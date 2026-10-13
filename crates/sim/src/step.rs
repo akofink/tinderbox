@@ -49,7 +49,11 @@ impl World {
         if lifetime > 0 {
             self.cells[i].age = self.cells[i].age.saturating_add(1);
             if self.cells[i].age >= lifetime {
-                if let Some(to) = decay_to {
+                if self.rules.elements[e].name == "plant"
+                    && decay_to.is_some_and(|to| self.rules.elements[to].name == "tree")
+                {
+                    self.grow_tree_canopy(i);
+                } else if let Some(to) = decay_to {
                     self.set_element(i, to);
                 }
                 if let Some(emission) = emission {
@@ -321,6 +325,38 @@ impl World {
                 if self.random_f32() < settings.evaporation_rate * warmth {
                     self.set_element(y * self.width + x, steam);
                     self.atmosphere[index].humidity = (humidity + 8.0).min(100.0);
+                }
+            }
+        }
+    }
+
+    fn grow_tree_canopy(&mut self, base: usize) {
+        let Some(tree) = self.rules.id("tree") else {
+            return;
+        };
+        self.set_element(base, tree);
+        let x = base % self.width;
+        let y = base / self.width;
+        // Mature saplings become a small rooted silhouette: a five-cell trunk
+        // with a three-cell-wide crown. Existing materials are never displaced.
+        for dy in 1..=4 {
+            if let Some(row) = y.checked_sub(dy) {
+                let index = row * self.width + x;
+                if self.rules.elements[self.cells[index].element].name == "air" {
+                    self.set_element(index, tree);
+                }
+            }
+        }
+        for dy in 2..=4 {
+            if let Some(row) = y.checked_sub(dy) {
+                for dx in [-1isize, 1] {
+                    let Some(column) = x.checked_add_signed(dx).filter(|x| *x < self.width) else {
+                        continue;
+                    };
+                    let index = row * self.width + column;
+                    if self.rules.elements[self.cells[index].element].name == "air" {
+                        self.set_element(index, tree);
+                    }
                 }
             }
         }

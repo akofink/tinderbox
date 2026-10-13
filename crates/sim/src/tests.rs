@@ -328,7 +328,7 @@ fn local_gust_is_bounded_and_respects_world_edges() {
 }
 
 #[test]
-fn trees_and_plants_die_into_seed_bearing_organic_matter() {
+fn trees_die_into_organic_matter_and_plants_mature_into_trees() {
     let mut rules = Rules::load(DEFAULT_RULES).unwrap();
     let tree = rules.id("tree").unwrap();
     let plant = rules.id("plant").unwrap();
@@ -339,8 +339,8 @@ fn trees_and_plants_die_into_seed_bearing_organic_matter() {
     put(&mut world, 2, 1, "plant");
     world.step(19);
     assert!(has(&world, 0, 0, "deadwood"));
-    assert!(has(&world, 2, 1, "leaf_litter"));
-    assert!(has(&world, 2, 0, "seed"));
+    assert!(has(&world, 2, 1, "tree"));
+    assert!(has(&world, 2, 0, "tree"));
 }
 
 #[test]
@@ -536,23 +536,37 @@ fn lava_heats_a_lake_and_cloud_rain_wets_soil_for_regrowth() {
 }
 
 #[test]
-fn burned_patch_regrows_during_a_short_play_session_at_default_rates() {
+fn burned_patch_regrows_a_recognizable_canopy_within_a_short_play_session() {
     let mut world = World::new(192, 120, 42, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
     let soil = world.rules().id("soil").unwrap();
     let stone = world.rules().id("stone").unwrap();
     let ash = world.rules().id("ash").unwrap();
-    let water = world.rules().id("water").unwrap();
     let seed = world.rules().id("seed").unwrap();
     for x in 85..100 {
         world.paint(x, 100, soil);
         world.paint(x, 101, stone);
     }
     world.paint(90, 99, ash);
-    world.paint(91, 99, water);
-    world.paint(92, 99, seed);
+    world.paint(90, 98, seed);
     for _ in 0..300 {
         world.step(12_000);
     }
     let plant = world.rules().id("plant").unwrap();
-    assert!(world.cells().iter().any(|cell| cell.element == plant));
+    assert!(
+        world.cells().iter().any(|cell| cell.element == plant),
+        "an ash bed and seed should produce a sapling"
+    );
+    for _ in 300..450 {
+        world.step(12_000);
+    }
+    let tree = world.rules().id("tree").unwrap();
+    let canopy_cells = world
+        .cells()
+        .iter()
+        .filter(|cell| cell.element == tree)
+        .count();
+    assert!(
+        canopy_cells >= 8,
+        "burned patch should regrow trunks and crowns, got {canopy_cells} tree cells"
+    );
 }

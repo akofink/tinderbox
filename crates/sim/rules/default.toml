@@ -51,9 +51,8 @@ emission = "seed"
 name = "plant"
 color = [92, 190, 74]
 motion = "static"
-lifetime = 480
-decay_to = "leaf_litter"
-emission = "seed"
+lifetime = 180
+decay_to = "tree"
 
 [[elements]]
 name = "deadwood"
@@ -296,6 +295,7 @@ result = "stone"
 chance = 0.25
 
 # Contact with water hydrates soil; ash enriches it into faster-sprouting soil.
+# Seeds can also establish directly on a cool ash bed after fire, even in dry weather.
 [[interactions]]
 when = "soil"
 with = "water"
@@ -326,6 +326,20 @@ chance = 0.55
 
 [[interactions]]
 when = "seed"
+with = "ash"
+result = "fertile_soil"
+self_result = "plant"
+chance = 0.65
+
+[[interactions]]
+when = "ash"
+with = "seed"
+result = "plant"
+self_result = "fertile_soil"
+chance = 0.65
+
+[[interactions]]
+when = "seed"
 with = "wet_soil"
 result = "soil"
 self_result = "plant"
@@ -336,7 +350,7 @@ when = "seed"
 with = "fertile_soil"
 result = "soil"
 self_result = "plant"
-chance = 0.75
+chance = 0.9
 
 [[interactions]]
 when = "wet_soil"
@@ -350,7 +364,7 @@ when = "fertile_soil"
 with = "seed"
 result = "plant"
 self_result = "soil"
-chance = 0.75
+chance = 0.9
 
 # Dry organic matter piles into humus with ash and remains easy to ignite.
 [[interactions]]
