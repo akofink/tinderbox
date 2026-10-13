@@ -133,6 +133,68 @@ fn shortcuts_work_with_button_focus_but_not_in_text_fields() {
 }
 
 #[test]
+fn level_recipe_round_trip_and_reset_reproduce_per_cell_attributes() {
+    let mut app = Tinderbox::new_state(false);
+    let mut level = Preset::DryForest.level(app.world.rules(), 192, 120);
+    level.ambient_humidity = 100;
+    level.ambient_oxygen = 0;
+    let encoded = level.to_toml().unwrap();
+    let loaded = Level::load(&encoded).unwrap();
+    assert_eq!(loaded, level);
+    app.setup_action(SetupAction::Play(loaded.clone()));
+    let initial = app.world.cells().to_vec();
+    app.world.set_ambient(20, 100, 21);
+    for _ in 0..20 {
+        app.world.step(usize::MAX);
+    }
+    assert!(app.world.cells().iter().any(|cell| cell.moisture > 0));
+    assert!(app.world.cells().iter().any(|cell| cell.burn_progress > 0));
+    assert_ne!(app.world.cells(), initial);
+    app.reset();
+    assert_eq!(app.world.cells(), initial);
+    app.setup_action(SetupAction::Play(Level::load(&encoded).unwrap()));
+    assert_eq!(app.world.cells(), initial);
+    assert_eq!(app.world.atmosphere_at(0, 0).unwrap().oxygen, 0.0);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn native_recipe_capture_arguments_validate_as_a_pair() {
+    let args = native_args_from([
+        "--level".into(),
+        "dry.toml".into(),
+        "--capture-after".into(),
+        "120".into(),
+        "--screenshot".into(),
+        "dry.png".into(),
+    ])
+    .unwrap();
+    assert_eq!(args.level_path, Some(PathBuf::from("dry.toml")));
+    assert_eq!(args.capture.after_frames, Some(120));
+    assert_eq!(args.capture.output, Some(PathBuf::from("dry.png")));
+    let initial = native_args_from([
+        "--level".into(),
+        "sealed.toml".into(),
+        "--capture-after".into(),
+        "0".into(),
+        "--screenshot".into(),
+        "initial.png".into(),
+    ])
+    .unwrap();
+    assert_eq!(initial.capture.after_frames, Some(0));
+    assert!(native_args_from(["--capture-after".into(), "-1".into()]).is_err());
+    assert!(
+        native_args_from([
+            "--level".into(),
+            "dry.toml".into(),
+            "--capture-after".into(),
+            "12".into()
+        ])
+        .is_err()
+    );
+}
+
+#[test]
 fn smooth_play_skips_setup_and_handles_small_worlds() {
     let mut app = Tinderbox::new_state(true);
     assert!(app.running);

@@ -14,6 +14,8 @@ use crate::rules_panel::RulesPanel;
 use eframe::egui;
 use level_setup::{LevelSetup, SetupAction};
 #[cfg(not(target_arch = "wasm32"))]
+use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
 use tinderbox_sim::level::{MAX_LEVEL_CELLS, MAX_LEVEL_DIMENSION};
 use tinderbox_sim::{
     DEFAULT_RULES, Rules, World,
@@ -87,12 +89,51 @@ pub(super) struct Tinderbox {
     stress_frames: usize,
     stress_total_ms: f64,
     stress_max_ms: f32,
+    #[cfg(not(target_arch = "wasm32"))]
+    capture: Option<CaptureOptions>,
+    #[cfg(not(target_arch = "wasm32"))]
+    capture_frames: usize,
+    #[cfg(not(target_arch = "wasm32"))]
+    capture_requested: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct CaptureOptions {
+    output: Option<PathBuf>,
+    after_frames: Option<usize>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct NativeArgs {
+    level_path: Option<PathBuf>,
+    capture: CaptureOptions,
 }
 impl Tinderbox {
     #[cfg(not(target_arch = "wasm32"))]
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let (width, height) = requested_world_size();
-        Self::new_with_context(cc.egui_ctx.clone(), width, height, smooth_play_requested())
+        let args = native_args().unwrap_or_else(|error| panic!("{error}"));
+        let level = args.level_path.as_ref().map(|path| {
+            let text = std::fs::read_to_string(path).unwrap_or_else(|error| {
+                panic!("Cannot read level recipe {}: {error}", path.display())
+            });
+            Level::load(&text)
+                .unwrap_or_else(|error| panic!("Invalid level recipe {}: {error}", path.display()))
+        });
+        let (width, height) = level
+            .as_ref()
+            .map_or_else(requested_world_size, |level| (level.width, level.height));
+        let mut app =
+            Self::new_with_context(cc.egui_ctx.clone(), width, height, smooth_play_requested());
+        if let Some(level) = level {
+            app.set_level(level)
+                .expect("validated level recipe must generate");
+            app.level_setup.open = false;
+            app.running = args.capture.after_frames != Some(0);
+        }
+        app.capture = (args.capture.after_frames.is_some()).then_some(args.capture);
+        app
     }
 
     #[cfg(test)]
@@ -151,6 +192,12 @@ impl Tinderbox {
             stress_frames: 0,
             stress_total_ms: 0.0,
             stress_max_ms: 0.0,
+            #[cfg(not(target_arch = "wasm32"))]
+            capture: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            capture_frames: 0,
+            #[cfg(not(target_arch = "wasm32"))]
+            capture_requested: false,
         }
     }
 
@@ -212,6 +259,55 @@ impl Tinderbox {
         let level =
             Preset::DryForest.level(self.world.rules(), self.world.width(), self.world.height());
         self.setup_action(SetupAction::Play(level));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn capture_frame(&mut self, ctx: &egui::Context) {
+        if let Some(image) = ctx.input(|input| {
+            input.events.iter().find_map(|event| match event {
+                egui::Event::Screenshot { image, .. } => Some(image.clone()),
+                _ => None,
+            })
+        }) {
+            if let Some(options) = &self.capture {
+                let path = options
+                    .output
+                    .as_ref()
+                    .expect("capture output was validated");
+                let rgba: Vec<u8> = image
+                    .pixels
+                    .iter()
+                    .flat_map(|pixel| pixel.to_array())
+                    .collect();
+                image::save_buffer(
+                    path,
+                    &rgba,
+                    image.size[0] as u32,
+                    image.size[1] as u32,
+                    image::ColorType::Rgba8,
+                )
+                .unwrap_or_else(|error| {
+                    panic!("Cannot save screenshot {}: {error}", path.display())
+                });
+                println!(
+                    "SCREENSHOT_CAPTURED path={} frames={}",
+                    path.display(),
+                    self.capture_frames
+                );
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                return;
+            }
+        }
+        let Some(options) = &self.capture else {
+            return;
+        };
+        self.capture_frames += 1;
+        if !self.capture_requested
+            && self.capture_frames >= options.after_frames.expect("validated frame count")
+        {
+            self.capture_requested = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+        }
     }
 
     fn simulate_frame(&mut self, ctx: &egui::Context, dt: f32) {
@@ -300,6 +396,8 @@ impl eframe::App for Tinderbox {
         if let Some(action) = self.level_setup.show(ctx, self.world.rules()) {
             self.setup_action(action);
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.capture_frame(ctx);
         #[cfg(target_arch = "wasm32")]
         poll_browser_files(ctx, frame, self);
     }
@@ -366,6 +464,64 @@ fn smooth_play_requested() -> bool {
 #[cfg(target_arch = "wasm32")]
 pub(super) fn start_web() {
     web::start();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn native_args_from(args: impl IntoIterator<Item = String>) -> Result<NativeArgs, String> {
+    let mut args = args.into_iter();
+    let mut parsed = NativeArgs::default();
+    while let Some(arg) = args.next() {
+        let value = match arg.as_str() {
+            "--level" => Some((
+                "level",
+                args.next().ok_or("--level requires a recipe path")?,
+            )),
+            "--screenshot" => Some((
+                "screenshot",
+                args.next().ok_or("--screenshot requires a PNG path")?,
+            )),
+            "--capture-after" => Some((
+                "frames",
+                args.next()
+                    .ok_or("--capture-after requires a frame count")?,
+            )),
+            _ => None,
+        };
+        let Some((flag, value)) = value else {
+            continue;
+        };
+        match flag {
+            "level" => parsed.level_path = Some(PathBuf::from(value)),
+            "screenshot" => parsed.capture.output = Some(PathBuf::from(value)),
+            "frames" => {
+                let count = value
+                    .parse::<usize>()
+                    .map_err(|_| "--capture-after must be a non-negative integer")?;
+                parsed.capture.after_frames = Some(count);
+            }
+            _ => unreachable!(),
+        }
+    }
+    if parsed.capture.output.is_some() != parsed.capture.after_frames.is_some() {
+        return Err("--screenshot and --capture-after must be supplied together".into());
+    }
+    if parsed
+        .capture
+        .output
+        .as_ref()
+        .is_some_and(|path| path.extension().is_none_or(|ext| ext != "png"))
+    {
+        return Err("--screenshot path must end in .png".into());
+    }
+    if parsed.capture.after_frames.is_some() && parsed.level_path.is_none() {
+        return Err("--capture-after requires a level recipe supplied with --level".into());
+    }
+    Ok(parsed)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn native_args() -> Result<NativeArgs, String> {
+    native_args_from(std::env::args().skip(1))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
