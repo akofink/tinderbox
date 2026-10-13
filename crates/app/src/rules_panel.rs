@@ -1,7 +1,14 @@
 //! Data-generated live interaction controls and portable rules text import/export.
 use crate::labels::{self, GROUPS};
 use eframe::egui;
-use tinderbox_sim::World;
+use std::sync::LazyLock;
+use tinderbox_sim::{DEFAULT_RULES, Rules, World};
+
+static DEFAULTS: LazyLock<Rules> =
+    LazyLock::new(|| Rules::load(DEFAULT_RULES).expect("validated bundled rules"));
+
+mod filter;
+use filter::Filter;
 
 #[cfg_attr(target_arch = "wasm32", derive(Default))]
 pub struct RulesPanel {
@@ -11,6 +18,7 @@ pub struct RulesPanel {
     text: String,
     message: String,
     error: bool,
+    filter: Filter,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -23,6 +31,7 @@ impl Default for RulesPanel {
             text: String::new(),
             message: String::new(),
             error: false,
+            filter: Filter::default(),
         }
     }
 }
@@ -60,6 +69,16 @@ impl RulesPanel {
 
     pub fn show(&mut self, ctx: &egui::Context, world: &mut World) {
         let mut open = self.open;
+        let defaults = &*DEFAULTS;
+        // A loaded ruleset may remove the previously filtered element.
+        if self
+            .filter
+            .element
+            .as_ref()
+            .is_some_and(|name| world.rules().id(name).is_none())
+        {
+            self.filter.element = None;
+        }
         egui::Window::new("Rules")
             .open(&mut open)
             .default_width(470.0)
@@ -86,6 +105,31 @@ impl RulesPanel {
                         "Default rules restored.",
                     );
                 }
+                ui.add(egui::TextEdit::singleline(&mut self.filter.query)
+                    .hint_text("Search rules (e.g. fire tree, heat)")
+                    .desired_width(f32::INFINITY));
+                ui.horizontal_wrapped(|ui| {
+                    ui.checkbox(&mut self.filter.changed_only, "Changed from default");
+                    if ui.button("Clear filters").clicked() {
+                        self.filter = Filter::default();
+                    }
+                    if world.rules().id("fire").is_some() && ui.button("Fire rules").clicked() {
+                        self.filter = Filter { element: Some("fire".into()), ..Default::default() };
+                    }
+                });
+                ui.collapsing("Filter by element", |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.selectable_value(&mut self.filter.element, None, "All elements");
+                        for element in &world.rules().elements {
+                            ui.selectable_value(&mut self.filter.element, Some(element.name.clone()), labels::display_name(&element.name));
+                        }
+                    });
+                });
+                if let Some(element) = &self.filter.element {
+                    ui.label(format!("Involving {} (inputs or outputs)", labels::display_name(element)));
+                }
+                let show_atmosphere = self.filter.atmosphere(&world.rules().atmosphere, &defaults.atmosphere);
+                if show_atmosphere {
                 egui::CollapsingHeader::new("Atmosphere thresholds and rates")
                     .default_open(false)
                     .show(ui, |ui| {
@@ -165,7 +209,9 @@ impl RulesPanel {
                             );
                         }
                     });
+                }
                 ui.separator();
+                ui.collapsing("Save / load rules", |ui| {
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     ui.label("Rules file path (relative to working directory or absolute)");
@@ -203,9 +249,14 @@ impl RulesPanel {
                 });
                 #[cfg(target_arch = "wasm32")]
                 browser_files(ui, world);
+                });
                 ui.separator();
-                ui.label(format!("{} interactions", world.rules().interactions.len()));
-                let grouped = grouped_interactions(world);
+                let grouped = grouped_interactions(world, &self.filter, defaults);
+                let count: usize = grouped.iter().map(|(_, indices)| indices.len()).sum();
+                ui.label(format!("{count} / {} interactions", world.rules().interactions.len()));
+                if count == 0 && !show_atmosphere {
+                    ui.label("No matching rules. Clear filters to see everything.");
+                }
                 egui::ScrollArea::vertical()
                     .id_salt("interactions")
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
@@ -216,7 +267,8 @@ impl RulesPanel {
                                 continue;
                             }
                             egui::CollapsingHeader::new(format!("{group} ({})", indices.len()))
-                                .default_open(group == "Fire")
+                                .id_salt(("rule_group", group, self.filter.active()))
+                                .default_open(self.filter.active())
                                 .show(ui, |ui| {
                                     for index in indices {
                                         show_interaction(self, ui, world, index);
@@ -229,7 +281,11 @@ impl RulesPanel {
     }
 }
 
-fn grouped_interactions(world: &World) -> Vec<(&'static str, Vec<usize>)> {
+fn grouped_interactions(
+    world: &World,
+    filter: &Filter,
+    defaults: &Rules,
+) -> Vec<(&'static str, Vec<usize>)> {
     GROUPS
         .into_iter()
         .map(|group| {
@@ -237,6 +293,7 @@ fn grouped_interactions(world: &World) -> Vec<(&'static str, Vec<usize>)> {
                 .filter(|index| {
                     let when = world.rules().interactions[*index].when;
                     labels::group(&world.rules().elements[when].name) == group
+                        && filter.matches(world.rules(), defaults, *index)
                 })
                 .collect();
             (group, indices)
@@ -254,7 +311,7 @@ fn interaction_label(world: &World, index: usize) -> String {
         Some(id) if id != rule.when => {
             format!("{when} becomes {}; {with} becomes {result}", name(id))
         }
-        _ => format!("{with} becomes {result}"),
+        _ => format!("{when} + {with} → {result}"),
     }
 }
 
