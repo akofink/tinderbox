@@ -2314,6 +2314,7 @@ name = "tinderbox-app"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "image",
  "js-sys",
  "log",
  "tinderbox-sim",

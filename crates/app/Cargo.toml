@@ -13,6 +13,7 @@ web-time = "1"
 # Linux window backends stay native-only. Enabling them on wasm fails the browser build.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 eframe = { version = "0.31", default-features = false, features = ["wayland", "x11"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 # Direct wgpu features unify with eframe and compile the WebGL2 fallback next to WebGPU.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
