@@ -1,6 +1,6 @@
 # Tinderbox
 
-Tinderbox is a native falling-element sandbox built to be played, not measured. Set a fire in a forest, pour water into the flames, and watch wind carry ash and smoke while soil, seeds, ice, oil, and lava add new chains to the world.
+Tinderbox is a native falling-element sandbox built to be played, not measured. Set a fire in a forest, pour water into the flames, and watch wind carry ash and smoke while soil, seeds, decomposers, ice, oil, and lava make a changing ecology.
 
 ![MIT licensed](https://img.shields.io/badge/license-MIT-blue)
 
@@ -20,14 +20,15 @@ The same sandbox is at <https://akofink.com/tinderbox/>. It uses WebGPU when the
 
 ## Play
 
-- Choose sand, soil, wet or fertile soil, stone, water, ice, tree, plant, seed, fire, oil, lava, ash, smoke, steam, or oil fire in the left palette.
+- Choose sand, soil, wet or fertile soil, stone, water, ice, tree, plant, seed, deadwood, leaf litter, humus, fungus, beetle, termite, fire, oil, lava, ash, smoke, steam, or oil fire in the left palette.
 - Left-click or drag on the world to paint. The brush size is adjustable in the toolbar.
 - Right-click to ignite at the pointer. Choose **Erase** or press `E` to paint air.
 - **Pause/Play** or press `Space`; **Step** or press `.`; **Reset** or press `R` returns to the applied level's original seed and settings.
 - **Level setup** pauses the game for editing. **Cancel / return to game** keeps the current world. Presets: **Dry forest, east wind**, **Island**, **Sandstorm valley**.
 - Setup's **Save / load level (TOML)** saves and loads recipes by path on desktop, downloads/uploads and remembers them in a browser, and exports/imports copyable text everywhere. New ruleset elements automatically appear as amount sliders.
 - Adjust simulation speed from 0.25× to 4×. Set wind direction and strength in the toolbar; select **Gust brush** and drag across the world to apply a local burst. Wind drifts ash, smoke, and steam and speeds fire spread downwind.
-- Water wets soil; ash and water make fertile soil, where seeds sprout faster into plants. Ice melts near fire or lava. Lava ignites plants and turns water into stone and steam. Oil floats on water and burns quickly as bright, hot oil fire.
+- Water wets soil; ash and water make fertile soil, where seeds sprout faster into plants and consume soil fertility. Plants and trees age into leaf litter or deadwood and release seeds; dry litter burns readily and mixes with ash into humus. Where damp soil meets organic matter, fungi, beetles, and termites decompose it back into fertile soil.
+- Ice melts near fire or lava. Lava ignites plants and turns water into stone and steam. Oil floats on water and burns quickly as bright, hot oil fire.
 - Toggle the frame/simulation/pending-work HUD with **HUD** or `H`. **Ignite** or press `I` selects fire for painting.
 - **Rules** opens the live physics panel. Toggle any interaction and adjust its chance without restarting the world.
 

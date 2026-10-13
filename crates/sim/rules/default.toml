@@ -43,11 +43,56 @@ motion = "static"
 name = "tree"
 color = [55, 156, 78]
 motion = "static"
+lifetime = 1200
+decay_to = "deadwood"
+emission = "seed"
 
 [[elements]]
 name = "plant"
 color = [92, 190, 74]
 motion = "static"
+lifetime = 480
+decay_to = "leaf_litter"
+emission = "seed"
+
+[[elements]]
+name = "deadwood"
+color = [102, 70, 48]
+motion = "fall"
+wind_response = 0.35
+
+[[elements]]
+name = "leaf_litter"
+color = [145, 112, 55]
+motion = "fall"
+wind_response = 0.65
+
+[[elements]]
+name = "humus"
+color = [76, 74, 46]
+motion = "fall"
+wind_response = 0.5
+
+[[elements]]
+name = "fungus"
+color = [202, 186, 155]
+motion = "static"
+lifetime = 240
+decay_to = "soil"
+
+[[elements]]
+name = "beetle"
+color = [112, 67, 42]
+motion = "static"
+lifetime = 180
+decay_to = "wet_soil"
+
+[[elements]]
+name = "termite"
+color = [183, 139, 80]
+motion = "static"
+lifetime = 180
+decay_to = "wet_soil"
 
 [[elements]]
 name = "seed"
@@ -264,14 +309,14 @@ chance = 0.55
 [[interactions]]
 when = "seed"
 with = "wet_soil"
-result = "wet_soil"
+result = "soil"
 self_result = "plant"
 chance = 0.12
 
 [[interactions]]
 when = "seed"
 with = "fertile_soil"
-result = "fertile_soil"
+result = "soil"
 self_result = "plant"
 chance = 0.75
 
@@ -279,12 +324,174 @@ chance = 0.75
 when = "wet_soil"
 with = "seed"
 result = "plant"
-self_result = "wet_soil"
+self_result = "soil"
 chance = 0.12
 
 [[interactions]]
 when = "fertile_soil"
 with = "seed"
 result = "plant"
-self_result = "fertile_soil"
+self_result = "soil"
 chance = 0.75
+
+# Dry organic matter piles into humus with ash and remains easy to ignite.
+[[interactions]]
+when = "deadwood"
+with = "ash"
+result = "humus"
+self_result = "humus"
+chance = 0.22
+
+[[interactions]]
+when = "ash"
+with = "deadwood"
+result = "humus"
+self_result = "humus"
+chance = 0.22
+
+[[interactions]]
+when = "leaf_litter"
+with = "ash"
+result = "humus"
+self_result = "humus"
+chance = 0.28
+
+[[interactions]]
+when = "ash"
+with = "leaf_litter"
+result = "humus"
+self_result = "humus"
+chance = 0.28
+
+# Moist soil wakes a decomposer near each kind of organic matter.
+[[interactions]]
+when = "wet_soil"
+with = "deadwood"
+result = "fungus"
+self_result = "fertile_soil"
+chance = 0.16
+
+[[interactions]]
+when = "deadwood"
+with = "wet_soil"
+result = "fertile_soil"
+self_result = "fungus"
+chance = 0.16
+
+[[interactions]]
+when = "wet_soil"
+with = "leaf_litter"
+result = "beetle"
+self_result = "fertile_soil"
+chance = 0.16
+
+[[interactions]]
+when = "leaf_litter"
+with = "wet_soil"
+result = "fertile_soil"
+self_result = "beetle"
+chance = 0.16
+
+[[interactions]]
+when = "wet_soil"
+with = "humus"
+result = "termite"
+self_result = "fertile_soil"
+chance = 0.16
+
+[[interactions]]
+when = "humus"
+with = "wet_soil"
+result = "fertile_soil"
+self_result = "termite"
+chance = 0.16
+
+# Decomposers consume dead matter and ash, returning fertile soil.
+[[interactions]]
+when = "fungus"
+with = "deadwood"
+result = "fertile_soil"
+self_result = "fertile_soil"
+chance = 0.2
+
+[[interactions]]
+when = "fungus"
+with = "ash"
+result = "fertile_soil"
+self_result = "fertile_soil"
+chance = 0.2
+
+[[interactions]]
+when = "fungus"
+with = "humus"
+result = "fertile_soil"
+self_result = "fertile_soil"
+chance = 0.2
+
+[[interactions]]
+when = "beetle"
+with = "leaf_litter"
+result = "fertile_soil"
+self_result = "fertile_soil"
+chance = 0.2
+
+[[interactions]]
+when = "beetle"
+with = "ash"
+result = "fertile_soil"
+self_result = "fertile_soil"
+chance = 0.2
+
+[[interactions]]
+when = "beetle"
+with = "humus"
+result = "fertile_soil"
+self_result = "fertile_soil"
+chance = 0.2
+
+[[interactions]]
+when = "termite"
+with = "deadwood"
+result = "fertile_soil"
+self_result = "fertile_soil"
+chance = 0.2
+
+[[interactions]]
+when = "termite"
+with = "leaf_litter"
+result = "fertile_soil"
+self_result = "fertile_soil"
+chance = 0.2
+
+[[interactions]]
+when = "termite"
+with = "ash"
+result = "fertile_soil"
+self_result = "fertile_soil"
+chance = 0.2
+
+[[interactions]]
+when = "termite"
+with = "humus"
+result = "fertile_soil"
+self_result = "fertile_soil"
+chance = 0.2
+
+# Dead organic matter catches fire readily.
+[[interactions]]
+when = "fire"
+with = "deadwood"
+result = "fire"
+chance = 0.9
+
+[[interactions]]
+when = "fire"
+with = "leaf_litter"
+result = "fire"
+chance = 0.9
+
+[[interactions]]
+when = "fire"
+with = "humus"
+result = "fire"
+chance = 0.85
