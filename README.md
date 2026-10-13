@@ -12,7 +12,7 @@ Install Rust with `rustup`, then start the native app:
 cargo run --release -p tinderbox-app
 ```
 
-The default world is 192 × 120 cells. The app starts playing immediately in a small forest-fire scene; click **Wildfire** to reseed the larger showcase. Run `cargo run --release -p tinderbox-app -- --smooth-play` for a 900-frame native heavy-play check with continuous water/fire painting; it reports average and worst frame intervals.
+The default world is 192 × 120 cells. The app starts in **Level setup**: choose a preset, size, terrain, seed, starting wind and element amounts, then press **Play level**. Open setup again from the toolbar at any time; **Wildfire** starts the dry-forest preset at the current size. See [Level recipes](docs/levels.md) for generators, human-readable save/load and sharing. Run `cargo run --release -p tinderbox-app -- --smooth-play` for a 900-frame native heavy-play check with continuous water/fire painting; it reports average and worst frame intervals.
 
 ## Play in the browser
 
@@ -23,7 +23,9 @@ The same sandbox is at <https://akofink.com/tinderbox/>. It uses WebGPU when the
 - Choose sand, soil, wet or fertile soil, stone, water, ice, tree, plant, seed, fire, oil, lava, ash, smoke, steam, or oil fire in the left palette.
 - Left-click or drag on the world to paint. The brush size is adjustable in the toolbar.
 - Right-click to ignite at the pointer. Choose **Erase** or press `E` to paint air.
-- **Pause/Play** or press `Space`; **Step** or press `.`; **Reset** or press `R`.
+- **Pause/Play** or press `Space`; **Step** or press `.`; **Reset** or press `R` returns to the applied level's original seed and settings.
+- **Level setup** pauses the game for editing. **Cancel / return to game** keeps the current world. Presets: **Dry forest, east wind**, **Island**, **Sandstorm valley**.
+- Setup's **Save / load level (TOML)** saves and loads recipes by path on desktop, downloads/uploads and remembers them in a browser, and exports/imports copyable text everywhere. New ruleset elements automatically appear as amount sliders.
 - Adjust simulation speed from 0.25× to 4×. Set wind direction and strength in the toolbar; select **Gust brush** and drag across the world to apply a local burst. Wind drifts ash, smoke, and steam and speeds fire spread downwind.
 - Water wets soil; ash and water make fertile soil, where seeds sprout faster into plants. Ice melts near fire or lava. Lava ignites plants and turns water into stone and steam. Oil floats on water and burns quickly as bright, hot oil fire.
 - Toggle the frame/simulation/pending-work HUD with **HUD** or `H`. **Ignite** or press `I` selects fire for painting.

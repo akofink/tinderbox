@@ -17,6 +17,9 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
         if ui.button("Reset").clicked() {
             app.reset();
         }
+        if ui.button("Level setup").clicked() {
+            app.open_level_setup();
+        }
         if ui.button("Wildfire").clicked() {
             app.wildfire();
         }

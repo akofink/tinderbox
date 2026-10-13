@@ -5,7 +5,7 @@ use tinderbox_sim::World;
 pub(super) fn fitted_size(world: &World, available: Vec2) -> Vec2 {
     let cell = (available.x / world.width() as f32)
         .min(available.y / world.height() as f32)
-        .max(1.0);
+        .max(0.01);
     Vec2::new(cell * world.width() as f32, cell * world.height() as f32)
 }
 

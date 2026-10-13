@@ -3,8 +3,10 @@ use super::Tinderbox;
 use eframe::egui::{self, Pos2, Rect, Response};
 
 pub(super) fn handle_keyboard(app: &mut Tinderbox, ctx: &egui::Context) {
-    // File paths, slider text edits, and TOML must not trigger sandbox shortcuts.
-    if ctx.wants_keyboard_input() {
+    let editing_text = ctx
+        .memory(|m| m.focused())
+        .is_some_and(|id| egui::text_edit::TextEditState::load(ctx, id).is_some());
+    if app.level_setup.open || editing_text {
         return;
     }
     let keys = ctx.input(|input| {
@@ -38,7 +40,7 @@ pub(super) fn handle_keyboard(app: &mut Tinderbox, ctx: &egui::Context) {
 }
 
 pub(super) fn handle_canvas_pointer(app: &mut Tinderbox, response: &Response, rect: Rect) {
-    if !response.hovered() {
+    if app.level_setup.open || !response.hovered() {
         return;
     }
     let Some(pos) = response.interact_pointer_pos() else {
