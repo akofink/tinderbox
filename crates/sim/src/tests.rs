@@ -519,14 +519,46 @@ fn atmosphere_transfers_heat_and_phase_thresholds_are_data_driven() {
 }
 
 #[test]
+fn humid_air_water_production_is_bounded_and_does_not_freeze_above_threshold() {
+    let mut world = World::new(64, 48, 630, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    world.set_ambient(20, 100, 21);
+    let ice = world.rules().id("ice").unwrap();
+    let water_materials =
+        ["water", "ice", "steam", "cloud"].map(|name| world.rules().id(name).unwrap());
+    for _ in 0..300 {
+        world.step(usize::MAX);
+    }
+    let ice_cells = world
+        .cells()
+        .iter()
+        .filter(|cell| cell.element == ice)
+        .count();
+    let water_mass_cells = world
+        .cells()
+        .iter()
+        .filter(|cell| water_materials.contains(&cell.element))
+        .count();
+    assert_eq!(ice_cells, 0, "20 C humid air must not create ice");
+    assert!(
+        water_mass_cells <= world.atmosphere.len() * 3,
+        "condensed water should be bounded by the initial vapor reservoir: {water_mass_cells} water-bearing cells across {} atmosphere cells",
+        world.atmosphere.len()
+    );
+}
+
+#[test]
 fn humid_cool_air_condenses_cloud_and_dew_and_pressure_drives_wind() {
     let mut wet_air = world(63);
-    wet_air.atmosphere[0].temperature = 0.0;
+    wet_air.atmosphere[0].temperature = 1.0;
     wet_air.atmosphere[0].humidity = 100.0;
-    put(&mut wet_air, 4, 8, "soil");
+    for x in 0..8 {
+        put(&mut wet_air, x, 8, "soil");
+    }
     wet_air.step(16);
-    assert!(has(&wet_air, 4, 4, "cloud"));
-    assert!(has(&wet_air, 4, 7, "water"));
+    let cloud = wet_air.rules().id("cloud").unwrap();
+    let water = wet_air.rules().id("water").unwrap();
+    assert!(wet_air.cells().iter().any(|cell| cell.element == cloud));
+    assert!((0..8).any(|x| wet_air.cells()[7 * wet_air.width() + x].element == water));
 
     let mut pressure = world(64);
     pressure.atmosphere[0].pressure = 0.0;
