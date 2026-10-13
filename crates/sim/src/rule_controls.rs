@@ -9,6 +9,34 @@ impl World {
         Ok(())
     }
 
+    /// Change moisture response for a material without advancing simulation time.
+    pub fn set_material_moisture(
+        &mut self,
+        index: usize,
+        enabled: bool,
+        rate: f32,
+        wet_flammability: f32,
+    ) -> Result<(), RulesError> {
+        if !rate.is_finite()
+            || !(0.0..=1.0).contains(&rate)
+            || !wet_flammability.is_finite()
+            || !(0.0..=1.0).contains(&wet_flammability)
+        {
+            return Err(RulesError(
+                "material moisture settings must be between 0 and 1".into(),
+            ));
+        }
+        let element = self
+            .rules
+            .elements
+            .get_mut(index)
+            .ok_or_else(|| RulesError(format!("unknown element {index}")))?;
+        element.carries_moisture = enabled;
+        element.moisture_rate = rate;
+        element.wet_flammability = wet_flammability;
+        Ok(())
+    }
+
     /// Change one interaction without advancing simulation time.
     pub fn set_interaction(
         &mut self,

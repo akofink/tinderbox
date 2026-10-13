@@ -35,12 +35,18 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
                 Overlay::Temperature => "Temperature",
                 Overlay::Humidity => "Humidity",
                 Overlay::Pressure => "Pressure",
+                Overlay::Oxygen => "Oxygen",
+                Overlay::Moisture => "Material moisture",
+                Overlay::BurnProgress => "Burn progress",
             })
             .show_ui(ui, |ui| {
                 ui.selectable_value(&mut app.overlay, Overlay::None, "Off");
                 ui.selectable_value(&mut app.overlay, Overlay::Temperature, "Temperature");
                 ui.selectable_value(&mut app.overlay, Overlay::Humidity, "Humidity");
                 ui.selectable_value(&mut app.overlay, Overlay::Pressure, "Pressure");
+                ui.selectable_value(&mut app.overlay, Overlay::Oxygen, "Oxygen");
+                ui.selectable_value(&mut app.overlay, Overlay::Moisture, "Material moisture");
+                ui.selectable_value(&mut app.overlay, Overlay::BurnProgress, "Burn progress");
             });
         if app.overlay != previous_overlay {
             app.world.mark_all_dirty();

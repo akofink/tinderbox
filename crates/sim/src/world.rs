@@ -27,6 +27,7 @@ pub struct AtmosphereCell {
     pub temperature: f32,
     pub humidity: f32,
     pub pressure: f32,
+    pub oxygen: f32,
 }
 impl Default for AtmosphereCell {
     fn default() -> Self {
@@ -34,6 +35,7 @@ impl Default for AtmosphereCell {
             temperature: 20.0,
             humidity: 45.0,
             pressure: 0.0,
+            oxygen: 21.0,
         }
     }
 }
@@ -63,6 +65,7 @@ pub struct World {
     pub(super) atmosphere_credit: usize,
     pub(super) ambient_temperature: f32,
     pub(super) ambient_humidity: f32,
+    pub(super) ambient_oxygen: f32,
 }
 impl World {
     /// Creates a world with preallocated cells and focus-queue storage.
@@ -84,7 +87,9 @@ impl World {
             cells: vec![
                 Cell {
                     element: air,
-                    age: 0
+                    age: 0,
+                    moisture: 0,
+                    burn_progress: 0,
                 };
                 count
             ],
@@ -101,6 +106,7 @@ impl World {
             atmosphere_credit: 0,
             ambient_temperature: 20.0,
             ambient_humidity: 45.0,
+            ambient_oxygen: 21.0,
         })
     }
 
@@ -149,13 +155,15 @@ impl World {
     }
 
     /// Set level-wide ambient air conditions, clamped to the supported ranges.
-    pub fn set_ambient(&mut self, temperature: i16, humidity: u8) {
+    pub fn set_ambient(&mut self, temperature: i16, humidity: u8, oxygen: u8) {
         self.ambient_temperature = f32::from(temperature.clamp(-40, 60));
         self.ambient_humidity = f32::from(humidity.min(100));
+        self.ambient_oxygen = f32::from(oxygen.min(100));
         self.atmosphere.fill(AtmosphereCell {
             temperature: self.ambient_temperature,
             humidity: self.ambient_humidity,
             pressure: 0.0,
+            oxygen: self.ambient_oxygen,
         });
     }
 

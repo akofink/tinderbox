@@ -8,6 +8,8 @@ impl World {
         self.cells.fill(Cell {
             element: air,
             age: 0,
+            moisture: 0,
+            burn_progress: 0,
         });
         self.scheduler.reset();
         self.gusts.fill(Default::default());
@@ -15,6 +17,7 @@ impl World {
             temperature: self.ambient_temperature,
             humidity: self.ambient_humidity,
             pressure: 0.0,
+            oxygen: self.ambient_oxygen,
         });
         self.atmosphere_cursor = 0;
         self.atmosphere_credit = 0;
@@ -38,7 +41,12 @@ impl World {
         if self.cells[index].element != element {
             self.dirty_regions.mark_cell(x, y);
         }
-        self.cells[index] = Cell { element, age: 0 };
+        self.cells[index] = Cell {
+            element,
+            age: 0,
+            moisture: 0,
+            burn_progress: 0,
+        };
         self.scheduler.enqueue_focus(index);
         let x = index % self.width;
         let y = index / self.width;

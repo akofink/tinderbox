@@ -43,6 +43,9 @@ motion = "static"
 name = "tree"
 color = [55, 156, 78]
 motion = "static"
+carries_moisture = true
+moisture_rate = 0.012
+wet_flammability = 0.12
 lifetime = 7200
 decay_to = "deadwood"
 emission = "seed"
@@ -51,6 +54,9 @@ emission = "seed"
 name = "plant"
 color = [92, 190, 74]
 motion = "static"
+carries_moisture = true
+moisture_rate = 0.04
+wet_flammability = 0.2
 lifetime = 180
 decay_to = "tree"
 
@@ -58,18 +64,27 @@ decay_to = "tree"
 name = "deadwood"
 color = [102, 70, 48]
 motion = "fall"
+carries_moisture = true
+moisture_rate = 0.025
+wet_flammability = 0.08
 wind_response = 0.35
 
 [[elements]]
 name = "leaf_litter"
 color = [145, 112, 55]
 motion = "fall"
+carries_moisture = true
+moisture_rate = 0.08
+wet_flammability = 0.16
 wind_response = 0.65
 
 [[elements]]
 name = "humus"
 color = [76, 74, 46]
 motion = "fall"
+carries_moisture = true
+moisture_rate = 0.05
+wet_flammability = 0.3
 wind_response = 0.5
 
 [[elements]]
@@ -169,6 +184,8 @@ heat_transfer = 0.08
 evaporation_rate = 0.08
 condensation_humidity = 78.0
 pressure_wind = 0.15
+oxygen_consumption = 0.35
+oxygen_diffusion = 0.08
 
 # Wind strengthens fire spread only when the target is directly downwind.
 [[interactions]]

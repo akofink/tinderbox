@@ -40,6 +40,10 @@ pub struct AtmosphereRules {
     pub evaporation_rate: f32,
     pub condensation_humidity: f32,
     pub pressure_wind: f32,
+    /// Oxygen consumed by one fire-cell update, in percentage points.
+    pub oxygen_consumption: f32,
+    /// Fraction of local oxygen difference diffused per atmosphere update.
+    pub oxygen_diffusion: f32,
 }
 impl Default for AtmosphereRules {
     fn default() -> Self {
@@ -52,6 +56,8 @@ impl Default for AtmosphereRules {
             evaporation_rate: 0.08,
             condensation_humidity: 78.0,
             pressure_wind: 0.15,
+            oxygen_consumption: 0.35,
+            oxygen_diffusion: 0.08,
         }
     }
 }
@@ -79,6 +85,12 @@ struct RawElement {
     lifetime: u16,
     decay_to: Option<String>,
     emission: Option<String>,
+    #[serde(default)]
+    carries_moisture: bool,
+    #[serde(default)]
+    moisture_rate: f32,
+    #[serde(default)]
+    wet_flammability: f32,
 }
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -113,7 +125,11 @@ pub(crate) fn validate_atmosphere(settings: &AtmosphereRules) -> Result<(), Rule
         && settings.condensation_humidity.is_finite()
         && (0.0..=100.0).contains(&settings.condensation_humidity)
         && settings.pressure_wind.is_finite()
-        && (0.0..=1.0).contains(&settings.pressure_wind);
+        && (0.0..=1.0).contains(&settings.pressure_wind)
+        && settings.oxygen_consumption.is_finite()
+        && (0.0..=10.0).contains(&settings.oxygen_consumption)
+        && settings.oxygen_diffusion.is_finite()
+        && (0.0..=1.0).contains(&settings.oxygen_diffusion);
     if !ordered || !rates_valid {
         return Err(RulesError(
             "atmosphere thresholds must be ordered and rates must be within their valid ranges"
@@ -177,6 +193,16 @@ impl Rules {
                     )));
                 }
             };
+            if !e.moisture_rate.is_finite()
+                || !(0.0..=1.0).contains(&e.moisture_rate)
+                || !e.wet_flammability.is_finite()
+                || !(0.0..=1.0).contains(&e.wet_flammability)
+            {
+                return Err(RulesError(format!(
+                    "element '{}' moisture settings must be between 0 and 1",
+                    e.name
+                )));
+            }
             elements.push(Element {
                 name: e.name,
                 color: e.color,
@@ -194,6 +220,9 @@ impl Rules {
                     .as_deref()
                     .map(|v| id(v, "emission"))
                     .transpose()?,
+                carries_moisture: e.carries_moisture,
+                moisture_rate: e.moisture_rate,
+                wet_flammability: e.wet_flammability,
             });
         }
         let mut interactions = Vec::with_capacity(raw.interactions.len());
@@ -257,6 +286,9 @@ impl Rules {
                     lifetime: e.lifetime,
                     decay_to: e.decay_to.map(name).transpose()?,
                     emission: e.emission.map(name).transpose()?,
+                    carries_moisture: e.carries_moisture,
+                    moisture_rate: e.moisture_rate,
+                    wet_flammability: e.wet_flammability,
                 })
             })
             .collect::<Result<Vec<_>, RulesError>>()?;
