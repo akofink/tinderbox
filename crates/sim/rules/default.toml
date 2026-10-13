@@ -43,7 +43,7 @@ motion = "static"
 name = "tree"
 color = [55, 156, 78]
 motion = "static"
-lifetime = 1200
+lifetime = 7200
 decay_to = "deadwood"
 emission = "seed"
 
@@ -185,12 +185,13 @@ result = "fire"
 chance = 0.12
 downwind_bonus = 0.5
 
+# Seed banks survive an ordinary fire front so seedlings can follow the burn.
 [[interactions]]
 when = "fire"
 with = "seed"
 result = "fire"
-chance = 0.35
-downwind_bonus = 0.45
+chance = 0.0
+downwind_bonus = 0.0
 
 [[interactions]]
 when = "fire"

@@ -84,7 +84,15 @@ impl World {
                 .iter()
                 .find(|r| r.enabled && r.when == e && r.with == other)
                 .map(|r| (r.chance, r.downwind_bonus, r.result, r.self_result));
-            if let Some((chance, downwind_bonus, result, self_result)) = rule
+            let seed_on_hot_ash = (self.rules.elements[e].name == "seed"
+                && self.rules.elements[other].name == "ash"
+                || self.rules.elements[e].name == "ash"
+                    && self.rules.elements[other].name == "seed")
+                && self
+                    .atmosphere_at(x, y)
+                    .is_some_and(|field| field.temperature >= self.rules.atmosphere.ignition_point);
+            if !seed_on_hot_ash
+                && let Some((chance, downwind_bonus, result, self_result)) = rule
                 && self.random_f32()
                     < (chance
                         + if (nx as isize - x as isize).signum()
@@ -102,7 +110,7 @@ impl World {
                 if let Some(to) = self_result {
                     self.set_element(i, to);
                 }
-                // Burning a living cell drops its seed so a wet ash bed can regrow.
+                // Burning a living cell drops its seed so the ash bed can regrow.
                 if let Some(emission) = self.rules.elements.get(replaced).and_then(|el| el.emission)
                 {
                     self.emit_into_air_near(j, emission);
@@ -184,7 +192,7 @@ impl World {
             "water" if temp <= atmosphere_rules.freezing_point => self.rules.id("ice"),
             "water" if temp >= atmosphere_rules.boiling_point => self.rules.id("steam"),
             "ice" if temp >= atmosphere_rules.melting_point => self.rules.id("water"),
-            "tree" | "plant" | "seed" | "oil" | "deadwood" | "leaf_litter" | "humus"
+            "tree" | "plant" | "oil" | "deadwood" | "leaf_litter" | "humus"
                 if temp >= atmosphere_rules.ignition_point =>
             {
                 self.rules.id("fire")
@@ -192,7 +200,11 @@ impl World {
             _ => None,
         };
         if let Some(target) = target {
+            let emission = self.rules.elements[element].emission;
             self.set_element(index, target);
+            if let Some(emission) = emission {
+                self.emit_into_air_near(index, emission);
+            }
         }
     }
 
@@ -399,6 +411,26 @@ impl World {
             if self.cells[j].element == air {
                 self.set_element(j, element);
                 return;
+            }
+        }
+        if self.rules.elements[element].name == "seed" {
+            // Dense crowns and an active fire front can fill every adjacent cell.
+            // Release a seed above that canopy instead of silently losing it.
+            let canopy_clearance = self.height.min((self.height / 4).max(8));
+            for dy in 2..=canopy_clearance {
+                let Some(row) = y.checked_sub(dy) else {
+                    break;
+                };
+                for dx in [0isize, -1, 1, -2, 2] {
+                    let Some(column) = x.checked_add_signed(dx).filter(|x| *x < self.width) else {
+                        continue;
+                    };
+                    let j = row * self.width + column;
+                    if self.cells[j].element == air {
+                        self.set_element(j, element);
+                        return;
+                    }
+                }
             }
         }
     }

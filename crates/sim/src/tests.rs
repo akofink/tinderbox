@@ -428,6 +428,29 @@ fn seeded_burned_bed_recovers_through_water_and_fertile_soil() {
 }
 
 #[test]
+fn seeds_wait_for_hot_ash_to_cool_before_sprouting() {
+    let mut world = guaranteed_world(42, &[("seed", "ash"), ("ash", "seed")]);
+    let ignition_point = world.rules().atmosphere.ignition_point;
+    for field in &mut world.atmosphere {
+        field.temperature = ignition_point;
+    }
+    put(&mut world, 0, 0, "seed");
+    put(&mut world, 0, 1, "ash");
+    world.scheduler.enqueue_focus(0);
+    world.step(1);
+    assert!(has(&world, 0, 0, "seed"));
+    assert!(has(&world, 0, 1, "ash"));
+
+    for field in &mut world.atmosphere {
+        field.temperature = 20.0;
+    }
+    world.scheduler.enqueue_focus(0);
+    world.step(1);
+    assert!(has(&world, 0, 0, "plant"));
+    assert!(has(&world, 0, 1, "fertile_soil"));
+}
+
+#[test]
 fn atmosphere_transfers_heat_and_phase_thresholds_are_data_driven() {
     let mut a = world(61);
     let mut b = world(61);
@@ -532,6 +555,56 @@ fn lava_heats_a_lake_and_cloud_rain_wets_soil_for_regrowth() {
         rain.cells()
             .iter()
             .any(|cell| cell.element == rain.rules().id("plant").unwrap())
+    );
+}
+
+#[test]
+fn dry_forest_fire_front_leaves_a_regrowing_canopy() {
+    let rules = Rules::load(DEFAULT_RULES).unwrap();
+    let level = crate::level::Preset::DryForest.level(&rules, 96, 64);
+    let mut world = level.generate(rules).unwrap();
+    let count = |world: &World, name: &str| {
+        let id = world.rules().id(name).unwrap();
+        world
+            .cells()
+            .iter()
+            .filter(|cell| cell.element == id)
+            .count()
+    };
+    let initial_trees = count(&world, "tree");
+    let mut fire_clear_frame = None;
+    for frame in 1..=600 {
+        world.step(usize::MAX);
+        if frame > 24 && count(&world, "fire") == 0 {
+            fire_clear_frame = Some(frame);
+            break;
+        }
+    }
+    assert!(
+        fire_clear_frame.is_some(),
+        "the Dry forest fire front should finish within 600 simulation sweeps"
+    );
+    let trees_after_fire = count(&world, "tree");
+    assert!(
+        trees_after_fire < initial_trees,
+        "the preset spark should burn a patch"
+    );
+
+    for _ in 0..300 {
+        world.step(usize::MAX);
+    }
+    let recovered_trees = count(&world, "tree");
+    assert!(
+        recovered_trees >= trees_after_fire + 8,
+        "a burned patch should grow a trunk-and-crown canopy after the front passes"
+    );
+    for _ in 0..600 {
+        world.step(usize::MAX);
+    }
+    let settled_trees = count(&world, "tree");
+    assert!(
+        settled_trees <= initial_trees * 2,
+        "a forest left alone should not overgrow: {settled_trees} tree cells from {initial_trees}"
     );
 }
 
