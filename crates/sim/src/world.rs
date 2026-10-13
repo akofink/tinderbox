@@ -1,6 +1,7 @@
 //! World storage, construction, and read-only accessors.
+use crate::dirty::DirtyRegions;
 use crate::scheduler::Scheduler;
-use crate::{Cell, Rules, RulesError, Wind, WindDirection};
+use crate::{Cell, DirtyRegion, Rules, RulesError, Wind, WindDirection};
 use std::fmt;
 
 /// Invalid grid dimensions or missing required world definitions.
@@ -32,6 +33,7 @@ pub struct World {
     pub(super) cells: Vec<Cell>,
     pub(super) rules: Rules,
     pub(super) scheduler: Scheduler,
+    pub(super) dirty_regions: DirtyRegions,
     pub(super) rng: u64,
     pub(super) wind: Wind,
     pub(super) gusts: Vec<GustCell>,
@@ -60,6 +62,7 @@ impl World {
             ],
             rules,
             scheduler: Scheduler::new(count),
+            dirty_regions: DirtyRegions::new(width, height),
             rng: seed.max(1),
             wind: Wind::default(),
             gusts: vec![GustCell::default(); count],
@@ -89,6 +92,25 @@ impl World {
     /// Count of deferred player-focused updates waiting ahead of background work.
     pub fn pending_work(&self) -> usize {
         self.scheduler.pending_focus()
+    }
+
+    /// Number of deduplicated regions waiting for presentation.
+    pub fn pending_dirty_regions(&self) -> usize {
+        self.dirty_regions.len()
+    }
+
+    /// Marks every texture region dirty after a bulk visual change.
+    pub fn mark_all_dirty(&mut self) {
+        self.dirty_regions.mark_all();
+    }
+
+    /// Removes the oldest dirty texture region, if any.
+    ///
+    /// Callers should drain a bounded number per frame and preserve the returned region until it
+    /// has been uploaded. Dirty regions are clipped at the world edges and coalesce changes until
+    /// popped; changes made after a pop enqueue the region again.
+    pub fn pop_dirty_region(&mut self) -> Option<DirtyRegion> {
+        self.dirty_regions.pop()
     }
 
     /// Current global horizontal wind.

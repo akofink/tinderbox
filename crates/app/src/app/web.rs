@@ -19,7 +19,14 @@ pub(super) fn start() {
             .start(
                 canvas,
                 web_options,
-                Box::new(|cc| Ok(Box::new(Tinderbox::new(cc)))),
+                Box::new(|cc| {
+                    Ok(Box::new(Tinderbox::new_with_context(
+                        cc.egui_ctx.clone(),
+                        super::DEFAULT_WIDTH,
+                        super::DEFAULT_HEIGHT,
+                        false,
+                    )))
+                }),
             )
             .await;
         let loading = document.get_element_by_id("loading_text");

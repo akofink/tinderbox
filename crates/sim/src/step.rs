@@ -37,20 +37,14 @@ impl World {
             self.cells[i].age = self.cells[i].age.saturating_add(1);
             if self.cells[i].age >= lifetime {
                 if let Some(to) = decay_to {
-                    self.cells[i] = crate::Cell {
-                        element: to,
-                        age: 0,
-                    };
+                    self.set_element(i, to);
                 }
                 if let Some(emission) = emission {
                     let above = i.checked_sub(self.width);
                     if let Some(j) = above.filter(|j| {
                         self.cells[*j].element == self.rules.id("air").unwrap_or(usize::MAX)
                     }) {
-                        self.cells[j] = crate::Cell {
-                            element: emission,
-                            age: 0,
-                        };
+                        self.set_element(j, emission);
                     }
                 }
                 return;
@@ -86,15 +80,9 @@ impl World {
                         })
                     .min(1.0)
             {
-                self.cells[j] = crate::Cell {
-                    element: result,
-                    age: 0,
-                };
+                self.set_element(j, result);
                 if let Some(to) = self_result {
-                    self.cells[i] = crate::Cell {
-                        element: to,
-                        age: 0,
-                    };
+                    self.set_element(i, to);
                 }
                 return;
             }
@@ -126,6 +114,8 @@ impl World {
                         && density < self.rules.elements[above_element].density
                     {
                         self.cells.swap(i, above);
+                        self.mark_cell_dirty(i);
+                        self.mark_cell_dirty(above);
                         return;
                     }
                 }
@@ -137,6 +127,8 @@ impl World {
                             && density > self.rules.elements[below_element].density)
                     {
                         self.cells.swap(i, below);
+                        self.mark_cell_dirty(i);
+                        self.mark_cell_dirty(below);
                         return;
                     }
                 }
@@ -160,10 +152,25 @@ impl World {
             .is_some_and(|c| Some(c.element) == self.rules.id("air"))
         {
             self.cells.swap(a, b);
+            self.mark_cell_dirty(a);
+            self.mark_cell_dirty(b);
             true
         } else {
             false
         }
+    }
+
+    fn set_element(&mut self, index: usize, element: usize) {
+        let changed = self.cells[index].element != element;
+        self.cells[index] = crate::Cell { element, age: 0 };
+        if changed {
+            self.mark_cell_dirty(index);
+        }
+    }
+
+    fn mark_cell_dirty(&mut self, index: usize) {
+        self.dirty_regions
+            .mark_cell(index % self.width, index / self.width);
     }
 
     fn random_u64(&mut self) -> u64 {

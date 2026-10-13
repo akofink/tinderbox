@@ -6,6 +6,7 @@ fn startup_waits_for_setup_and_cancel_preserves_a_running_game() {
     let mut app = Tinderbox::new_state(false);
     assert!(app.level_setup.open);
     assert!(!app.running);
+    assert!(app.world.pending_dirty_regions() > 0);
     app.setup_action(SetupAction::Play(app.level.clone()));
     app.world.step(500);
     let cells = app.world.cells().to_vec();
@@ -139,4 +140,45 @@ fn smooth_play_skips_setup_and_handles_small_worlds() {
     let level = Preset::DryForest.level(app.world.rules(), 16, 16);
     app.set_level(level).unwrap();
     app.simulate_frame(&egui::Context::default(), 1.0 / 60.0);
+}
+
+#[test]
+fn work_accumulator_issues_default_budget_and_preserves_fractional_work() {
+    let mut work = WorkAccumulator::default();
+    work.accrue(1.0 / 60.0, 1.0);
+    assert_eq!(work.take(), WORK_PER_FRAME);
+    assert!(work.pending < 0.01);
+    work.accrue(1.0 / 120.0, 1.0);
+    assert_eq!(work.take(), WORK_PER_FRAME / 2);
+    assert!(work.pending < 0.01);
+}
+
+#[test]
+fn frame_cap_carries_backlog_but_bounds_long_hitches() {
+    let mut work = WorkAccumulator::default();
+    work.accrue(0.1, 1.0);
+    assert_eq!(work.take(), MAX_WORK_PER_FRAME);
+    assert!(work.pending > 0.0);
+    work.accrue(1.0 / 60.0, 1.0);
+    let next = work.take();
+    assert!((MAX_WORK_PER_FRAME / 2..=MAX_WORK_PER_FRAME).contains(&next));
+    assert!(work.pending < 0.01);
+    let carry_cap = (MAX_WORK_PER_FRAME * MAX_CARRY_FRAMES) as f64;
+    work.accrue(10.0, 4.0);
+    assert_eq!(work.take(), MAX_WORK_PER_FRAME);
+    assert!(work.pending <= carry_cap - MAX_WORK_PER_FRAME as f64);
+    assert!(work.pending > 0.0);
+}
+
+#[test]
+fn manual_steps_share_the_frame_cap_and_can_run_while_paused() {
+    let mut work = WorkAccumulator::default();
+    work.add(WORK_PER_FRAME as f64);
+    assert_eq!(work.take(), WORK_PER_FRAME);
+    assert_eq!(work.take(), 0);
+
+    work.add((MAX_WORK_PER_FRAME * 2) as f64);
+    assert_eq!(work.take(), MAX_WORK_PER_FRAME);
+    assert_eq!(work.take(), MAX_WORK_PER_FRAME);
+    assert_eq!(work.pending, 0.0);
 }

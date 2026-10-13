@@ -23,7 +23,7 @@ pub(super) fn handle_keyboard(app: &mut Tinderbox, ctx: &egui::Context) {
         app.running = !app.running;
     }
     if keys.1 {
-        app.world.step(super::WORK_PER_FRAME);
+        app.request_step();
     }
     if keys.2 {
         app.reset();

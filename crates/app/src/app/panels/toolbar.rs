@@ -11,8 +11,7 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
             app.running = !app.running;
         }
         if ui.button("Step").clicked() {
-            app.world.step(super::super::WORK_PER_FRAME);
-            app.sim_seconds += 1.0 / 60.0;
+            app.request_step();
         }
         if ui.button("Reset").clicked() {
             app.reset();

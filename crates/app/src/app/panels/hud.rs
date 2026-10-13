@@ -10,10 +10,12 @@ pub(super) fn show(app: &Tinderbox, painter: &Painter, rect: Rect) {
         rect.left_top() + egui::Vec2::splat(8.0),
         egui::Align2::LEFT_TOP,
         format!(
-            "{:.1} ms/frame   sim {:.1}s   pending {}",
+            "{:.1} ms/frame   sim {:.1}s   focus {} carry {}   dirty {}",
             app.frame_ms,
             app.sim_seconds,
-            app.world.pending_work()
+            app.world.pending_work(),
+            app.work.pending.ceil() as usize,
+            app.world.pending_dirty_regions()
         ),
         egui::FontId::monospace(13.0),
         Color32::WHITE,

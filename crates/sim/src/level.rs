@@ -251,6 +251,7 @@ impl Level {
                 }
             }
         }
+        world.mark_all_dirty();
         Ok(world)
     }
     fn surface(&self, x: usize) -> usize {
