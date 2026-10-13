@@ -45,8 +45,12 @@ pub(in crate::app) fn load_text(key: &str) -> Result<String, String> {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let text =
-            std::fs::read_to_string(key).map_err(|err| format!("Cannot load {key}: {err}"))?;
+        use std::io::Read;
+        let file = std::fs::File::open(key).map_err(|err| format!("Cannot load {key}: {err}"))?;
+        let mut text = String::new();
+        file.take((MAX_BYTES + 1) as u64)
+            .read_to_string(&mut text)
+            .map_err(|err| format!("Cannot read {key}: {err}"))?;
         check_size(&text)?;
         Ok(text)
     }

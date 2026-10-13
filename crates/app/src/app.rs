@@ -203,27 +203,33 @@ impl eframe::App for Tinderbox {
 #[cfg(target_arch = "wasm32")]
 fn poll_browser_files(ctx: &egui::Context, frame: &mut eframe::Frame, app: &mut Tinderbox) {
     if let Some((key, text)) = files::poll(ctx) {
-        let selected_name = app
-            .world
-            .rules()
-            .elements
-            .get(app.selected)
-            .map(|e| e.name.clone());
-        match app.world.load_rules(&text) {
-            Ok(()) => {
-                app.selected = selected_name
-                    .as_deref()
-                    .and_then(|name| app.world.rules().id(name))
-                    .unwrap_or_else(|| app.world.rules().id("air").unwrap_or(0));
-                match files::remember(&key, &text) {
-                    Ok(()) => files::set_notice(format!(
-                        "Applied and stored {key} ({} bytes). The world keeps running.",
-                        text.len()
-                    )),
-                    Err(err) => files::set_notice(format!("Rules applied, but not stored: {err}")),
+        if key == "level" || Level::load(&text).is_ok() {
+            if !app.level_setup.open {
+                app.open_level_setup();
+            }
+            app.level_setup.import_text(text.clone(), app.world.rules());
+            if app.level_setup.error.is_none() {
+                match files::remember("level", &text) {
+                    Ok(()) => files::set_notice("Loaded level settings. Press Play level to start."),
+                    Err(err) => files::set_notice(err),
                 }
             }
-            Err(err) => files::set_notice(format!("{err}. Current rules are unchanged.")),
+        } else {
+            let selected_name = app.world.rules().elements.get(app.selected).map(|e| e.name.clone());
+            match app.world.load_rules(&text) {
+                Ok(()) => {
+                    app.selected = selected_name.as_deref()
+                        .and_then(|name| app.world.rules().id(name))
+                        .unwrap_or_else(|| app.world.rules().id("air").unwrap_or(0));
+                    match files::remember(&key, &text) {
+                        Ok(()) => files::set_notice(format!(
+                            "Applied and stored {key} ({} bytes). The world keeps running.", text.len()
+                        )),
+                        Err(err) => files::set_notice(format!("Rules applied, but not stored: {err}")),
+                    }
+                }
+                Err(err) => files::set_notice(format!("{err}. Current rules are unchanged.")),
+            }
         }
     }
     web::publish_frame(app.frame_ms, frame);

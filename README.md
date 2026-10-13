@@ -25,7 +25,7 @@ The same sandbox is at <https://akofink.com/tinderbox/>. It uses WebGPU when the
 - Right-click to ignite at the pointer. Choose **Erase** or press `E` to paint air.
 - **Pause/Play** or press `Space`; **Step** or press `.`; **Reset** or press `R` returns to the applied level's original seed and settings.
 - **Level setup** pauses the game for editing. **Cancel / return to game** keeps the current world. Presets: **Dry forest**, **Island**, **Sandstorm valley**.
-- Setup's **Save / load level (TOML)** saves and loads recipes by path on desktop, or exports/imports copyable text on every platform. New ruleset elements automatically appear as amount sliders.
+- Setup's **Save / load level (TOML)** saves and loads recipes by path on desktop, downloads/uploads and remembers them in a browser, and exports/imports copyable text everywhere. New ruleset elements automatically appear as amount sliders.
 - Adjust simulation speed from 0.25× to 4×. Set wind direction and strength in the toolbar; select **Gust brush** and drag across the world to apply a local burst. Wind drifts ash, smoke, and steam and speeds fire spread downwind.
 - Water wets soil; ash and water make fertile soil, where seeds sprout faster into plants. Ice melts near fire or lava. Lava ignites plants and turns water into stone and steam. Oil floats on water and burns quickly as bright, hot oil fire.
 - Toggle the frame/simulation/pending-work HUD with **HUD** or `H`. **Ignite** or press `I` selects fire for painting.

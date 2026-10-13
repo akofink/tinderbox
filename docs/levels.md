@@ -15,6 +15,8 @@ Dimensions range from 16 to 2048 cells per side, with a maximum of 1,048,576 cel
 
 Expand **Save / load level (TOML)**. On desktop, enter a file path and use **Save file** or **Load file**. Relative paths are relative to the app's launch directory. Saving replaces an existing file at that path. Errors are shown in setup and leave the game untouched.
 
+In a browser, **Download level** saves the recipe as a file and remembers it locally. **Upload level** or dropping a valid recipe on the canvas opens its settings without changing the running world; **Stored level** loads the last saved or uploaded recipe from this browser.
+
 On desktop or in a browser, **Export settings to text** produces a human-readable recipe. **Copy text** copies it for sharing. Paste a recipe into the text area and press **Load text**, then Play. A recipe stores setup, not an ongoing simulation snapshot or a ruleset. Use the same ruleset to reproduce the same world and subsequent simulation.
 
 ```toml

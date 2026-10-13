@@ -1,4 +1,5 @@
 //! Setup UI is derived from the current rules, not a hard-coded element list.
+use super::files;
 use eframe::egui;
 use tinderbox_sim::{
     Rules,
@@ -41,6 +42,10 @@ impl LevelSetup {
         self.message.clear();
         self.open = true;
     }
+    pub(super) fn import_text(&mut self, text: String, rules: &Rules) {
+        self.text = text;
+        self.load_text(rules);
+    }
     fn load_text(&mut self, rules: &Rules) {
         match Level::load(&self.text).and_then(|level| {
             // Validate names before replacing the draft, but don't touch the game.
@@ -82,7 +87,7 @@ impl LevelSetup {
             .collapsible(false)
             .resizable(true)
             .default_width(610.0)
-            .default_height(600.0)
+            .default_height(420.0)
             .max_height((ctx.screen_rect().height() - 64.0).max(180.0))
             .vscroll(true)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
@@ -138,17 +143,38 @@ impl LevelSetup {
                         ui.text_edit_singleline(&mut self.file_path);
                         if ui.button("Save file").clicked() {
                             match self.encode_draft().map_err(|e| e.to_string())
-                                .and_then(|text| std::fs::write(&self.file_path, text).map_err(|e| format!("Cannot save level: {e}"))) {
+                                .and_then(|text| files::save_text("level", &self.file_path, &text)) {
                                 Ok(()) => { self.error = None; self.message = format!("Saved {}", self.file_path); }
                                 Err(e) => self.error = Some(e),
                             }
                         }
                         if ui.button("Load file").clicked() {
-                            match read_level_file(&self.file_path) {
-                                Ok(text) => { self.text = text; self.load_text(rules); }
+                            match files::load_text(&self.file_path) {
+                                Ok(text) => self.import_text(text, rules),
                                 Err(e) => self.error = Some(e),
                             }
                         }
+                    });
+                    #[cfg(target_arch = "wasm32")]
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button("Download level").clicked() {
+                            match self.encode_draft().map_err(|e| e.to_string())
+                                .and_then(|text| files::save_text("level", "tinderbox-level.toml", &text)) {
+                                Ok(()) => { self.error = None; self.message = "Downloaded level and stored it in this browser.".into(); }
+                                Err(e) => self.error = Some(e),
+                            }
+                        }
+                        if ui.button("Upload level").clicked() {
+                            if let Err(e) = files::begin_upload("level") { self.error = Some(e); }
+                        }
+                        if ui.button("Stored level").clicked() {
+                            match files::load_text("level") {
+                                Ok(text) => self.import_text(text, rules),
+                                Err(e) => self.error = Some(e),
+                            }
+                        }
+                        let notice = files::notice();
+                        if !notice.is_empty() { ui.label(notice); }
                     });
                     ui.horizontal(|ui| {
                         if ui.button("Export settings to text").clicked() {
@@ -179,20 +205,6 @@ impl LevelSetup {
             });
         action
     }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn read_level_file(path: &str) -> Result<String, String> {
-    use std::io::Read;
-    let file = std::fs::File::open(path).map_err(|e| format!("Cannot load level: {e}"))?;
-    let mut text = String::new();
-    file.take(65_537)
-        .read_to_string(&mut text)
-        .map_err(|e| format!("Cannot read level: {e}"))?;
-    if text.len() > 65_536 {
-        return Err("Level file is too large (maximum 64 KiB)".into());
-    }
-    Ok(text)
 }
 
 #[cfg(test)]

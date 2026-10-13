@@ -195,17 +195,22 @@ impl Level {
         for (_, id, element, amount) in materials {
             let salt = name_hash(&element.name);
             for (x, &ground) in surface.iter().enumerate() {
+                let flooded =
+                    ground > waterline && self.amounts.get("water").copied().unwrap_or(0) > 0;
+                let canopy = (self.height / 12
+                    + (sample(self.seed ^ name_hash("tree"), x / 4, 1)
+                        % (self.height / 8).max(1) as u64) as usize)
+                    .saturating_sub((x % 4).abs_diff(1))
+                    .max(2);
                 for y in 0..self.height {
                     let eligible = match element.name.as_str() {
                         "stone" => y >= ground,
                         "soil" => y >= ground && y < ground + (self.height / 32).max(2),
-                        "tree" => {
-                            ground <= waterline && y < ground && y + self.height / 5 >= ground
-                        }
-                        "plant" | "grass" => ground <= waterline && y < ground && y + 3 >= ground,
+                        "tree" => !flooded && y < ground && y + canopy >= ground,
+                        "plant" | "grass" => !flooded && y < ground && y + 3 >= ground,
                         "water" => y >= waterline && y < ground,
                         "sand" | "ash" => y >= ground && y < ground + (self.height / 16).max(2),
-                        "fire" => ground <= waterline && y + (self.height / 12).max(1) == ground,
+                        "fire" => !flooded && y + (canopy / 2).max(1) == ground,
                         _ => match element.motion {
                             Motion::Static => y < ground && y + (self.height / 16).max(2) >= ground,
                             Motion::Fall => y >= ground && y < ground + (self.height / 24).max(2),
@@ -216,8 +221,13 @@ impl Level {
                         },
                     };
                     // Column-coherent forest clumps; per-cell density for other materials.
-                    let density_y = if element.name == "tree" { 0 } else { y };
-                    if eligible && sample(self.seed ^ salt, x, density_y) % 100 < u64::from(amount)
+                    let (density_x, density_y) = if element.name == "tree" {
+                        (x / 4, 0)
+                    } else {
+                        (x, y)
+                    };
+                    if eligible
+                        && sample(self.seed ^ salt, density_x, density_y) % 100 < u64::from(amount)
                     {
                         world.cells[y * self.width + x].element = id;
                     }
