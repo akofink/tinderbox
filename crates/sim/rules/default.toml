@@ -20,7 +20,7 @@ motion = "static"
 
 [[elements]]
 name = "fertile_soil"
-color = [82, 103, 56]
+color = [126, 168, 72]
 motion = "static"
 
 [[elements]]
@@ -133,7 +133,7 @@ decay_to = "stone"
 
 [[elements]]
 name = "ash"
-color = [100, 94, 88]
+color = [138, 132, 122]
 motion = "fall"
 wind_response = 0.9
 

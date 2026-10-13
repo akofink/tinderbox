@@ -80,10 +80,17 @@ impl World {
                         })
                     .min(1.0)
             {
+                let replaced = other;
                 self.set_element(j, result);
                 if let Some(to) = self_result {
                     self.set_element(i, to);
                 }
+                // Burning a living cell drops its seed so a wet ash bed can regrow.
+                if let Some(emission) = self.rules.elements.get(replaced).and_then(|el| el.emission)
+                {
+                    self.emit_into_air_near(j, emission);
+                }
+                self.wake_decomposer(e, replaced, j);
                 return;
             }
         }
@@ -157,6 +164,47 @@ impl World {
             true
         } else {
             false
+        }
+    }
+
+    fn emit_into_air_near(&mut self, index: usize, element: usize) {
+        let air = self.rules.id("air").unwrap_or(usize::MAX);
+        let x = index % self.width;
+        let y = index / self.width;
+        for (dx, dy) in [
+            (0isize, -1isize),
+            (1, 0),
+            (-1, 0),
+            (0, 1),
+            (1, -1),
+            (-1, -1),
+        ] {
+            let Some(nx) = x.checked_add_signed(dx).filter(|v| *v < self.width) else {
+                continue;
+            };
+            let Some(ny) = y.checked_add_signed(dy).filter(|v| *v < self.height) else {
+                continue;
+            };
+            let j = ny * self.width + nx;
+            if self.cells[j].element == air {
+                self.set_element(j, element);
+                return;
+            }
+        }
+    }
+
+    fn wake_decomposer(&mut self, actor: usize, replaced: usize, index: usize) {
+        let Some(ash) = self.rules.id("ash") else {
+            return;
+        };
+        let Some(water) = self.rules.id("water") else {
+            return;
+        };
+        let Some(fungus) = self.rules.id("fungus") else {
+            return;
+        };
+        if (actor == ash && replaced == water) || (actor == water && replaced == ash) {
+            self.emit_into_air_near(index, fungus);
         }
     }
 
