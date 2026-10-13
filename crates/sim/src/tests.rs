@@ -375,6 +375,25 @@ fn ash_and_deadwood_make_burnable_humus() {
 }
 
 #[test]
+fn burning_a_tree_drops_a_seed_and_wet_ash_wakes_fungus() {
+    let mut burned = guaranteed_world(3, &[("fire", "tree")]);
+    put(&mut burned, 0, 0, "fire");
+    put(&mut burned, 1, 0, "tree");
+    burned.step(1);
+    assert!(has(&burned, 1, 0, "fire"));
+    let seed = burned.rules().id("seed").unwrap();
+    assert!(burned.cells().iter().any(|cell| cell.element == seed));
+
+    let mut wet = guaranteed_world(4, &[("ash", "water")]);
+    put(&mut wet, 0, 0, "ash");
+    put(&mut wet, 1, 0, "water");
+    wet.step(1);
+    assert!(has(&wet, 0, 0, "fertile_soil"));
+    assert!(has(&wet, 1, 0, "fertile_soil"));
+    assert!(has(&wet, 0, 1, "fungus") || has(&wet, 2, 0, "fungus") || has(&wet, 1, 1, "fungus"));
+}
+
+#[test]
 fn seeded_burned_bed_recovers_through_water_and_fertile_soil() {
     let mut world = guaranteed_world(41, &[("ash", "water"), ("fertile_soil", "seed")]);
     put(&mut world, 0, 0, "ash");

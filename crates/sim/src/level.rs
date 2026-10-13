@@ -41,6 +41,9 @@ pub struct Level {
     pub wind: Wind,
     /// Density (0..=100) within each material's terrain region, keyed by name.
     pub amounts: BTreeMap<String, u8>,
+    /// A small upwind fire, instead of scattering fire through the whole canopy.
+    #[serde(default)]
+    pub spark: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -72,7 +75,7 @@ impl Preset {
             Self::DryForest => (
                 Generator::Hills,
                 7,
-                &[("stone", 100), ("soil", 100), ("tree", 75), ("fire", 12)],
+                &[("stone", 100), ("soil", 100), ("tree", 75)],
             ),
             Self::Island => (
                 Generator::Island,
@@ -116,6 +119,7 @@ impl Preset {
                 },
             },
             amounts: BTreeMap::new(),
+            spark: matches!(self, Self::DryForest),
         };
         level.add_missing_elements(rules);
         for &(name, amount) in amounts {
@@ -223,7 +227,15 @@ impl Level {
                     let eligible = match element.name.as_str() {
                         "stone" => y >= ground,
                         "soil" => y >= ground && y < ground + (self.height / 32).max(2),
-                        "tree" => !flooded && y < ground && y + canopy >= ground,
+                        "tree" => {
+                            // A trunk plus a wider crown, so a forest is not a row of bars.
+                            let column = x % 4;
+                            let above = ground.saturating_sub(y);
+                            !flooded
+                                && y < ground
+                                && ((column == 1 && above <= canopy)
+                                    || (column <= 2 && above > 1 && above <= canopy / 2))
+                        }
                         "plant" | "grass" => !flooded && y < ground && y + 3 >= ground,
                         "water" => y >= waterline && y < ground,
                         "sand" | "ash" => y >= ground && y < ground + (self.height / 16).max(2),
@@ -251,9 +263,46 @@ impl Level {
                 }
             }
         }
+        if self.spark {
+            place_spark(&mut world);
+        }
         world.mark_all_dirty();
         Ok(world)
     }
+}
+
+fn place_spark(world: &mut World) {
+    let Some(fire) = world.rules.id("fire") else {
+        return;
+    };
+    let tree = world.rules.id("tree");
+    let limit = (world.width() / 8).max(2);
+    let mut at = None;
+    if let Some(tree) = tree {
+        'search: for x in 0..limit {
+            for y in 0..world.height() {
+                if world.cells[y * world.width() + x].element == tree {
+                    at = Some((x, y));
+                    break 'search;
+                }
+            }
+        }
+    }
+    let (x, y) = at.unwrap_or((limit / 2, world.height() * 2 / 3));
+    for dy in -1isize..=1 {
+        for dx in 0isize..=2 {
+            let Some(px) = x.checked_add_signed(dx).filter(|px| *px < world.width()) else {
+                continue;
+            };
+            let Some(py) = y.checked_add_signed(dy).filter(|py| *py < world.height()) else {
+                continue;
+            };
+            world.paint(px, py, fire);
+        }
+    }
+}
+
+impl Level {
     fn surface(&self, x: usize) -> usize {
         let wave = |span: usize, salt: u64| -> usize {
             let section = x / span;
@@ -411,6 +460,14 @@ mod tests {
                     w.cells.iter().any(|c| Some(c.element) == w.rules.id(name)),
                     "{} lacks {name}",
                     preset.label()
+                );
+            }
+            if preset == Preset::DryForest {
+                let fire = w.rules.id("fire").unwrap();
+                let fires = w.cells.iter().filter(|cell| cell.element == fire).count();
+                assert!(
+                    (1..=12).contains(&fires),
+                    "spark should be a small west fire, got {fires}"
                 );
             }
             preset.level(&rules(), 16, 16).generate(rules()).unwrap();
