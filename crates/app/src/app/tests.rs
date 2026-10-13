@@ -1,0 +1,88 @@
+//! Headless tests for setup transitions; no native window or GPU required.
+use super::*;
+
+#[test]
+fn startup_waits_for_setup_and_cancel_preserves_a_running_game() {
+    let mut app = Tinderbox::new_state(false);
+    assert!(app.level_setup.open);
+    assert!(!app.running);
+    app.setup_action(SetupAction::Play(app.level.clone()));
+    app.world.step(500);
+    let cells = app.world.cells().to_vec();
+    app.open_level_setup();
+    assert!(!app.running);
+    app.level_setup.draft.seed += 1;
+    app.setup_action(SetupAction::Cancel);
+    assert!(app.running);
+    assert!(!app.level_setup.open);
+    assert_eq!(cells, app.world.cells());
+    assert_ne!(app.level.seed, app.level_setup.draft.seed);
+}
+
+#[test]
+fn play_applies_size_and_reset_restores_cells_and_seeded_evolution() {
+    let mut app = Tinderbox::new_state(false);
+    let level = Preset::Island.level(app.world.rules(), 80, 48);
+    app.setup_action(SetupAction::Play(level.clone()));
+    assert_eq!((app.world.width(), app.world.height()), (80, 48));
+    let start = app.world.cells().to_vec();
+    app.world.paint(5, 5, app.world.rules().id("fire").unwrap());
+    app.world.step(1000);
+    app.reset();
+    assert_eq!(app.level, level);
+    assert_eq!(app.world.cells(), start);
+    assert_eq!(app.world.pending_work(), 0);
+    let mut reference = level.generate(app.world.rules().clone()).unwrap();
+    for _ in 0..20 {
+        app.world.step(512);
+        reference.step(512);
+    }
+    assert_eq!(app.world.cells(), reference.cells());
+}
+
+#[test]
+fn invalid_apply_preserves_world_and_applied_recipe() {
+    let mut app = Tinderbox::new_state(false);
+    let original = app.level.clone();
+    let cells = app.world.cells().to_vec();
+    let mut invalid = original.clone();
+    invalid.width = 0;
+    app.setup_action(SetupAction::Play(invalid));
+    assert_eq!(app.level, original);
+    assert_eq!(app.world.cells(), cells);
+    assert!(app.level_setup.open);
+    assert!(app.level_setup.error.is_some());
+    assert!(!app.running);
+}
+
+#[test]
+fn setup_blocks_keyboard_play_and_step() {
+    let mut app = Tinderbox::new_state(false);
+    let cells = app.world.cells().to_vec();
+    let ctx = egui::Context::default();
+    let _ = ctx.run(
+        egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::Space,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        },
+        |ctx| input::handle_keyboard(&mut app, ctx),
+    );
+    assert!(!app.running);
+    assert_eq!(app.world.cells(), cells);
+}
+
+#[test]
+fn smooth_play_skips_setup_and_handles_small_worlds() {
+    let mut app = Tinderbox::new_state(true);
+    assert!(app.running);
+    assert!(!app.level_setup.open);
+    let level = Preset::DryForest.level(app.world.rules(), 16, 16);
+    app.set_level(level).unwrap();
+    app.simulate_frame(&egui::Context::default(), 1.0 / 60.0);
+}

@@ -1,14 +1,22 @@
 //! Application loop and shared sandbox state. Native and wasm share this UI.
 mod files;
 mod input;
+mod level_setup;
 mod panels;
 mod render;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
+#[cfg(test)]
+mod tests;
+
 use crate::rules_panel::RulesPanel;
+use level_setup::{LevelSetup, SetupAction};
 use eframe::egui;
-use tinderbox_sim::{DEFAULT_RULES, Rules, WindDirection, World};
+use tinderbox_sim::{
+    DEFAULT_RULES, Rules, World,
+    level::{Level, LevelError, Preset},
+};
 use web_time::Instant;
 
 const DEFAULT_WIDTH: usize = 192;
@@ -24,7 +32,9 @@ pub(super) struct Tinderbox {
     speed: f32,
     show_hud: bool,
     rules_panel: RulesPanel,
-    seed: u64,
+    level: Level,
+    level_setup: LevelSetup,
+    return_running: bool,
     sim_seconds: f64,
     last_frame: Instant,
     frame_ms: f32,
@@ -35,63 +45,79 @@ pub(super) struct Tinderbox {
 }
 impl Tinderbox {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        Self::new_state(smooth_play_requested())
+    }
+
+    fn new_state(stress_play: bool) -> Self {
         let rules = Rules::load(DEFAULT_RULES).expect("bundled rules are validated by tests");
         let selected = rules.id("sand").unwrap_or(0);
-        let world = World::new(DEFAULT_WIDTH, DEFAULT_HEIGHT, 7, rules)
-            .expect("default world dimensions are valid");
-        let mut app = Self {
+        let level = Preset::DryForest.level(&rules, DEFAULT_WIDTH, DEFAULT_HEIGHT);
+        let world = level.generate(rules).expect("default level is valid");
+        let mut level_setup = LevelSetup::new(level.clone());
+        level_setup.open = !stress_play;
+        Self {
             world,
             selected,
             brush: 3,
             gust_mode: false,
-            running: true,
+            running: stress_play,
             speed: 1.0,
             show_hud: true,
             rules_panel: RulesPanel::default(),
-            seed: 7,
+            level,
+            level_setup,
+            return_running: false,
             sim_seconds: 0.0,
             last_frame: Instant::now(),
             frame_ms: 0.0,
-            stress_play: smooth_play_requested(),
+            stress_play,
             stress_frames: 0,
             stress_total_ms: 0.0,
             stress_max_ms: 0.0,
-        };
-        app.world.set_wind(WindDirection::East, 1);
-        app.wildfire();
-        app
+        }
+    }
+
+    fn set_level(&mut self, level: Level) -> Result<(), LevelError> {
+        let world = level.generate(self.world.rules().clone())?;
+        self.world = world;
+        self.level = level;
+        self.sim_seconds = 0.0;
+        Ok(())
     }
 
     fn reset(&mut self) {
-        self.seed = self.seed.wrapping_add(1).max(1);
-        self.world.reset(self.seed);
-        self.sim_seconds = 0.0;
+        if let Err(error) = self.set_level(self.level.clone()) {
+            self.open_level_setup();
+            self.level_setup.error = Some(error.to_string());
+        }
+    }
+
+    fn open_level_setup(&mut self) {
+        self.return_running = self.running;
+        self.running = false;
+        self.level_setup.begin(&self.level, self.world.rules());
+    }
+
+    fn setup_action(&mut self, action: SetupAction) {
+        match action {
+            SetupAction::Play(level) => match self.set_level(level) {
+                Ok(()) => {
+                    self.level_setup.open = false;
+                    self.running = true;
+                }
+                Err(error) => self.level_setup.error = Some(error.to_string()),
+            },
+            SetupAction::Cancel => {
+                self.level_setup.open = false;
+                self.running = self.return_running;
+            }
+        }
     }
 
     fn wildfire(&mut self) {
-        let rules = self.world.rules();
-        let tree = rules.id("tree").unwrap_or(0);
-        let fire = rules.id("fire").unwrap_or(0);
-        let water = rules.id("water").unwrap_or(0);
-        let stone = rules.id("stone").unwrap_or(0);
-        let floor = self.world.height() - 12;
-        for y in floor - 32..floor {
-            for x in 18..self.world.width() - 18 {
-                if (x * 7 + y * 11) % 9 < 7 {
-                    self.world.paint(x, y, tree);
-                }
-            }
-        }
-        for x in 30..self.world.width() - 30 {
-            self.world.paint(x, floor, stone);
-        }
-        for x in 68..self.world.width() - 70 {
-            self.world.paint(x, floor - 16, fire);
-        }
-        for x in 25..32 {
-            self.world.paint(x, floor - 1, water);
-        }
-        self.running = true;
+        let level =
+            Preset::DryForest.level(self.world.rules(), self.world.width(), self.world.height());
+        self.setup_action(SetupAction::Play(level));
     }
 
     fn simulate_frame(&mut self, ctx: &egui::Context, dt: f32) {
@@ -99,10 +125,12 @@ impl Tinderbox {
             let water = self.world.rules().id("water").unwrap_or(0);
             let fire = self.world.rules().id("fire").unwrap_or(0);
             for n in 0..32 {
-                let x = 20 + (self.stress_frames * 32 + n * 7) % (self.world.width() - 40);
+                let margin = (self.world.width() / 4).min(20);
+                let x =
+                    margin + (self.stress_frames * 32 + n * 7) % (self.world.width() - 2 * margin);
                 self.world.paint(
                     x,
-                    self.world.height() - 28,
+                    self.world.height().saturating_sub(28),
                     if n % 4 == 0 { fire } else { water },
                 );
             }
@@ -140,16 +168,18 @@ impl eframe::App for Tinderbox {
         ctx.request_repaint();
 
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
-            panels::toolbar::show(self, ui);
+            ui.add_enabled_ui(!self.level_setup.open, |ui| panels::toolbar::show(self, ui));
         });
         egui::SidePanel::left("palette")
             .resizable(false)
             .default_width(142.0)
-            .show(ctx, |ui| panels::palette::show(self, ui));
+            .show(ctx, |ui| {
+                ui.add_enabled_ui(!self.level_setup.open, |ui| panels::palette::show(self, ui));
+            });
         egui::CentralPanel::default().show(ctx, |ui| {
-            panels::world::show(self, ui);
+            ui.add_enabled_ui(!self.level_setup.open, |ui| panels::world::show(self, ui));
         });
-        if self.rules_panel.open {
+        if self.rules_panel.open && !self.level_setup.open {
             let selected_name = self
                 .world
                 .rules()
@@ -161,6 +191,9 @@ impl eframe::App for Tinderbox {
                 .as_deref()
                 .and_then(|name| self.world.rules().id(name))
                 .unwrap_or_else(|| self.world.rules().id("air").unwrap_or(0));
+        }
+        if let Some(action) = self.level_setup.show(ctx, self.world.rules()) {
+            self.setup_action(action);
         }
         #[cfg(target_arch = "wasm32")]
         poll_browser_files(ctx, frame, self);
