@@ -7,6 +7,7 @@
 //! kept in focused sibling modules so new elements and interactions do not expand this facade.
 mod commands;
 mod element;
+mod rule_controls;
 mod rules;
 mod scheduler;
 mod step;

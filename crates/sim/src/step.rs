@@ -71,7 +71,7 @@ impl World {
                 .rules
                 .interactions
                 .iter()
-                .find(|r| r.when == e && r.with == other)
+                .find(|r| r.enabled && r.when == e && r.with == other)
                 .map(|r| (r.chance, r.downwind_bonus, r.result, r.self_result));
             if let Some((chance, downwind_bonus, result, self_result)) = rule
                 && self.random_f32()

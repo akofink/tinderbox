@@ -6,6 +6,7 @@ mod render;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
+use crate::rules_panel::RulesPanel;
 use eframe::egui;
 use tinderbox_sim::{DEFAULT_RULES, Rules, WindDirection, World};
 use web_time::Instant;
@@ -22,6 +23,7 @@ pub(super) struct Tinderbox {
     running: bool,
     speed: f32,
     show_hud: bool,
+    rules_panel: RulesPanel,
     seed: u64,
     sim_seconds: f64,
     last_frame: Instant,
@@ -45,6 +47,7 @@ impl Tinderbox {
             running: true,
             speed: 1.0,
             show_hud: true,
+            rules_panel: RulesPanel::default(),
             seed: 7,
             sim_seconds: 0.0,
             last_frame: Instant::now(),
@@ -146,26 +149,51 @@ impl eframe::App for Tinderbox {
         egui::CentralPanel::default().show(ctx, |ui| {
             panels::world::show(self, ui);
         });
+        if self.rules_panel.open {
+            let selected_name = self
+                .world
+                .rules()
+                .elements
+                .get(self.selected)
+                .map(|e| e.name.clone());
+            self.rules_panel.show(ctx, &mut self.world);
+            self.selected = selected_name
+                .as_deref()
+                .and_then(|name| self.world.rules().id(name))
+                .unwrap_or_else(|| self.world.rules().id("air").unwrap_or(0));
+        }
         #[cfg(target_arch = "wasm32")]
-        poll_browser_files(ctx, frame, self.frame_ms);
+        poll_browser_files(ctx, frame, self);
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn poll_browser_files(ctx: &egui::Context, frame: &mut eframe::Frame, frame_ms: f32) {
+fn poll_browser_files(ctx: &egui::Context, frame: &mut eframe::Frame, app: &mut Tinderbox) {
     if let Some((key, text)) = files::poll(ctx) {
-        match Rules::load(&text) {
-            Ok(_) => match files::remember(&key, &text) {
-                Ok(()) => files::set_notice(format!(
-                    "Stored {key} ({} bytes) in this browser. The running world is unchanged.",
-                    text.len()
-                )),
-                Err(err) => files::set_notice(err),
-            },
-            Err(err) => files::set_notice(err.to_string()),
+        let selected_name = app
+            .world
+            .rules()
+            .elements
+            .get(app.selected)
+            .map(|e| e.name.clone());
+        match app.world.load_rules(&text) {
+            Ok(()) => {
+                app.selected = selected_name
+                    .as_deref()
+                    .and_then(|name| app.world.rules().id(name))
+                    .unwrap_or_else(|| app.world.rules().id("air").unwrap_or(0));
+                match files::remember(&key, &text) {
+                    Ok(()) => files::set_notice(format!(
+                        "Applied and stored {key} ({} bytes). The world keeps running.",
+                        text.len()
+                    )),
+                    Err(err) => files::set_notice(format!("Rules applied, but not stored: {err}")),
+                }
+            }
+            Err(err) => files::set_notice(format!("{err}. Current rules are unchanged.")),
         }
     }
-    web::publish_frame(frame_ms, frame);
+    web::publish_frame(app.frame_ms, frame);
 }
 
 fn smooth_play_requested() -> bool {
