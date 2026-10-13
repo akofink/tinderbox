@@ -3,7 +3,10 @@ use super::Tinderbox;
 use eframe::egui::{self, Pos2, Rect, Response};
 
 pub(super) fn handle_keyboard(app: &mut Tinderbox, ctx: &egui::Context) {
-    if app.level_setup.open || ctx.wants_keyboard_input() {
+    let editing_text = ctx
+        .memory(|m| m.focused())
+        .is_some_and(|id| egui::text_edit::TextEditState::load(ctx, id).is_some());
+    if app.level_setup.open || editing_text {
         return;
     }
     let keys = ctx.input(|input| {

@@ -130,7 +130,7 @@ impl Tinderbox {
                     margin + (self.stress_frames * 32 + n * 7) % (self.world.width() - 2 * margin);
                 self.world.paint(
                     x,
-                    self.world.height().saturating_sub(28),
+                    self.world.height() * 2 / 3,
                     if n % 4 == 0 { fire } else { water },
                 );
             }

@@ -43,6 +43,19 @@ fn play_applies_size_and_reset_restores_cells_and_seeded_evolution() {
 }
 
 #[test]
+fn large_levels_fit_the_canvas_instead_of_being_cropped() {
+    let app = Tinderbox::new_state(false);
+    let world = Preset::Island
+        .level(app.world.rules(), 1024, 640)
+        .generate(app.world.rules().clone())
+        .unwrap();
+    let available = egui::Vec2::new(800.0, 500.0);
+    let size = render::fitted_size(&world, available);
+    assert!(size.x <= available.x && size.y <= available.y);
+    assert!((size.x / size.y - 1.6).abs() < 0.001);
+}
+
+#[test]
 fn invalid_apply_preserves_world_and_applied_recipe() {
     let mut app = Tinderbox::new_state(false);
     let original = app.level.clone();
@@ -77,6 +90,36 @@ fn setup_blocks_keyboard_play_and_step() {
     );
     assert!(!app.running);
     assert_eq!(app.world.cells(), cells);
+}
+
+#[test]
+fn shortcuts_work_with_button_focus_but_not_in_text_fields() {
+    for text_focus in [false, true] {
+        let mut app = Tinderbox::new_state(false);
+        app.setup_action(SetupAction::Play(app.level.clone()));
+        let ctx = egui::Context::default();
+        let id = egui::Id::new("focused_control");
+        let _ = ctx.run(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Space,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ctx| {
+                ctx.memory_mut(|m| m.request_focus(id));
+                if text_focus {
+                    egui::text_edit::TextEditState::default().store(ctx, id);
+                }
+                input::handle_keyboard(&mut app, ctx);
+            },
+        );
+        assert_eq!(app.running, text_focus);
+    }
 }
 
 #[test]
