@@ -26,5 +26,36 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
         ui.label("Speed");
         ui.add(egui::Slider::new(&mut app.speed, 0.25..=4.0).suffix("×"));
         ui.checkbox(&mut app.show_hud, "HUD");
+        #[cfg(target_arch = "wasm32")]
+        show_browser_files(ui);
     });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn show_browser_files(ui: &mut egui::Ui) {
+    use crate::app::files;
+    use tinderbox_sim::DEFAULT_RULES;
+
+    ui.separator();
+    if ui.button("Download rules").clicked() {
+        match files::save_text("rules", "tinderbox-rules.toml", DEFAULT_RULES) {
+            Ok(()) => files::set_notice("Downloaded the bundled rules."),
+            Err(err) => files::set_notice(err),
+        }
+    }
+    if ui.button("Upload rules").clicked() {
+        if let Err(err) = files::begin_upload("rules") {
+            files::set_notice(err);
+        }
+    }
+    if ui.button("Stored rules").clicked() {
+        match files::load_text("rules") {
+            Ok(text) => files::finish_upload("rules", Ok(text)),
+            Err(err) => files::set_notice(err),
+        }
+    }
+    let notice = files::notice();
+    if !notice.is_empty() {
+        ui.label(notice);
+    }
 }

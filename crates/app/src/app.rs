@@ -1,11 +1,14 @@
-//! Native application loop and shared sandbox state.
+//! Application loop and shared sandbox state. Native and wasm share this UI.
+mod files;
 mod input;
 mod panels;
 mod render;
+#[cfg(target_arch = "wasm32")]
+mod web;
 
 use eframe::egui;
-use std::time::Instant;
 use tinderbox_sim::{DEFAULT_RULES, Rules, World};
+use web_time::Instant;
 
 const DEFAULT_WIDTH: usize = 192;
 const DEFAULT_HEIGHT: usize = 120;
@@ -44,7 +47,7 @@ impl Tinderbox {
             sim_seconds: 0.0,
             last_frame: Instant::now(),
             frame_ms: 0.0,
-            stress_play: std::env::args().any(|arg| arg == "--smooth-play"),
+            stress_play: smooth_play_requested(),
             stress_frames: 0,
             stress_total_ms: 0.0,
             stress_max_ms: 0.0,
@@ -119,7 +122,9 @@ impl Tinderbox {
 }
 
 impl eframe::App for Tinderbox {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = frame;
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
@@ -138,9 +143,45 @@ impl eframe::App for Tinderbox {
         egui::CentralPanel::default().show(ctx, |ui| {
             panels::world::show(self, ui);
         });
+        #[cfg(target_arch = "wasm32")]
+        poll_browser_files(ctx, frame, self.frame_ms);
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+fn poll_browser_files(ctx: &egui::Context, frame: &mut eframe::Frame, frame_ms: f32) {
+    if let Some((key, text)) = files::poll(ctx) {
+        match Rules::load(&text) {
+            Ok(_) => match files::remember(&key, &text) {
+                Ok(()) => files::set_notice(format!(
+                    "Stored {key} ({} bytes) in this browser. The running world is unchanged.",
+                    text.len()
+                )),
+                Err(err) => files::set_notice(err),
+            },
+            Err(err) => files::set_notice(err.to_string()),
+        }
+    }
+    web::publish_frame(frame_ms, frame);
+}
+
+fn smooth_play_requested() -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::env::args().any(|arg| arg == "--smooth-play")
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        false
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(super) fn start_web() {
+    web::start();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn run() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

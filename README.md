@@ -14,6 +14,10 @@ cargo run --release -p tinderbox-app
 
 The default world is 192 × 120 cells. The app starts playing immediately in a small forest-fire scene; click **Wildfire** to reseed the larger showcase. Run `cargo run --release -p tinderbox-app -- --smooth-play` for a 900-frame native heavy-play check with continuous water/fire painting; it reports average and worst frame intervals.
 
+## Play in the browser
+
+The same sandbox is at <https://akofink.github.io/tinderbox/>. It uses WebGPU when the browser provides it, and WebGL2 otherwise. There is no local disk: **Download rules** saves the bundled rules file, **Upload rules** checks a file you pick, and **Stored rules** reloads the last valid copy from this browser. Dropping a text file onto the page does the same check.
+
 ## Play
 
 - Choose sand, stone, water, tree, fire, ash, smoke, or steam in the left palette.
