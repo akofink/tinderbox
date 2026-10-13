@@ -1,6 +1,6 @@
 //! Human-editable TOML ruleset parsing and validation.
 use crate::element::{Element, Motion};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 
@@ -16,6 +16,8 @@ pub struct Interaction {
     pub self_result: Option<usize>,
     pub chance: f32,
     pub downwind_bonus: f32,
+    /// Disabled interactions retain their tuned chance but never fire.
+    pub enabled: bool,
 }
 
 /// Validated element and interaction definitions.
@@ -25,13 +27,15 @@ pub struct Rules {
     pub interactions: Vec<Interaction>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct RawRules {
     elements: Vec<RawElement>,
     #[serde(default)]
     interactions: Vec<RawInteraction>,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct RawElement {
     name: String,
     color: [u8; 3],
@@ -45,15 +49,22 @@ struct RawElement {
     decay_to: Option<String>,
     emission: Option<String>,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct RawInteraction {
     when: String,
     with: String,
     result: String,
     self_result: Option<String>,
-    chance: f32,
+    chance: f64,
     #[serde(default)]
     downwind_bonus: f32,
+    #[serde(default = "default_enabled")]
+    enabled: bool,
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 /// Validation or parse failure with a human-readable explanation.
@@ -150,14 +161,76 @@ impl Rules {
                     .as_deref()
                     .map(|v| id(v, &format!("interaction {i} self_result")))
                     .transpose()?,
-                chance: r.chance,
+                chance: r.chance as f32,
                 downwind_bonus: r.downwind_bonus,
+                enabled: r.enabled,
             });
         }
         Ok(Self {
             elements,
             interactions,
         })
+    }
+
+    /// Exports a human-editable ruleset including tuned and disabled interactions.
+    pub fn to_toml(&self) -> Result<String, RulesError> {
+        let name = |id: usize| {
+            self.elements
+                .get(id)
+                .map(|e| e.name.clone())
+                .ok_or_else(|| RulesError(format!("unknown element index {id}")))
+        };
+        let elements = self
+            .elements
+            .iter()
+            .map(|e| {
+                Ok(RawElement {
+                    name: e.name.clone(),
+                    color: e.color,
+                    motion: match e.motion {
+                        Motion::Static => "static",
+                        Motion::Fall => "fall",
+                        Motion::Liquid => "liquid",
+                        Motion::Gas => "gas",
+                    }
+                    .into(),
+                    wind_response: e.wind_response,
+                    density: e.density,
+                    lifetime: e.lifetime,
+                    decay_to: e.decay_to.map(name).transpose()?,
+                    emission: e.emission.map(name).transpose()?,
+                })
+            })
+            .collect::<Result<Vec<_>, RulesError>>()?;
+        let interactions = self
+            .interactions
+            .iter()
+            .map(|r| {
+                Ok(RawInteraction {
+                    when: name(r.when)?,
+                    with: name(r.with)?,
+                    result: name(r.result)?,
+                    self_result: r.self_result.map(name).transpose()?,
+                    // Use the shortest decimal that roundtrips to this f32,
+                    // rather than exposing its binary expansion in editable TOML.
+                    chance: r
+                        .chance
+                        .to_string()
+                        .parse::<f64>()
+                        .map_err(|e| RulesError(format!("cannot serialize chance: {e}")))?,
+                    downwind_bonus: r.downwind_bonus,
+                    enabled: r.enabled,
+                })
+            })
+            .collect::<Result<Vec<_>, RulesError>>()?;
+        let text = toml::to_string_pretty(&RawRules {
+            elements,
+            interactions,
+        })
+        .map_err(|e| RulesError(format!("cannot serialize rules: {e}")))?;
+        // Public Rules values may have been manually constructed or modified.
+        Self::load(&text)?;
+        Ok(text)
     }
 
     /// Looks up an element's stable index in this ruleset.

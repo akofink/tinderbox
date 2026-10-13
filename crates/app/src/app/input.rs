@@ -3,6 +3,10 @@ use super::Tinderbox;
 use eframe::egui::{self, Pos2, Rect, Response};
 
 pub(super) fn handle_keyboard(app: &mut Tinderbox, ctx: &egui::Context) {
+    // File paths, slider text edits, and TOML must not trigger sandbox shortcuts.
+    if ctx.wants_keyboard_input() {
+        return;
+    }
     let keys = ctx.input(|input| {
         (
             input.key_pressed(egui::Key::Space),

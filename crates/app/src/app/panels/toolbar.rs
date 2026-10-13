@@ -26,21 +26,27 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
         ui.label("Speed");
         ui.add(egui::Slider::new(&mut app.speed, 0.25..=4.0).suffix("×"));
         ui.checkbox(&mut app.show_hud, "HUD");
+        ui.toggle_value(&mut app.rules_panel.open, "Rules");
         #[cfg(target_arch = "wasm32")]
-        show_browser_files(ui);
+        show_browser_files(app, ui);
         super::wind::show(app, ui);
     });
 }
 
 #[cfg(target_arch = "wasm32")]
-fn show_browser_files(ui: &mut egui::Ui) {
+fn show_browser_files(app: &Tinderbox, ui: &mut egui::Ui) {
     use crate::app::files;
-    use tinderbox_sim::DEFAULT_RULES;
 
     ui.separator();
     if ui.button("Download rules").clicked() {
-        match files::save_text("rules", "tinderbox-rules.toml", DEFAULT_RULES) {
-            Ok(()) => files::set_notice("Downloaded the bundled rules."),
+        let result = app
+            .world
+            .rules()
+            .to_toml()
+            .map_err(|e| e.to_string())
+            .and_then(|text| files::save_text("rules", "tinderbox-rules.toml", &text));
+        match result {
+            Ok(()) => files::set_notice("Downloaded the current tuned rules."),
             Err(err) => files::set_notice(err),
         }
     }
