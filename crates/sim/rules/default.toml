@@ -1,0 +1,77 @@
+[[elements]]
+name = "air"
+color = [18, 22, 34]
+motion = "static"
+
+[[elements]]
+name = "sand"
+color = [224, 190, 106]
+motion = "fall"
+
+[[elements]]
+name = "stone"
+color = [112, 119, 132]
+motion = "static"
+
+[[elements]]
+name = "water"
+color = [50, 133, 232]
+motion = "liquid"
+
+[[elements]]
+name = "tree"
+color = [55, 156, 78]
+motion = "static"
+flammable = true
+
+[[elements]]
+name = "fire"
+color = [255, 105, 36]
+motion = "static"
+lifetime = 24
+decay_to = "ash"
+emission = "smoke"
+
+[[elements]]
+name = "ash"
+color = [100, 94, 88]
+motion = "fall"
+
+[[elements]]
+name = "smoke"
+color = [75, 82, 98]
+motion = "gas"
+lifetime = 120
+decay_to = "air"
+
+[[elements]]
+name = "steam"
+color = [183, 205, 224]
+motion = "gas"
+lifetime = 120
+decay_to = "water"
+
+[[interactions]]
+when = "fire"
+with = "tree"
+result = "fire"
+chance = 0.72
+
+[[interactions]]
+when = "fire"
+with = "water"
+result = "steam"
+self_result = "air"
+chance = 1.0
+
+[[interactions]]
+when = "fire"
+with = "sand"
+result = "stone"
+chance = 1.0
+
+[[interactions]]
+when = "fire"
+with = "stone"
+result = "stone"
+chance = 0.0
