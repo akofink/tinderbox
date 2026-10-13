@@ -2,7 +2,7 @@
 use super::files;
 use eframe::egui;
 use tinderbox_sim::{
-    Rules,
+    Rules, WindDirection,
     level::{Generator, Level, MAX_LEVEL_DIMENSION, Preset},
 };
 
@@ -127,6 +127,16 @@ impl LevelSetup {
                             ui.selectable_value(&mut self.draft.generator, generator, generator.label());
                         }
                     });
+                ui.horizontal(|ui| {
+                    egui::ComboBox::from_label("Starting wind")
+                        .selected_text(format!("{:?}", self.draft.wind.direction))
+                        .show_ui(ui, |ui| {
+                            for direction in [WindDirection::Calm, WindDirection::West, WindDirection::East] {
+                                ui.selectable_value(&mut self.draft.wind.direction, direction, format!("{direction:?}"));
+                            }
+                        });
+                    ui.add(egui::Slider::new(&mut self.draft.wind.strength, 0..=4).text("strength"));
+                });
                 ui.small("Amounts are density in each material's terrain region, not percent of the whole world. Empty canvas ignores amounts.");
                 egui::ScrollArea::vertical().id_salt("level_amounts").max_height(225.0).show(ui, |ui| {
                     for element in &rules.elements {

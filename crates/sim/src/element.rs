@@ -1,4 +1,5 @@
 //! Data shapes shared by the ruleset and simulation.
+use serde::{Deserialize, Serialize};
 
 /// Movement behavior attached to an element in the ruleset.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -10,7 +11,8 @@ pub enum Motion {
 }
 
 /// Horizontal direction used by global wind and local gusts.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum WindDirection {
     West,
     #[default]
@@ -28,7 +30,8 @@ impl WindDirection {
 }
 
 /// Global wind configuration. Strength is clamped to 0..=4 by `World`.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct Wind {
     pub direction: WindDirection,
     pub strength: u8,

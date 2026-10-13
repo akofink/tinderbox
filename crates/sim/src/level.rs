@@ -1,5 +1,5 @@
 //! Human-readable, seeded world recipes. No clocks, filesystem, or graphics.
-use crate::{Motion, Rules, World};
+use crate::{Motion, Rules, Wind, WindDirection, World};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fmt};
 
@@ -37,6 +37,8 @@ pub struct Level {
     #[serde(with = "seed_format")]
     pub seed: u64,
     pub generator: Generator,
+    #[serde(default)]
+    pub wind: Wind,
     /// Density (0..=100) within each material's terrain region, keyed by name.
     pub amounts: BTreeMap<String, u8>,
 }
@@ -60,7 +62,7 @@ impl Preset {
     pub const ALL: [Self; 3] = [Self::DryForest, Self::Island, Self::SandstormValley];
     pub fn label(self) -> &'static str {
         match self {
-            Self::DryForest => "Dry forest",
+            Self::DryForest => "Dry forest, east wind",
             Self::Island => "Island",
             Self::SandstormValley => "Sandstorm valley",
         }
@@ -102,6 +104,17 @@ impl Preset {
             height,
             seed,
             generator,
+            wind: match self {
+                Self::DryForest => Wind {
+                    direction: WindDirection::East,
+                    strength: 1,
+                },
+                Self::Island => Wind::default(),
+                Self::SandstormValley => Wind {
+                    direction: WindDirection::East,
+                    strength: 3,
+                },
+            },
             amounts: BTreeMap::new(),
         };
         level.add_missing_elements(rules);
@@ -153,6 +166,9 @@ impl Level {
                 "World must be 16..={MAX_LEVEL_DIMENSION} cells per side and at most {MAX_LEVEL_CELLS} cells total"
             )));
         }
+        if self.wind.strength > 4 {
+            return Err(LevelError("Wind strength must be 0..=4".into()));
+        }
         for (name, amount) in &self.amounts {
             if name.trim().is_empty() || name == "air" {
                 return Err(LevelError("Amounts must name non-air elements".into()));
@@ -174,6 +190,7 @@ impl Level {
         }
         let mut world = World::new(self.width, self.height, self.seed, rules)
             .map_err(|e| LevelError(e.to_string()))?;
+        world.set_wind(self.wind.direction, self.wind.strength);
         // Empty means a blank canvas regardless of amounts, not floating terrain.
         if self.generator == Generator::Empty {
             return Ok(world);
@@ -349,6 +366,8 @@ mod tests {
             assert_ne!(start.cells, played.cells);
             let reset = loaded.generate(played.rules).unwrap();
             assert_eq!(start.cells, reset.cells);
+            assert_eq!(start.wind(), reset.wind());
+            assert_eq!(start.wind(), level.wind);
         }
     }
     #[test]
@@ -407,6 +426,25 @@ mod tests {
             .unwrap()
             .replace("seed = \"29\"", "seed = 29");
         assert_eq!(Level::load(&numeric).unwrap(), level);
+    }
+    #[test]
+    fn older_recipes_default_to_calm_and_invalid_wind_fails() {
+        let old =
+            "version=1\nwidth=32\nheight=24\nseed=7\ngenerator='hills'\n[amounts]\nstone=100\n";
+        assert_eq!(Level::load(old).unwrap().wind, Wind::default());
+        let bad = format!("{old}\n[wind]\ndirection='east'\nstrength=5\n");
+        assert!(
+            Level::load(&bad)
+                .unwrap_err()
+                .to_string()
+                .contains("Wind strength")
+        );
+        assert!(
+            Level::load(&bad.replace("east", "north"))
+                .unwrap_err()
+                .to_string()
+                .contains("north")
+        );
     }
     #[test]
     fn invalid_files_and_unknown_elements_fail_clearly() {

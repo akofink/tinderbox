@@ -28,10 +28,12 @@ fn play_applies_size_and_reset_restores_cells_and_seeded_evolution() {
     let start = app.world.cells().to_vec();
     app.world.paint(5, 5, app.world.rules().id("fire").unwrap());
     app.world.step(1000);
+    app.world.set_wind(tinderbox_sim::WindDirection::West, 4);
     app.reset();
     assert_eq!(app.level, level);
     assert_eq!(app.world.cells(), start);
     assert_eq!(app.world.pending_work(), 0);
+    assert_eq!(app.world.wind(), level.wind);
     let mut reference = level.generate(app.world.rules().clone()).unwrap();
     for _ in 0..20 {
         app.world.step(512);
