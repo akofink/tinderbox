@@ -146,8 +146,31 @@ fn bundled_export_preserves_lifecycle_and_motion() {
     assert_eq!(rules.to_toml().unwrap(), loaded.to_toml().unwrap());
     for (a, b) in rules.elements.iter().zip(loaded.elements.iter()) {
         assert_eq!(a.motion, b.motion);
+        assert_eq!(a.wind_response, b.wind_response);
+        assert_eq!(a.density, b.density);
         assert_eq!(a.lifetime, b.lifetime);
         assert_eq!(a.decay_to, b.decay_to);
         assert_eq!(a.emission, b.emission);
     }
+    for (a, b) in rules.interactions.iter().zip(loaded.interactions.iter()) {
+        assert_eq!(a.downwind_bonus, b.downwind_bonus);
+    }
+}
+
+#[test]
+fn disabled_rule_never_fires_even_with_maximum_wind_bonus() {
+    use tinderbox_sim::WindDirection;
+    let text = PAIR.replace("chance = 1.0", "chance = 0.0\ndownwind_bonus = 1.0");
+    let mut world = World::new(2, 1, 42, Rules::load(&text).unwrap()).unwrap();
+    world.paint(0, 0, 1);
+    world.paint(1, 0, 2);
+    world.set_wind(WindDirection::East, 4);
+    world.set_interaction(0, false, 0.0).unwrap();
+    for _ in 0..100 {
+        world.step(2);
+    }
+    assert_eq!(world.cells()[1].element, 2);
+    world.set_interaction(0, true, 0.0).unwrap();
+    world.step(2);
+    assert_eq!(world.cells()[1].element, 1);
 }

@@ -65,7 +65,7 @@ impl RulesPanel {
             .default_height(480.0)
             .vscroll(true)
             .show(ctx, |ui| {
-                ui.label("Edits apply immediately. Chance is per neighboring-cell visit.");
+                ui.label("Edits apply immediately. Base chance is per neighbor visit; wind can boost it.");
                 if !self.message.is_empty() {
                     let color = match (self.error, ui.visuals().dark_mode) {
                         (true, true) => egui::Color32::LIGHT_RED,
@@ -83,37 +83,6 @@ impl RulesPanel {
                         world.reset_rules().map_err(|e| e.to_string()),
                         "Default rules restored.",
                     );
-                }
-                ui.separator();
-                for index in 0..world.rules().interactions.len() {
-                    let rule = &world.rules().interactions[index];
-                    let name = |id: usize| world.rules().elements[id].name.as_str();
-                    let label = format!(
-                        "{} + {} -> {} + {}",
-                        name(rule.when),
-                        name(rule.with),
-                        name(rule.self_result.unwrap_or(rule.when)),
-                        name(rule.result)
-                    );
-                    let mut enabled = rule.enabled;
-                    let mut chance = rule.chance;
-                    ui.push_id(index, |ui| {
-                        let toggle = ui.checkbox(&mut enabled, label).changed();
-                        let tune = ui
-                            .indent("chance", |ui| {
-                                ui.add(egui::Slider::new(&mut chance, 0.0..=1.0).text("chance"))
-                                    .changed()
-                            })
-                            .inner;
-                        if toggle || tune {
-                            self.report(
-                                world
-                                    .set_interaction(index, enabled, chance)
-                                    .map_err(|e| e.to_string()),
-                                "Interaction updated.",
-                            );
-                        }
-                    });
                 }
                 ui.separator();
                 #[cfg(not(target_arch = "wasm32"))]
@@ -150,6 +119,37 @@ impl RulesPanel {
                             .desired_rows(8)
                             .desired_width(f32::INFINITY),
                     );
+                });
+                ui.separator();
+                ui.label(format!("{} interactions", world.rules().interactions.len()));
+                // Keep persistence and validation feedback reachable as rulesets grow.
+                egui::ScrollArea::vertical().id_salt("interactions")
+                    .max_height(280.0).show(ui, |ui| {
+                    for index in 0..world.rules().interactions.len() {
+                        let rule = &world.rules().interactions[index];
+                        let name = |id: usize| world.rules().elements[id].name.as_str();
+                        let label = format!("{} + {} -> {} + {}",
+                            name(rule.when), name(rule.with),
+                            name(rule.self_result.unwrap_or(rule.when)), name(rule.result));
+                        let mut enabled = rule.enabled;
+                        let mut chance = rule.chance;
+                        let downwind_bonus = rule.downwind_bonus;
+                        ui.push_id(index, |ui| {
+                            let toggle = ui.checkbox(&mut enabled, label).changed();
+                            let tune = ui.indent("chance", |ui| {
+                                let changed = ui.add(egui::Slider::new(&mut chance, 0.0..=1.0)
+                                    .text("base chance")).changed();
+                                if downwind_bonus > 0.0 {
+                                    ui.small(format!("Downwind bonus: up to +{downwind_bonus:.2}"));
+                                }
+                                changed
+                            }).inner;
+                            if toggle || tune {
+                                self.report(world.set_interaction(index, enabled, chance)
+                                    .map_err(|e| e.to_string()), "Interaction updated.");
+                            }
+                        });
+                    }
                 });
             });
         self.open = open;
