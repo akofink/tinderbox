@@ -13,18 +13,47 @@ mod tests;
 use crate::rules_panel::RulesPanel;
 use eframe::egui;
 use level_setup::{LevelSetup, SetupAction};
+#[cfg(not(target_arch = "wasm32"))]
+use tinderbox_sim::level::{MAX_LEVEL_CELLS, MAX_LEVEL_DIMENSION};
 use tinderbox_sim::{
     DEFAULT_RULES, Rules, World,
     level::{Level, LevelError, Preset},
 };
 use web_time::Instant;
 
-const DEFAULT_WIDTH: usize = 192;
-const DEFAULT_HEIGHT: usize = 120;
+const DEFAULT_WIDTH: usize = 400;
+const DEFAULT_HEIGHT: usize = 250;
 const WORK_PER_FRAME: usize = 12_000;
+const WORK_UNITS_PER_SECOND: f64 = (WORK_PER_FRAME * 60) as f64;
+const MAX_WORK_PER_FRAME: usize = WORK_PER_FRAME * 4;
+const MAX_CARRY_FRAMES: usize = 8;
+pub(super) const MAX_TEXTURE_REGIONS_PER_FRAME: usize = 32;
+
+#[derive(Default)]
+struct WorkAccumulator {
+    pending: f64,
+}
+impl WorkAccumulator {
+    fn accrue(&mut self, dt: f32, speed: f32) {
+        let due = dt.max(0.0) as f64 * WORK_UNITS_PER_SECOND * speed.clamp(0.0, 4.0) as f64;
+        self.add(due);
+    }
+
+    fn add(&mut self, units: f64) {
+        let carry_cap = (MAX_WORK_PER_FRAME * MAX_CARRY_FRAMES) as f64;
+        self.pending = (self.pending + units).min(carry_cap);
+    }
+
+    fn take(&mut self) -> usize {
+        let budget = (self.pending.floor() as usize).min(MAX_WORK_PER_FRAME);
+        self.pending -= budget as f64;
+        budget
+    }
+}
 
 pub(super) struct Tinderbox {
     world: World,
+    world_texture: eframe::egui::TextureHandle,
     selected: usize,
     brush: usize,
     gust_mode: bool,
@@ -36,6 +65,9 @@ pub(super) struct Tinderbox {
     level_setup: LevelSetup,
     return_running: bool,
     sim_seconds: f64,
+    work: WorkAccumulator,
+    peak_carry_work: usize,
+    max_dirty_regions_uploaded: usize,
     last_frame: Instant,
     frame_ms: f32,
     stress_play: bool,
@@ -44,19 +76,47 @@ pub(super) struct Tinderbox {
     stress_max_ms: f32,
 }
 impl Tinderbox {
-    fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        Self::new_state(smooth_play_requested())
+    #[cfg(not(target_arch = "wasm32"))]
+    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let (width, height) = requested_world_size();
+        Self::new_with_context(cc.egui_ctx.clone(), width, height, smooth_play_requested())
     }
 
+    #[cfg(test)]
     fn new_state(stress_play: bool) -> Self {
+        Self::new_with_context(
+            egui::Context::default(),
+            DEFAULT_WIDTH,
+            DEFAULT_HEIGHT,
+            stress_play,
+        )
+    }
+
+    fn new_with_context(
+        ctx: egui::Context,
+        width: usize,
+        height: usize,
+        stress_play: bool,
+    ) -> Self {
         let rules = Rules::load(DEFAULT_RULES).expect("bundled rules are validated by tests");
         let selected = rules.id("sand").unwrap_or(0);
-        let level = Preset::DryForest.level(&rules, DEFAULT_WIDTH, DEFAULT_HEIGHT);
+        let level = Preset::DryForest.level(&rules, width, height);
         let world = level.generate(rules).expect("default level is valid");
+        let air = world.rules().id("air").unwrap_or(0);
+        let air_color = world.rules().elements[air].color;
+        let world_texture = ctx.load_texture(
+            "tinderbox-world",
+            egui::ColorImage::new(
+                [width, height],
+                egui::Color32::from_rgb(air_color[0], air_color[1], air_color[2]),
+            ),
+            egui::TextureOptions::NEAREST,
+        );
         let mut level_setup = LevelSetup::new(level.clone());
         level_setup.open = !stress_play;
         Self {
             world,
+            world_texture,
             selected,
             brush: 3,
             gust_mode: false,
@@ -68,6 +128,9 @@ impl Tinderbox {
             level_setup,
             return_running: false,
             sim_seconds: 0.0,
+            work: WorkAccumulator::default(),
+            peak_carry_work: 0,
+            max_dirty_regions_uploaded: 0,
             last_frame: Instant::now(),
             frame_ms: 0.0,
             stress_play,
@@ -79,10 +142,26 @@ impl Tinderbox {
 
     fn set_level(&mut self, level: Level) -> Result<(), LevelError> {
         let world = level.generate(self.world.rules().clone())?;
+        let air = world.rules().id("air").unwrap_or(0);
+        let air_color = world.rules().elements[air].color;
+        self.world_texture.set(
+            egui::ColorImage::new(
+                [world.width(), world.height()],
+                egui::Color32::from_rgb(air_color[0], air_color[1], air_color[2]),
+            ),
+            egui::TextureOptions::NEAREST,
+        );
         self.world = world;
         self.level = level;
         self.sim_seconds = 0.0;
+        self.work = WorkAccumulator::default();
+        self.peak_carry_work = 0;
+        self.max_dirty_regions_uploaded = 0;
         Ok(())
+    }
+
+    fn request_step(&mut self) {
+        self.work.add(WORK_PER_FRAME as f64);
     }
 
     fn reset(&mut self) {
@@ -139,8 +218,14 @@ impl Tinderbox {
             self.stress_max_ms = self.stress_max_ms.max(dt * 1000.0);
             if self.stress_frames == 900 {
                 println!(
-                    "NATIVE_SMOOTH_PLAY frames={} avg_frame_ms={:.2} worst_frame_ms={:.2}",
+                    "NATIVE_SMOOTH_PLAY world={}x{} frames={} max_work_per_frame={} peak_carry_work={} dirty_region_cap={} max_dirty_regions_uploaded={} avg_frame_ms={:.2} worst_frame_ms={:.2}",
+                    self.world.width(),
+                    self.world.height(),
                     self.stress_frames,
+                    MAX_WORK_PER_FRAME,
+                    self.peak_carry_work,
+                    MAX_TEXTURE_REGIONS_PER_FRAME,
+                    self.max_dirty_regions_uploaded,
                     self.stress_total_ms / self.stress_frames as f64,
                     self.stress_max_ms
                 );
@@ -148,9 +233,13 @@ impl Tinderbox {
             }
         }
         if self.running {
-            let units = (WORK_PER_FRAME as f32 * self.speed).round() as usize;
-            self.world.step(units);
-            self.sim_seconds += dt as f64 * self.speed as f64;
+            self.work.accrue(dt, self.speed);
+        }
+        self.peak_carry_work = self.peak_carry_work.max(self.work.pending.ceil() as usize);
+        let budget = self.work.take();
+        if budget > 0 {
+            let completed = self.world.step(budget);
+            self.sim_seconds += completed as f64 / WORK_UNITS_PER_SECOND;
         }
     }
 }
@@ -246,6 +335,7 @@ fn poll_browser_files(ctx: &egui::Context, frame: &mut eframe::Frame, app: &mut 
     web::publish_frame(app.frame_ms, frame);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn smooth_play_requested() -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -263,10 +353,43 @@ pub(super) fn start_web() {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn requested_world_size() -> (usize, usize) {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        let value = if arg == "--world-size" {
+            args.next()
+        } else {
+            arg.strip_prefix("--world-size=").map(str::to_owned)
+        };
+        let Some(value) = value else {
+            continue;
+        };
+        let parsed = value.split_once('x').and_then(|(width, height)| {
+            Some((width.parse::<usize>().ok()?, height.parse::<usize>().ok()?))
+        });
+        if let Some((width, height)) = parsed
+            && width >= 128
+            && height >= 96
+            && width <= MAX_LEVEL_DIMENSION
+            && height <= MAX_LEVEL_DIMENSION
+            && width
+                .checked_mul(height)
+                .is_some_and(|cells| cells <= MAX_LEVEL_CELLS)
+        {
+            return (width, height);
+        }
+        eprintln!(
+            "Ignoring invalid --world-size={value}; expected WIDTHxHEIGHT within 128..={MAX_LEVEL_DIMENSION} by 96..={MAX_LEVEL_DIMENSION} (max {MAX_LEVEL_CELLS} cells)"
+        );
+    }
+    (DEFAULT_WIDTH, DEFAULT_HEIGHT)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn run() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1120.0, 760.0])
+            .with_inner_size([1440.0, 960.0])
             .with_min_inner_size([720.0, 520.0]),
         ..Default::default()
     };

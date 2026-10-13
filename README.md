@@ -12,7 +12,7 @@ Install Rust with `rustup`, then start the native app:
 cargo run --release -p tinderbox-app
 ```
 
-The default world is 192 × 120 cells. The app starts in **Level setup**: choose a preset, size, terrain, seed, starting wind and element amounts, then press **Play level**. Open setup again from the toolbar at any time; **Wildfire** starts the dry-forest preset at the current size. See [Level recipes](docs/levels.md) for generators, human-readable save/load and sharing. Run `cargo run --release -p tinderbox-app -- --smooth-play` for a 900-frame native heavy-play check with continuous water/fire painting; it reports average and worst frame intervals.
+The default world is 400 × 250 cells and opens in a 1440 × 960 window. The app starts in **Level setup**: choose a preset, size, terrain, seed, starting wind and element amounts, then press **Play level**. Open setup again from the toolbar at any time; **Wildfire** starts the dry-forest preset at the current size. See [Level recipes](docs/levels.md) for generators, human-readable save/load and sharing. Native runs accept `--world-size=WIDTHxHEIGHT` to set the initial dimensions. Run `cargo run --release -p tinderbox-app -- --smooth-play` for a 900-frame native heavy-play check; use `--smooth-play --world-size=1024x640` to check the larger grid. Both runs report simulation and texture-upload caps, average frame interval, and worst frame interval.
 
 ## Play in the browser
 
@@ -48,7 +48,7 @@ cargo test --workspace
 
 ## Lineage
 
-Tinderbox reuses and adapts ideas from [Cascade](https://github.com/akofink/cascade-game-demo), including bounded per-update simulation work, a headless core, and the winit/wgpu/egui native stack. The project is independently licensed under MIT and has no dependency on Cascade crates.
+Tinderbox reuses and adapts ideas from [Cascade](https://github.com/akofink/cascade-game-demo), including bounded simulation work with carry-over, preallocated scheduler storage, dirty-region texture uploads under a per-frame cap, a headless core, and the winit/wgpu/egui native stack. The project is independently licensed under MIT and has no dependency on Cascade crates.
 
 ## License
 

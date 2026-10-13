@@ -11,6 +11,7 @@ impl World {
         });
         self.scheduler.reset();
         self.gusts.fill(Default::default());
+        self.dirty_regions.mark_all();
         self.rng = seed.max(1);
     }
 
@@ -27,6 +28,9 @@ impl World {
         else {
             return;
         };
+        if self.cells[index].element != element {
+            self.dirty_regions.mark_cell(x, y);
+        }
         self.cells[index] = Cell { element, age: 0 };
         self.scheduler.enqueue_focus(index);
         let x = index % self.width;

@@ -105,6 +105,29 @@ fn default_world_heavy_play_smoke_keeps_work_bounded() {
 }
 
 #[test]
+fn dirty_texture_regions_coalesce_changes_and_reset_marks_the_world() {
+    let mut world = world(5);
+    let sand = world.rules().id("sand").unwrap();
+    assert_eq!(world.pending_dirty_regions(), 0);
+    world.paint(1, 1, sand);
+    world.paint(2, 2, sand);
+    assert_eq!(world.pending_dirty_regions(), 1);
+    assert_eq!(
+        world.pop_dirty_region(),
+        Some(crate::DirtyRegion {
+            x: 0,
+            y: 0,
+            width: 16,
+            height: 16,
+        })
+    );
+    let air = world.rules().id("air").unwrap();
+    world.paint(1, 1, air);
+    world.reset(6);
+    assert_eq!(world.pending_dirty_regions(), 4);
+}
+
+#[test]
 fn each_update_obeys_work_budget_and_paint_is_bounded() {
     let mut world = world(1);
     assert_eq!(world.step(7), 7);

@@ -43,6 +43,7 @@ impl World {
                 cell.element = air;
             }
         }
+        self.dirty_regions.mark_all();
         self.rules = rules;
         Ok(())
     }

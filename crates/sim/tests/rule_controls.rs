@@ -130,7 +130,10 @@ fn loads_remap_reordered_and_removed_elements_by_name() {
         "name = \"fuel\"\ncolor = [0",
         "name = \"spark\"\ncolor = [0",
     );
+    assert!(world.pop_dirty_region().is_some());
+    assert_eq!(world.pending_dirty_regions(), 0);
     world.load_rules(&reordered).unwrap();
+    assert_eq!(world.pending_dirty_regions(), 1);
     assert_eq!(world.cells()[0].element, world.rules().id("spark").unwrap());
     assert_eq!(world.cells()[1].element, world.rules().id("fuel").unwrap());
     assert_eq!(world.pending_work(), pending);
