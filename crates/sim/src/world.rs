@@ -152,13 +152,11 @@ impl World {
     pub fn set_ambient(&mut self, temperature: i16, humidity: u8) {
         self.ambient_temperature = f32::from(temperature.clamp(-40, 60));
         self.ambient_humidity = f32::from(humidity.min(100));
-        for field in &mut self.atmosphere {
-            *field = AtmosphereCell {
-                temperature: self.ambient_temperature,
-                humidity: self.ambient_humidity,
-                pressure: 0.0,
-            };
-        }
+        self.atmosphere.fill(AtmosphereCell {
+            temperature: self.ambient_temperature,
+            humidity: self.ambient_humidity,
+            pressure: 0.0,
+        });
     }
 
     /// Atmospheric conditions at a cell coordinate, sampled from the fixed coarse grid.
