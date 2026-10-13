@@ -25,6 +25,35 @@ pub struct Interaction {
 pub struct Rules {
     pub elements: Vec<Element>,
     pub interactions: Vec<Interaction>,
+    pub atmosphere: AtmosphereRules,
+}
+
+/// Tunable atmospheric physics. Temperatures are in Celsius; rates are per atmosphere update.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AtmosphereRules {
+    pub freezing_point: f32,
+    pub melting_point: f32,
+    pub boiling_point: f32,
+    pub ignition_point: f32,
+    pub heat_transfer: f32,
+    pub evaporation_rate: f32,
+    pub condensation_humidity: f32,
+    pub pressure_wind: f32,
+}
+impl Default for AtmosphereRules {
+    fn default() -> Self {
+        Self {
+            freezing_point: 0.0,
+            melting_point: 2.0,
+            boiling_point: 100.0,
+            ignition_point: 180.0,
+            heat_transfer: 0.08,
+            evaporation_rate: 0.08,
+            condensation_humidity: 78.0,
+            pressure_wind: 0.15,
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -33,6 +62,8 @@ struct RawRules {
     elements: Vec<RawElement>,
     #[serde(default)]
     interactions: Vec<RawInteraction>,
+    #[serde(default)]
+    atmosphere: AtmosphereRules,
 }
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -65,6 +96,31 @@ struct RawInteraction {
 
 fn default_enabled() -> bool {
     true
+}
+
+pub(crate) fn validate_atmosphere(settings: &AtmosphereRules) -> Result<(), RulesError> {
+    let ordered = settings.freezing_point.is_finite()
+        && settings.melting_point.is_finite()
+        && settings.boiling_point.is_finite()
+        && settings.ignition_point.is_finite()
+        && settings.freezing_point < settings.melting_point
+        && settings.melting_point < settings.boiling_point
+        && settings.boiling_point < settings.ignition_point;
+    let rates_valid = settings.heat_transfer.is_finite()
+        && (0.0..=1.0).contains(&settings.heat_transfer)
+        && settings.evaporation_rate.is_finite()
+        && (0.0..=1.0).contains(&settings.evaporation_rate)
+        && settings.condensation_humidity.is_finite()
+        && (0.0..=100.0).contains(&settings.condensation_humidity)
+        && settings.pressure_wind.is_finite()
+        && (0.0..=1.0).contains(&settings.pressure_wind);
+    if !ordered || !rates_valid {
+        return Err(RulesError(
+            "atmosphere thresholds must be ordered and rates must be within their valid ranges"
+                .into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Validation or parse failure with a human-readable explanation.
@@ -166,9 +222,11 @@ impl Rules {
                 enabled: r.enabled,
             });
         }
+        validate_atmosphere(&raw.atmosphere)?;
         Ok(Self {
             elements,
             interactions,
+            atmosphere: raw.atmosphere,
         })
     }
 
@@ -226,6 +284,7 @@ impl Rules {
         let text = toml::to_string_pretty(&RawRules {
             elements,
             interactions,
+            atmosphere: self.atmosphere.clone(),
         })
         .map_err(|e| RulesError(format!("cannot serialize rules: {e}")))?;
         // Public Rules values may have been manually constructed or modified.

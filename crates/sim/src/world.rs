@@ -19,6 +19,25 @@ impl From<RulesError> for WorldError {
     }
 }
 
+pub(super) const ATMOSPHERE_CELL_SIZE: usize = 8;
+pub(super) const ATMOSPHERE_INTERVAL: usize = 16;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AtmosphereCell {
+    pub temperature: f32,
+    pub humidity: f32,
+    pub pressure: f32,
+}
+impl Default for AtmosphereCell {
+    fn default() -> Self {
+        Self {
+            temperature: 20.0,
+            humidity: 45.0,
+            pressure: 0.0,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct GustCell {
     pub(super) direction: WindDirection,
@@ -37,6 +56,13 @@ pub struct World {
     pub(super) rng: u64,
     pub(super) wind: Wind,
     pub(super) gusts: Vec<GustCell>,
+    pub(super) atmosphere: Vec<AtmosphereCell>,
+    pub(super) atmosphere_width: usize,
+    pub(super) atmosphere_height: usize,
+    pub(super) atmosphere_cursor: usize,
+    pub(super) atmosphere_credit: usize,
+    pub(super) ambient_temperature: f32,
+    pub(super) ambient_humidity: f32,
 }
 impl World {
     /// Creates a world with preallocated cells and focus-queue storage.
@@ -50,6 +76,8 @@ impl World {
         let air = rules
             .id("air")
             .ok_or_else(|| WorldError("ruleset must define 'air'".into()))?;
+        let atmosphere_width = width.div_ceil(ATMOSPHERE_CELL_SIZE);
+        let atmosphere_height = height.div_ceil(ATMOSPHERE_CELL_SIZE);
         Ok(Self {
             width,
             height,
@@ -66,6 +94,13 @@ impl World {
             rng: seed.max(1),
             wind: Wind::default(),
             gusts: vec![GustCell::default(); count],
+            atmosphere: vec![AtmosphereCell::default(); atmosphere_width * atmosphere_height],
+            atmosphere_width,
+            atmosphere_height,
+            atmosphere_cursor: 0,
+            atmosphere_credit: 0,
+            ambient_temperature: 20.0,
+            ambient_humidity: 45.0,
         })
     }
 
@@ -111,6 +146,26 @@ impl World {
     /// popped; changes made after a pop enqueue the region again.
     pub fn pop_dirty_region(&mut self) -> Option<DirtyRegion> {
         self.dirty_regions.pop()
+    }
+
+    /// Set level-wide ambient air conditions, clamped to the supported ranges.
+    pub fn set_ambient(&mut self, temperature: i16, humidity: u8) {
+        self.ambient_temperature = f32::from(temperature.clamp(-40, 60));
+        self.ambient_humidity = f32::from(humidity.min(100));
+        self.atmosphere.fill(AtmosphereCell {
+            temperature: self.ambient_temperature,
+            humidity: self.ambient_humidity,
+            pressure: 0.0,
+        });
+    }
+
+    /// Atmospheric conditions at a cell coordinate, sampled from the fixed coarse grid.
+    pub fn atmosphere_at(&self, x: usize, y: usize) -> Option<AtmosphereCell> {
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        let index = (y / ATMOSPHERE_CELL_SIZE) * self.atmosphere_width + x / ATMOSPHERE_CELL_SIZE;
+        self.atmosphere.get(index).copied()
     }
 
     /// Current global horizontal wind.
@@ -164,12 +219,46 @@ impl World {
     pub(super) fn wind_at(&self, index: usize) -> Wind {
         let gust = self.gusts[index];
         if gust.remaining > 0 {
-            Wind {
+            return Wind {
                 direction: gust.direction,
                 strength: gust.strength,
-            }
+            };
+        }
+        let x = index % self.width;
+        let y = index / self.width;
+        let ax = x / ATMOSPHERE_CELL_SIZE;
+        let ay = y / ATMOSPHERE_CELL_SIZE;
+        let here = self.atmosphere[ay * self.atmosphere_width + ax].pressure;
+        let west = if ax > 0 {
+            self.atmosphere[ay * self.atmosphere_width + ax - 1].pressure
         } else {
-            self.wind
+            here
+        };
+        let east = if ax + 1 < self.atmosphere_width {
+            self.atmosphere[ay * self.atmosphere_width + ax + 1].pressure
+        } else {
+            here
+        };
+        let local = east - west;
+        let threshold = self.rules.atmosphere.pressure_wind;
+        let local_component = if local.abs() > threshold {
+            let strength = ((local.abs() / (threshold.max(0.01) * 4.0)).ceil() as i8).clamp(1, 4);
+            if local < 0.0 { strength } else { -strength }
+        } else {
+            0
+        };
+        let combined =
+            self.wind.direction.horizontal() * self.wind.strength as i8 + local_component;
+        match combined.cmp(&0) {
+            std::cmp::Ordering::Greater => Wind {
+                direction: WindDirection::East,
+                strength: combined.min(4) as u8,
+            },
+            std::cmp::Ordering::Less => Wind {
+                direction: WindDirection::West,
+                strength: (-combined).min(4) as u8,
+            },
+            std::cmp::Ordering::Equal => Wind::default(),
         }
     }
 }

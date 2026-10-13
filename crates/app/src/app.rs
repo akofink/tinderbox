@@ -29,6 +29,15 @@ const MAX_WORK_PER_FRAME: usize = WORK_PER_FRAME * 4;
 const MAX_CARRY_FRAMES: usize = 8;
 pub(super) const MAX_TEXTURE_REGIONS_PER_FRAME: usize = 32;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Overlay {
+    #[default]
+    None,
+    Temperature,
+    Humidity,
+    Pressure,
+}
+
 #[derive(Default)]
 struct WorkAccumulator {
     pending: f64,
@@ -57,6 +66,7 @@ pub(super) struct Tinderbox {
     selected: usize,
     brush: usize,
     gust_mode: bool,
+    overlay: Overlay,
     running: bool,
     speed: f32,
     show_hud: bool,
@@ -120,6 +130,7 @@ impl Tinderbox {
             selected,
             brush: 3,
             gust_mode: false,
+            overlay: Overlay::None,
             running: stress_play,
             speed: 1.0,
             show_hud: true,
@@ -152,6 +163,7 @@ impl Tinderbox {
             egui::TextureOptions::NEAREST,
         );
         self.world = world;
+        self.world.mark_all_dirty();
         self.level = level;
         self.sim_seconds = 0.0;
         self.work = WorkAccumulator::default();

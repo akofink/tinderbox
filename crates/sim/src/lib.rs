@@ -21,5 +21,5 @@ mod tests;
 
 pub use dirty::DirtyRegion;
 pub use element::{Cell, Element, Motion, Wind, WindDirection};
-pub use rules::{DEFAULT_RULES, Interaction, Rules, RulesError};
-pub use world::{World, WorldError};
+pub use rules::{AtmosphereRules, DEFAULT_RULES, Interaction, Rules, RulesError};
+pub use world::{AtmosphereCell, World, WorldError};

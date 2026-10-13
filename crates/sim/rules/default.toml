@@ -153,6 +153,24 @@ wind_response = 0.7
 lifetime = 120
 decay_to = "water"
 
+[[elements]]
+name = "cloud"
+color = [190, 204, 220]
+motion = "gas"
+wind_response = 0.25
+lifetime = 90
+decay_to = "water"
+
+[atmosphere]
+freezing_point = 0.0
+melting_point = 2.0
+boiling_point = 100.0
+ignition_point = 180.0
+heat_transfer = 0.08
+evaporation_rate = 0.08
+condensation_humidity = 78.0
+pressure_wind = 0.15
+
 # Wind strengthens fire spread only when the target is directly downwind.
 [[interactions]]
 when = "fire"

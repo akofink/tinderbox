@@ -27,6 +27,13 @@ impl Generator {
     }
 }
 
+fn default_ambient_temperature() -> i16 {
+    20
+}
+fn default_ambient_humidity() -> u8 {
+    45
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Level {
@@ -39,6 +46,10 @@ pub struct Level {
     pub generator: Generator,
     #[serde(default)]
     pub wind: Wind,
+    #[serde(default = "default_ambient_temperature")]
+    pub ambient_temperature: i16,
+    #[serde(default = "default_ambient_humidity")]
+    pub ambient_humidity: u8,
     /// Density (0..=100) within each material's terrain region, keyed by name.
     pub amounts: BTreeMap<String, u8>,
     /// A small upwind fire, instead of scattering fire through the whole canopy.
@@ -107,6 +118,8 @@ impl Preset {
             height,
             seed,
             generator,
+            ambient_temperature: 20,
+            ambient_humidity: 45,
             wind: match self {
                 Self::DryForest => Wind {
                     direction: WindDirection::East,
@@ -173,6 +186,11 @@ impl Level {
         if self.wind.strength > 4 {
             return Err(LevelError("Wind strength must be 0..=4".into()));
         }
+        if !(-40..=60).contains(&self.ambient_temperature) || self.ambient_humidity > 100 {
+            return Err(LevelError(
+                "Ambient temperature must be -40..=60 C and humidity 0..=100%".into(),
+            ));
+        }
         for (name, amount) in &self.amounts {
             if name.trim().is_empty() || name == "air" {
                 return Err(LevelError("Amounts must name non-air elements".into()));
@@ -195,6 +213,7 @@ impl Level {
         let mut world = World::new(self.width, self.height, self.seed, rules)
             .map_err(|e| LevelError(e.to_string()))?;
         world.set_wind(self.wind.direction, self.wind.strength);
+        world.set_ambient(self.ambient_temperature, self.ambient_humidity);
         // Empty means a blank canvas regardless of amounts, not floating terrain.
         if self.generator == Generator::Empty {
             return Ok(world);
@@ -489,7 +508,12 @@ mod tests {
     fn older_recipes_default_to_calm_and_invalid_wind_fails() {
         let old =
             "version=1\nwidth=32\nheight=24\nseed=7\ngenerator='hills'\n[amounts]\nstone=100\n";
-        assert_eq!(Level::load(old).unwrap().wind, Wind::default());
+        let legacy = Level::load(old).unwrap();
+        assert_eq!(legacy.wind, Wind::default());
+        assert_eq!(
+            (legacy.ambient_temperature, legacy.ambient_humidity),
+            (20, 45)
+        );
         let bad = format!("{old}\n[wind]\ndirection='east'\nstrength=5\n");
         assert!(
             Level::load(&bad)

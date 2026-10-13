@@ -1,5 +1,5 @@
 //! Play controls, brush controls, speed, reset, and scene setup.
-use crate::app::Tinderbox;
+use crate::app::{Overlay, Tinderbox};
 use eframe::egui;
 
 pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
@@ -28,6 +28,23 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
         ui.label("Speed");
         ui.add(egui::Slider::new(&mut app.speed, 0.25..=4.0).suffix("×"));
         ui.checkbox(&mut app.show_hud, "HUD");
+        let previous_overlay = app.overlay;
+        egui::ComboBox::from_label("Overlay")
+            .selected_text(match app.overlay {
+                Overlay::None => "Off",
+                Overlay::Temperature => "Temperature",
+                Overlay::Humidity => "Humidity",
+                Overlay::Pressure => "Pressure",
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut app.overlay, Overlay::None, "Off");
+                ui.selectable_value(&mut app.overlay, Overlay::Temperature, "Temperature");
+                ui.selectable_value(&mut app.overlay, Overlay::Humidity, "Humidity");
+                ui.selectable_value(&mut app.overlay, Overlay::Pressure, "Pressure");
+            });
+        if app.overlay != previous_overlay {
+            app.world.mark_all_dirty();
+        }
         ui.toggle_value(&mut app.rules_panel.open, "Rules");
     });
     ui.horizontal_wrapped(|ui| {

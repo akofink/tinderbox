@@ -43,6 +43,28 @@ fn rules_load_and_missing_reference_has_clear_error() {
 }
 
 #[test]
+fn atmosphere_rules_validate_and_round_trip_with_legacy_defaults() {
+    let rules = Rules::load(DEFAULT_RULES).unwrap();
+    let text = rules.to_toml().unwrap();
+    let loaded = Rules::load(&text).unwrap();
+    assert_eq!(
+        loaded.atmosphere.freezing_point,
+        rules.atmosphere.freezing_point
+    );
+    assert_eq!(
+        loaded.atmosphere.condensation_humidity,
+        rules.atmosphere.condensation_humidity
+    );
+    let broken = text.replace("melting_point = 2.0", "melting_point = -1.0");
+    assert!(
+        Rules::load(&broken)
+            .unwrap_err()
+            .to_string()
+            .contains("thresholds must be ordered")
+    );
+}
+
+#[test]
 fn seeded_fire_tree_ash_smoke_water_steam_sand_stone_chain() {
     let mut a = world(77);
     let mut b = world(77);
@@ -403,6 +425,114 @@ fn seeded_burned_bed_recovers_through_water_and_fertile_soil() {
     assert!(has(&world, 0, 0, "fertile_soil"));
     assert!(has(&world, 1, 0, "soil"));
     assert!(has(&world, 2, 0, "plant"));
+}
+
+#[test]
+fn atmosphere_transfers_heat_and_phase_thresholds_are_data_driven() {
+    let mut a = world(61);
+    let mut b = world(61);
+    put(&mut a, 4, 4, "lava");
+    put(&mut b, 4, 4, "lava");
+    a.step(32);
+    b.step(32);
+    assert_eq!(a.atmosphere_at(4, 4), b.atmosphere_at(4, 4));
+    assert!(a.atmosphere_at(4, 4).unwrap().temperature > 20.0);
+    assert!(a.atmosphere_at(12, 4).unwrap().temperature > 20.0);
+
+    let mut phases = world(62);
+    phases.atmosphere[0].temperature = -5.0;
+    put(&mut phases, 0, 0, "water");
+    phases.step(1);
+    assert!(has(&phases, 0, 0, "ice"));
+    phases.atmosphere[0].temperature = 10.0;
+    put(&mut phases, 0, 0, "ice");
+    phases.scheduler.enqueue_focus(0);
+    phases.step(1);
+    assert!(
+        phases
+            .cells()
+            .iter()
+            .any(|cell| cell.element == phases.rules().id("water").unwrap())
+    );
+
+    phases.rules.atmosphere.boiling_point = 30.0;
+    phases.atmosphere[0].temperature = 40.0;
+    put(&mut phases, 0, 0, "water");
+    phases.scheduler.enqueue_focus(0);
+    phases.step(1);
+    assert!(has(&phases, 0, 0, "steam"));
+
+    let mut ignited = world(65);
+    ignited.atmosphere[0].temperature = 250.0;
+    put(&mut ignited, 0, 0, "tree");
+    ignited.step(1);
+    assert!(has(&ignited, 0, 0, "fire"));
+}
+
+#[test]
+fn humid_cool_air_condenses_cloud_and_dew_and_pressure_drives_wind() {
+    let mut wet_air = world(63);
+    wet_air.atmosphere[0].temperature = 0.0;
+    wet_air.atmosphere[0].humidity = 100.0;
+    put(&mut wet_air, 4, 8, "soil");
+    wet_air.step(16);
+    assert!(has(&wet_air, 4, 4, "cloud"));
+    assert!(has(&wet_air, 4, 7, "water"));
+
+    let mut pressure = world(64);
+    pressure.atmosphere[0].pressure = 0.0;
+    pressure.atmosphere[2].pressure = 10.0;
+    put(&mut pressure, 8, 1, "smoke");
+    pressure.scheduler.enqueue_focus(8 + pressure.width);
+    pressure.step(1);
+    assert!(has(&pressure, 7, 1, "smoke"));
+}
+
+#[test]
+fn lava_heats_a_lake_and_cloud_rain_wets_soil_for_regrowth() {
+    let mut lake = world(66);
+    put(&mut lake, 4, 4, "lava");
+    put(&mut lake, 7, 7, "water");
+    for (x, y) in [(4, 5), (3, 4), (5, 4), (7, 8), (6, 7), (8, 7)] {
+        put(&mut lake, x, y, "stone");
+    }
+    for _ in 0..16 {
+        lake.step(768);
+    }
+    assert!(lake.atmosphere_at(4, 4).unwrap().temperature > 100.0);
+    assert!(
+        lake.cells()
+            .iter()
+            .any(|cell| cell.element == lake.rules().id("steam").unwrap())
+    );
+
+    let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+    let cloud = rules.id("cloud").unwrap();
+    rules.elements[cloud].lifetime = 1;
+    for rule in &mut rules.interactions {
+        let when = &rules.elements[rule.when].name;
+        let with = &rules.elements[rule.with].name;
+        if matches!(
+            (when.as_str(), with.as_str()),
+            ("water", "soil") | ("soil", "water") | ("seed", "wet_soil") | ("wet_soil", "seed")
+        ) {
+            rule.chance = 1.0;
+        }
+    }
+    let mut rain = World::new(32, 24, 67, rules).unwrap();
+    put(&mut rain, 4, 0, "cloud");
+    put(&mut rain, 4, 9, "soil");
+    put(&mut rain, 3, 9, "seed");
+    put(&mut rain, 3, 10, "stone");
+    put(&mut rain, 4, 10, "stone");
+    for _ in 0..32 {
+        rain.step(768);
+    }
+    assert!(
+        rain.cells()
+            .iter()
+            .any(|cell| cell.element == rain.rules().id("plant").unwrap())
+    );
 }
 
 #[test]
