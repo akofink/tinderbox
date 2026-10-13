@@ -22,7 +22,6 @@ motion = "liquid"
 name = "tree"
 color = [55, 156, 78]
 motion = "static"
-flammable = true
 
 [[elements]]
 name = "fire"

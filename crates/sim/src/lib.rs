@@ -21,7 +21,6 @@ pub struct Element {
     pub lifetime: u16,
     pub decay_to: Option<usize>,
     pub emission: Option<usize>,
-    pub flammable: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -54,8 +53,6 @@ struct RawElement {
     lifetime: u16,
     decay_to: Option<String>,
     emission: Option<String>,
-    #[serde(default)]
-    flammable: bool,
 }
 #[derive(Deserialize)]
 struct RawInteraction {
@@ -127,7 +124,6 @@ impl Rules {
                     .as_deref()
                     .map(|v| id(v, "emission"))
                     .transpose()?,
-                flammable: e.flammable,
             });
         }
         let mut interactions = Vec::with_capacity(raw.interactions.len());
@@ -259,7 +255,6 @@ impl World {
         let lifetime = element.lifetime;
         let decay_to = element.decay_to;
         let emission = element.emission;
-        let flammable = element.flammable;
         let motion = element.motion;
         if lifetime > 0 {
             self.cells[i].age = self.cells[i].age.saturating_add(1);
@@ -286,15 +281,6 @@ impl World {
         }
         let x = i % self.width;
         let y = i / self.width;
-        if flammable && self.neighbor_has(i, self.rules.id("fire").unwrap_or(usize::MAX)) {
-            if let Some(fire) = self.rules.id("fire") {
-                self.cells[i] = Cell {
-                    element: fire,
-                    age: 0,
-                };
-            }
-            return;
-        }
         for (dx, dy) in [(0isize, -1isize), (1, 0), (0, 1), (-1, 0)] {
             let Some(nx) = x.checked_add_signed(dx).filter(|v| *v < self.width) else {
                 continue;
@@ -353,18 +339,6 @@ impl World {
         if self.priority.len() < self.priority.capacity() {
             self.priority.push(index);
         }
-    }
-    fn neighbor_has(&self, i: usize, element: usize) -> bool {
-        let x = i % self.width;
-        let y = i / self.width;
-        [(0isize, -1isize), (1, 0), (0, 1), (-1, 0)]
-            .into_iter()
-            .any(|(dx, dy)| {
-                x.checked_add_signed(dx)
-                    .filter(|v| *v < self.width)
-                    .zip(y.checked_add_signed(dy).filter(|v| *v < self.height))
-                    .is_some_and(|(nx, ny)| self.cells[ny * self.width + nx].element == element)
-            })
     }
     fn swap_if_empty(&mut self, a: usize, b: usize) {
         if self
