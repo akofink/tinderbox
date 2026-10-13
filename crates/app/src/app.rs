@@ -11,8 +11,8 @@ mod web;
 mod tests;
 
 use crate::rules_panel::RulesPanel;
-use level_setup::{LevelSetup, SetupAction};
 use eframe::egui;
+use level_setup::{LevelSetup, SetupAction};
 use tinderbox_sim::{
     DEFAULT_RULES, Rules, World,
     level::{Level, LevelError, Preset},
@@ -210,22 +210,33 @@ fn poll_browser_files(ctx: &egui::Context, frame: &mut eframe::Frame, app: &mut 
             app.level_setup.import_text(text.clone(), app.world.rules());
             if app.level_setup.error.is_none() {
                 match files::remember("level", &text) {
-                    Ok(()) => files::set_notice("Loaded level settings. Press Play level to start."),
+                    Ok(()) => {
+                        files::set_notice("Loaded level settings. Press Play level to start.")
+                    }
                     Err(err) => files::set_notice(err),
                 }
             }
         } else {
-            let selected_name = app.world.rules().elements.get(app.selected).map(|e| e.name.clone());
+            let selected_name = app
+                .world
+                .rules()
+                .elements
+                .get(app.selected)
+                .map(|e| e.name.clone());
             match app.world.load_rules(&text) {
                 Ok(()) => {
-                    app.selected = selected_name.as_deref()
+                    app.selected = selected_name
+                        .as_deref()
                         .and_then(|name| app.world.rules().id(name))
                         .unwrap_or_else(|| app.world.rules().id("air").unwrap_or(0));
                     match files::remember(&key, &text) {
                         Ok(()) => files::set_notice(format!(
-                            "Applied and stored {key} ({} bytes). The world keeps running.", text.len()
+                            "Applied and stored {key} ({} bytes). The world keeps running.",
+                            text.len()
                         )),
-                        Err(err) => files::set_notice(format!("Rules applied, but not stored: {err}")),
+                        Err(err) => {
+                            files::set_notice(format!("Rules applied, but not stored: {err}"))
+                        }
                     }
                 }
                 Err(err) => files::set_notice(format!("{err}. Current rules are unchanged.")),

@@ -43,6 +43,15 @@ fn play_applies_size_and_reset_restores_cells_and_seeded_evolution() {
 }
 
 #[test]
+fn level_reset_preserves_live_rule_tuning() {
+    let mut app = Tinderbox::new_state(false);
+    app.world.set_interaction(0, false, 0.25).unwrap();
+    let tuned = app.world.rules().to_toml().unwrap();
+    app.reset();
+    assert_eq!(app.world.rules().to_toml().unwrap(), tuned);
+}
+
+#[test]
 fn large_levels_fit_the_canvas_instead_of_being_cropped() {
     let app = Tinderbox::new_state(false);
     let world = Preset::Island
