@@ -832,31 +832,53 @@ fn atmosphere_transfers_heat_and_phase_thresholds_are_data_driven() {
 }
 
 #[test]
-fn humid_air_water_production_is_bounded_and_does_not_freeze_above_threshold() {
-    let mut world = World::new(64, 48, 630, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
-    world.set_ambient(20, 100, 21);
-    let ice = world.rules().id("ice").unwrap();
-    let water_materials =
-        ["water", "ice", "steam", "cloud"].map(|name| world.rules().id(name).unwrap());
-    for _ in 0..300 {
-        world.step(usize::MAX);
+fn humid_air_produces_cloud_and_rain_but_dry_air_stays_clear_and_water_is_bounded() {
+    let mut humid = World::new(64, 48, 630, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    humid.set_ambient(20, 100, 21);
+    let ids = ["ice", "cloud", "water", "steam"].map(|name| humid.rules().id(name).unwrap());
+    let count = |world: &World, id| {
+        world
+            .cells()
+            .iter()
+            .filter(|cell| cell.element == id)
+            .count()
+    };
+    let mut saw_cloud = false;
+    let mut saw_rain = false;
+    let mut weather_at_30_seconds = false;
+    for sweep in 1..=1800 {
+        humid.step(usize::MAX);
+        let clouds = count(&humid, ids[1]);
+        let rain = count(&humid, ids[2]);
+        saw_cloud |= clouds > 0;
+        saw_rain |= rain > 0;
+        if sweep == 1800 {
+            weather_at_30_seconds = clouds > 0 || rain > 0;
+        }
+        assert!(
+            ids.iter().map(|id| count(&humid, *id)).sum::<usize>() <= humid.atmosphere.len() * 3,
+            "water-bearing cells should stay bounded by the initial vapor reservoir"
+        );
     }
-    let ice_cells = world
-        .cells()
-        .iter()
-        .filter(|cell| cell.element == ice)
-        .count();
-    let water_mass_cells = world
-        .cells()
-        .iter()
-        .filter(|cell| water_materials.contains(&cell.element))
-        .count();
-    assert_eq!(ice_cells, 0, "20 C humid air must not create ice");
-    assert!(
-        water_mass_cells <= world.atmosphere.len() * 3,
-        "condensed water should be bounded by the initial vapor reservoir: {water_mass_cells} water-bearing cells across {} atmosphere cells",
-        world.atmosphere.len()
+    assert_eq!(
+        count(&humid, ids[0]),
+        0,
+        "20 C humid air must not create ice"
     );
+    assert!(saw_cloud, "humid air should form visible clouds");
+    assert!(saw_rain, "cloud droplets should become rain");
+    assert!(
+        weather_at_30_seconds,
+        "humid air should still show clouds or rain at 30 simulated seconds"
+    );
+
+    let mut dry = World::new(64, 48, 630, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    dry.set_ambient(20, 0, 21);
+    for _ in 0..180 {
+        dry.step(usize::MAX);
+    }
+    assert_eq!(count(&dry, ids[1]), 0, "dry air should stay cloud-free");
+    assert_eq!(count(&dry, ids[2]), 0, "dry air should not produce rain");
 }
 
 #[test]

@@ -78,6 +78,21 @@ impl World {
             *oxygen = (*oxygen - self.rules.atmosphere.oxygen_consumption).max(0.0);
         }
         self.apply_temperature_phase(i, e);
+        let water = self.rules.id("water");
+        let steam = self.rules.id("steam");
+        if Some(self.cells[i].element) == water
+            && let (Some(steam), Some(air)) =
+                (steam, self.atmosphere_at(i % self.width, i / self.width))
+            && air.temperature > self.rules.atmosphere.freezing_point
+            && self.ambient_humidity >= self.rules.atmosphere.condensation_humidity
+            && self.random_f32() < self.rules.atmosphere.evaporation_rate * 0.015
+        {
+            let ax = (i % self.width) / ATMOSPHERE_CELL_SIZE;
+            let ay = (i / self.width) / ATMOSPHERE_CELL_SIZE;
+            self.set_element(i, steam);
+            let humidity = &mut self.atmosphere[ay * self.atmosphere_width + ax].humidity;
+            *humidity = (*humidity + 8.0).min(100.0);
+        }
         let e = self.cells[i].element;
         let Some(element) = self.rules.elements.get(e) else {
             return;
@@ -334,11 +349,18 @@ impl World {
         ];
         let mut heat = 0.0;
         let mut moisture = 0.0;
+        let mut plume_seed = false;
         for (x, y) in sample_points {
             let name = &self.rules.elements[self.cells[y * self.width + x].element].name;
             match name.as_str() {
-                "fire" | "oil_fire" => heat += 2_000.0,
-                "lava" => heat += 2_600.0,
+                "fire" | "oil_fire" => {
+                    heat += 2_000.0;
+                    plume_seed = true;
+                }
+                "lava" => {
+                    heat += 2_600.0;
+                    plume_seed = true;
+                }
                 "water" => {
                     moisture += 1.0;
                     heat -= 4.0;
@@ -346,7 +368,9 @@ impl World {
                 "steam" => {
                     moisture += 0.5;
                     heat += 6.0;
+                    plume_seed = true;
                 }
+                "smoke" => plume_seed = true,
                 "ice" => heat -= 3.0,
                 _ => {}
             }
@@ -414,7 +438,9 @@ impl World {
                 humidity = (humidity - 12.0).max(0.0);
             }
         }
-        if humidity >= settings.condensation_humidity && temperature < 25.0 {
+        if humidity >= settings.condensation_humidity
+            && (temperature < 25.0 || (plume_seed && temperature < 120.0))
+        {
             if let Some(cloud) = self.rules.id("cloud") {
                 // Condensation samples within the atmospheric cell so visible clouds
                 // do not expose the coarse simulation grid as a block pattern.
@@ -438,10 +464,12 @@ impl World {
                     .into_iter()
                     .find(|(x, y)| self.cells[y * self.width + x].element == water)
             {
-                let warmth = ((temperature - self.ambient_temperature)
-                    / settings.boiling_point.max(1.0))
+                let warmth = (0.12
+                    + (temperature - self.ambient_temperature) / settings.boiling_point.max(1.0))
                 .clamp(0.0, 1.0);
-                if self.random_f32() < settings.evaporation_rate * warmth {
+                if temperature > settings.freezing_point
+                    && self.random_f32() < settings.evaporation_rate * warmth
+                {
                     self.set_element(y * self.width + x, steam);
                     self.atmosphere[index].humidity =
                         (self.atmosphere[index].humidity + 8.0).min(100.0);
