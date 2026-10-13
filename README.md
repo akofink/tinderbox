@@ -2,6 +2,8 @@
 
 Tinderbox is a native falling-element sandbox built to be played, not measured. Set a fire in a forest, pour water into the flames, and watch wind carry ash and smoke while soil, seeds, decomposers, ice, oil, and lava make a changing ecology.
 
+![Dry forest after a west spark: the fire front, ash, water, and the trees still standing downwind](docs/play.png)
+
 ![MIT licensed](https://img.shields.io/badge/license-MIT-blue)
 
 ## Run
