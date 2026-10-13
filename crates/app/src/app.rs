@@ -565,11 +565,19 @@ fn requested_world_size() -> (usize, usize) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn background_window_requested(args: impl IntoIterator<Item = String>) -> bool {
+    let args = args.into_iter().collect::<Vec<_>>();
+    args.iter().any(|arg| arg == "--smooth-play")
+        || native_args_from(args).is_ok_and(|parsed| parsed.capture.after_frames.is_some())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn run() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1360.0, 860.0])
-            .with_min_inner_size([720.0, 520.0]),
+            .with_min_inner_size([720.0, 520.0])
+            .with_active(!background_window_requested(std::env::args().skip(1))),
         ..Default::default()
     };
     eframe::run_native(

@@ -159,6 +159,25 @@ fn level_recipe_round_trip_and_reset_reproduce_per_cell_attributes() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn batch_native_windows_are_inactive_but_interactive_windows_are_active() {
+    assert!(!background_window_requested(Vec::<String>::new()));
+    assert!(background_window_requested(["--smooth-play".into()]));
+    assert!(background_window_requested([
+        "--level".into(),
+        "dry.toml".into(),
+        "--capture-after".into(),
+        "120".into(),
+        "--screenshot".into(),
+        "dry.png".into(),
+    ]));
+    assert!(!background_window_requested([
+        "--level".into(),
+        "dry.toml".into(),
+    ]));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn native_recipe_capture_arguments_validate_as_a_pair() {
     let args = native_args_from([
         "--level".into(),
