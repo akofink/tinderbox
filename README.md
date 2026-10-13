@@ -16,7 +16,7 @@ The default world is 192 × 120 cells. The app starts playing immediately in a s
 
 ## Play in the browser
 
-The same sandbox is at <https://akofink.github.io/tinderbox/>. It uses WebGPU when the browser provides it, and WebGL2 otherwise. There is no local disk: **Download rules** saves the bundled rules file, **Upload rules** checks a file you pick, and **Stored rules** reloads the last valid copy from this browser. Dropping a text file onto the page does the same check.
+The same sandbox is at <https://akofink.com/tinderbox/>. It uses WebGPU when the browser provides it, and WebGL2 otherwise. There is no local disk: **Download rules** saves the bundled rules file, **Upload rules** checks a file you pick, and **Stored rules** reloads the last valid copy from this browser. Dropping a text file onto the page does the same check.
 
 ## Play
 

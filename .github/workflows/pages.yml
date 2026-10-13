@@ -35,7 +35,9 @@ jobs:
       - name: Build web
         working-directory: crates/app
         run: |
-          public_url="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+          # Path prefix, not the github.io host. The user site redirects that host to
+          # akofink.com, and Chrome blocks the redirected module script.
+          public_url="/${{ github.event.repository.name }}/"
           "$GITHUB_WORKSPACE/trunk" build --release --public-url "$public_url"
       - name: Upload pull request build
         if: github.event_name == 'pull_request'
