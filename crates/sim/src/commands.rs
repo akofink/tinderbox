@@ -10,6 +10,7 @@ impl World {
             age: 0,
         });
         self.scheduler.reset();
+        self.gusts.fill(Default::default());
         self.rng = seed.max(1);
     }
 

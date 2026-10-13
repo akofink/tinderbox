@@ -15,6 +15,7 @@ pub struct Interaction {
     pub result: usize,
     pub self_result: Option<usize>,
     pub chance: f32,
+    pub downwind_bonus: f32,
 }
 
 /// Validated element and interaction definitions.
@@ -36,6 +37,10 @@ struct RawElement {
     color: [u8; 3],
     motion: String,
     #[serde(default)]
+    wind_response: f32,
+    #[serde(default)]
+    density: u8,
+    #[serde(default)]
     lifetime: u16,
     decay_to: Option<String>,
     emission: Option<String>,
@@ -47,6 +52,8 @@ struct RawInteraction {
     result: String,
     self_result: Option<String>,
     chance: f32,
+    #[serde(default)]
+    downwind_bonus: f32,
 }
 
 /// Validation or parse failure with a human-readable explanation.
@@ -85,6 +92,12 @@ impl Rules {
         };
         let mut elements = Vec::with_capacity(raw.elements.len());
         for e in raw.elements {
+            if !e.wind_response.is_finite() || !(0.0..=1.0).contains(&e.wind_response) {
+                return Err(RulesError(format!(
+                    "element '{}' wind_response must be between 0 and 1",
+                    e.name
+                )));
+            }
             let motion = match e.motion.as_str() {
                 "static" => Motion::Static,
                 "fall" => Motion::Fall,
@@ -101,6 +114,8 @@ impl Rules {
                 name: e.name,
                 color: e.color,
                 motion,
+                wind_response: e.wind_response,
+                density: e.density,
                 lifetime: e.lifetime,
                 decay_to: e
                     .decay_to
@@ -121,6 +136,11 @@ impl Rules {
                     "interaction {i} chance must be between 0 and 1"
                 )));
             }
+            if !r.downwind_bonus.is_finite() || !(0.0..=1.0).contains(&r.downwind_bonus) {
+                return Err(RulesError(format!(
+                    "interaction {i} downwind_bonus must be between 0 and 1"
+                )));
+            }
             interactions.push(Interaction {
                 when: id(&r.when, &format!("interaction {i} when"))?,
                 with: id(&r.with, &format!("interaction {i} with"))?,
@@ -131,6 +151,7 @@ impl Rules {
                     .map(|v| id(v, &format!("interaction {i} self_result")))
                     .transpose()?,
                 chance: r.chance,
+                downwind_bonus: r.downwind_bonus,
             });
         }
         Ok(Self {

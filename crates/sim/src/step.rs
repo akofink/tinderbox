@@ -19,6 +19,10 @@ impl World {
     }
 
     fn update_cell(&mut self, i: usize) {
+        let wind = self.wind_at(i);
+        if self.gusts[i].remaining > 0 {
+            self.gusts[i].remaining -= 1;
+        }
         let e = self.cells[i].element;
         let Some(element) = self.rules.elements.get(e) else {
             return;
@@ -27,6 +31,8 @@ impl World {
         let decay_to = element.decay_to;
         let emission = element.emission;
         let motion = element.motion;
+        let wind_response = element.wind_response;
+        let density = element.density;
         if lifetime > 0 {
             self.cells[i].age = self.cells[i].age.saturating_add(1);
             if self.cells[i].age >= lifetime {
@@ -66,9 +72,19 @@ impl World {
                 .interactions
                 .iter()
                 .find(|r| r.when == e && r.with == other)
-                .map(|r| (r.chance, r.result, r.self_result));
-            if let Some((chance, result, self_result)) = rule
-                && self.random_f32() < chance
+                .map(|r| (r.chance, r.downwind_bonus, r.result, r.self_result));
+            if let Some((chance, downwind_bonus, result, self_result)) = rule
+                && self.random_f32()
+                    < (chance
+                        + if (nx as isize - x as isize).signum()
+                            == wind.direction.horizontal() as isize
+                            && wind.direction != crate::WindDirection::Calm
+                        {
+                            downwind_bonus * wind.strength as f32 / 4.0
+                        } else {
+                            0.0
+                        })
+                    .min(1.0)
             {
                 self.cells[j] = crate::Cell {
                     element: result,
@@ -83,17 +99,47 @@ impl World {
                 return;
             }
         }
-        match motion {
-            Motion::Fall if y + 1 < self.height => self.swap_if_empty(i, i + self.width),
-            Motion::Gas if y > 0 => self.swap_if_empty(i, i - self.width),
-            Motion::Liquid
-                if y + 1 < self.height
-                    && self.cells[i + self.width].element
-                        == self.rules.id("air").unwrap_or(usize::MAX) =>
+        if wind.strength > 0
+            && wind.direction != crate::WindDirection::Calm
+            && wind_response > 0.0
+            && self.random_f32() < wind_response * wind.strength as f32 / 4.0
+        {
+            let target_x = x.checked_add_signed(wind.direction.horizontal() as isize);
+            if let Some(target_x) = target_x.filter(|target_x| *target_x < self.width)
+                && self.swap_if_empty(i, y * self.width + target_x)
             {
-                self.swap_if_empty(i, i + self.width)
+                return;
+            }
+        }
+        match motion {
+            Motion::Fall if y + 1 < self.height => {
+                self.swap_if_empty(i, i + self.width);
+            }
+            Motion::Gas if y > 0 => {
+                self.swap_if_empty(i, i - self.width);
             }
             Motion::Liquid => {
+                if y > 0 {
+                    let above = i - self.width;
+                    let above_element = self.cells[above].element;
+                    if self.rules.elements[above_element].motion == Motion::Liquid
+                        && density < self.rules.elements[above_element].density
+                    {
+                        self.cells.swap(i, above);
+                        return;
+                    }
+                }
+                if y + 1 < self.height {
+                    let below = i + self.width;
+                    let below_element = self.cells[below].element;
+                    if Some(below_element) == self.rules.id("air")
+                        || (self.rules.elements[below_element].motion == Motion::Liquid
+                            && density > self.rules.elements[below_element].density)
+                    {
+                        self.cells.swap(i, below);
+                        return;
+                    }
+                }
                 let dir = if self.random_u64() & 1 == 0 {
                     -1isize
                 } else {
@@ -107,13 +153,16 @@ impl World {
         }
     }
 
-    fn swap_if_empty(&mut self, a: usize, b: usize) {
+    fn swap_if_empty(&mut self, a: usize, b: usize) -> bool {
         if self
             .cells
             .get(b)
             .is_some_and(|c| Some(c.element) == self.rules.id("air"))
         {
             self.cells.swap(a, b);
+            true
+        } else {
+            false
         }
     }
 

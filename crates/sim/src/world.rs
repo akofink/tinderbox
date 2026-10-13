@@ -1,6 +1,6 @@
 //! World storage, construction, and read-only accessors.
 use crate::scheduler::Scheduler;
-use crate::{Cell, Rules, RulesError};
+use crate::{Cell, Rules, RulesError, Wind, WindDirection};
 use std::fmt;
 
 /// Invalid grid dimensions or missing required world definitions.
@@ -18,6 +18,13 @@ impl From<RulesError> for WorldError {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct GustCell {
+    pub(super) direction: WindDirection,
+    pub(super) strength: u8,
+    pub(super) remaining: u8,
+}
+
 /// Deterministic material grid and bounded-work update state.
 pub struct World {
     pub(super) width: usize,
@@ -26,6 +33,8 @@ pub struct World {
     pub(super) rules: Rules,
     pub(super) scheduler: Scheduler,
     pub(super) rng: u64,
+    pub(super) wind: Wind,
+    pub(super) gusts: Vec<GustCell>,
 }
 impl World {
     /// Creates a world with preallocated cells and focus-queue storage.
@@ -52,6 +61,8 @@ impl World {
             rules,
             scheduler: Scheduler::new(count),
             rng: seed.max(1),
+            wind: Wind::default(),
+            gusts: vec![GustCell::default(); count],
         })
     }
 
@@ -78,5 +89,65 @@ impl World {
     /// Count of deferred player-focused updates waiting ahead of background work.
     pub fn pending_work(&self) -> usize {
         self.scheduler.pending_focus()
+    }
+
+    /// Current global horizontal wind.
+    pub const fn wind(&self) -> Wind {
+        self.wind
+    }
+
+    /// Sets global wind. Strength is clamped to 0..=4.
+    pub fn set_wind(&mut self, direction: WindDirection, strength: u8) {
+        self.wind = Wind {
+            direction,
+            strength: strength.min(4),
+        };
+    }
+
+    /// Applies a short-lived local gust over a circular brush centered at `(x, y)`.
+    /// Radius is capped at 64 cells and strength is clamped to 0..=4.
+    pub fn gust(
+        &mut self,
+        x: usize,
+        y: usize,
+        radius: usize,
+        direction: WindDirection,
+        strength: u8,
+    ) {
+        if x >= self.width || y >= self.height || direction == WindDirection::Calm || strength == 0
+        {
+            return;
+        }
+        let radius = radius.min(64);
+        let start_x = x.saturating_sub(radius);
+        let end_x = x.saturating_add(radius).min(self.width - 1);
+        let start_y = y.saturating_sub(radius);
+        let end_y = y.saturating_add(radius).min(self.height - 1);
+        let radius_squared = radius * radius;
+        for gy in start_y..=end_y {
+            for gx in start_x..=end_x {
+                let dx = gx.abs_diff(x);
+                let dy = gy.abs_diff(y);
+                if dx * dx + dy * dy <= radius_squared {
+                    self.gusts[gy * self.width + gx] = GustCell {
+                        direction,
+                        strength: strength.min(4),
+                        remaining: 12,
+                    };
+                }
+            }
+        }
+    }
+
+    pub(super) fn wind_at(&self, index: usize) -> Wind {
+        let gust = self.gusts[index];
+        if gust.remaining > 0 {
+            Wind {
+                direction: gust.direction,
+                strength: gust.strength,
+            }
+        } else {
+            self.wind
+        }
     }
 }

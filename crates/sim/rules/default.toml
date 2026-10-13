@@ -9,6 +9,21 @@ color = [224, 190, 106]
 motion = "fall"
 
 [[elements]]
+name = "soil"
+color = [121, 82, 54]
+motion = "static"
+
+[[elements]]
+name = "wet_soil"
+color = [91, 68, 53]
+motion = "static"
+
+[[elements]]
+name = "fertile_soil"
+color = [82, 103, 56]
+motion = "static"
+
+[[elements]]
 name = "stone"
 color = [112, 119, 132]
 motion = "static"
@@ -17,6 +32,12 @@ motion = "static"
 name = "water"
 color = [50, 133, 232]
 motion = "liquid"
+density = 3
+
+[[elements]]
+name = "ice"
+color = [157, 218, 241]
+motion = "static"
 
 [[elements]]
 name = "tree"
@@ -24,22 +45,58 @@ color = [55, 156, 78]
 motion = "static"
 
 [[elements]]
+name = "plant"
+color = [92, 190, 74]
+motion = "static"
+
+[[elements]]
+name = "seed"
+color = [156, 115, 55]
+motion = "fall"
+
+[[elements]]
 name = "fire"
 color = [255, 105, 36]
 motion = "static"
 lifetime = 24
+wind_response = 0.1
 decay_to = "ash"
 emission = "smoke"
+
+[[elements]]
+name = "oil"
+color = [91, 72, 29]
+motion = "liquid"
+density = 1
+
+[[elements]]
+name = "oil_fire"
+color = [255, 226, 117]
+motion = "static"
+lifetime = 10
+wind_response = 0.15
+decay_to = "ash"
+emission = "smoke"
+
+[[elements]]
+name = "lava"
+color = [237, 75, 26]
+motion = "liquid"
+density = 5
+lifetime = 240
+decay_to = "stone"
 
 [[elements]]
 name = "ash"
 color = [100, 94, 88]
 motion = "fall"
+wind_response = 0.9
 
 [[elements]]
 name = "smoke"
 color = [75, 82, 98]
 motion = "gas"
+wind_response = 1.0
 lifetime = 120
 decay_to = "air"
 
@@ -47,14 +104,50 @@ decay_to = "air"
 name = "steam"
 color = [183, 205, 224]
 motion = "gas"
+wind_response = 0.7
 lifetime = 120
 decay_to = "water"
 
+# Wind strengthens fire spread only when the target is directly downwind.
 [[interactions]]
 when = "fire"
 with = "tree"
 result = "fire"
-chance = 0.72
+chance = 0.16
+downwind_bonus = 0.42
+
+[[interactions]]
+when = "fire"
+with = "plant"
+result = "fire"
+chance = 0.12
+downwind_bonus = 0.5
+
+[[interactions]]
+when = "fire"
+with = "seed"
+result = "fire"
+chance = 0.35
+downwind_bonus = 0.45
+
+[[interactions]]
+when = "fire"
+with = "oil"
+result = "oil_fire"
+chance = 0.8
+downwind_bonus = 0.2
+
+[[interactions]]
+when = "oil_fire"
+with = "tree"
+result = "fire"
+chance = 0.8
+
+[[interactions]]
+when = "oil_fire"
+with = "plant"
+result = "fire"
+chance = 0.8
 
 [[interactions]]
 when = "fire"
@@ -74,3 +167,124 @@ when = "fire"
 with = "stone"
 result = "stone"
 chance = 0.0
+
+[[interactions]]
+when = "oil_fire"
+with = "water"
+result = "steam"
+self_result = "air"
+chance = 1.0
+
+[[interactions]]
+when = "lava"
+with = "water"
+result = "steam"
+self_result = "stone"
+chance = 1.0
+
+[[interactions]]
+when = "water"
+with = "lava"
+result = "stone"
+self_result = "steam"
+chance = 1.0
+
+[[interactions]]
+when = "lava"
+with = "ice"
+result = "steam"
+self_result = "stone"
+chance = 1.0
+
+[[interactions]]
+when = "fire"
+with = "ice"
+result = "water"
+chance = 1.0
+
+[[interactions]]
+when = "fire"
+with = "soil"
+result = "stone"
+chance = 0.02
+
+[[interactions]]
+when = "lava"
+with = "tree"
+result = "fire"
+chance = 0.7
+
+[[interactions]]
+when = "lava"
+with = "plant"
+result = "fire"
+chance = 0.7
+
+[[interactions]]
+when = "lava"
+with = "oil"
+result = "oil_fire"
+chance = 1.0
+
+[[interactions]]
+when = "lava"
+with = "sand"
+result = "stone"
+chance = 0.25
+
+# Contact with water hydrates soil; ash enriches it into faster-sprouting soil.
+[[interactions]]
+when = "soil"
+with = "water"
+result = "wet_soil"
+self_result = "wet_soil"
+chance = 0.08
+
+[[interactions]]
+when = "water"
+with = "soil"
+result = "wet_soil"
+self_result = "wet_soil"
+chance = 0.08
+
+[[interactions]]
+when = "ash"
+with = "water"
+result = "fertile_soil"
+self_result = "fertile_soil"
+chance = 0.55
+
+[[interactions]]
+when = "water"
+with = "ash"
+result = "fertile_soil"
+self_result = "fertile_soil"
+chance = 0.55
+
+[[interactions]]
+when = "seed"
+with = "wet_soil"
+result = "wet_soil"
+self_result = "plant"
+chance = 0.12
+
+[[interactions]]
+when = "seed"
+with = "fertile_soil"
+result = "fertile_soil"
+self_result = "plant"
+chance = 0.75
+
+[[interactions]]
+when = "wet_soil"
+with = "seed"
+result = "plant"
+self_result = "wet_soil"
+chance = 0.12
+
+[[interactions]]
+when = "fertile_soil"
+with = "seed"
+result = "plant"
+self_result = "fertile_soil"
+chance = 0.75

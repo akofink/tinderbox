@@ -15,6 +15,6 @@ mod world;
 #[cfg(test)]
 mod tests;
 
-pub use element::{Cell, Element, Motion};
+pub use element::{Cell, Element, Motion, Wind, WindDirection};
 pub use rules::{DEFAULT_RULES, Interaction, Rules, RulesError};
 pub use world::{World, WorldError};

@@ -43,12 +43,24 @@ pub(super) fn handle_canvas_pointer(app: &mut Tinderbox, response: &Response, re
     if response.dragged_by(egui::PointerButton::Primary)
         || response.clicked_by(egui::PointerButton::Primary)
     {
-        paint_at(app, pos, rect, app.selected);
+        if app.gust_mode {
+            gust_at(app, pos, rect);
+        } else {
+            paint_at(app, pos, rect, app.selected);
+        }
     }
     if response.clicked_by(egui::PointerButton::Secondary) {
         let fire = app.world.rules().id("fire").unwrap_or(app.selected);
         paint_at(app, pos, rect, fire);
     }
+}
+
+fn gust_at(app: &mut Tinderbox, pos: Pos2, rect: Rect) {
+    let x = ((pos.x - rect.left()) / rect.width() * app.world.width() as f32) as usize;
+    let y = ((pos.y - rect.top()) / rect.height() * app.world.height() as f32) as usize;
+    let wind = app.world.wind();
+    app.world
+        .gust(x, y, app.brush / 2, wind.direction, wind.strength);
 }
 
 fn paint_at(app: &mut Tinderbox, pos: Pos2, rect: Rect, element: usize) {
