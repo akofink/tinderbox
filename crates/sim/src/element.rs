@@ -9,12 +9,41 @@ pub enum Motion {
     Gas,
 }
 
+/// Horizontal direction used by global wind and local gusts.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum WindDirection {
+    West,
+    #[default]
+    Calm,
+    East,
+}
+impl WindDirection {
+    pub(crate) const fn horizontal(self) -> i8 {
+        match self {
+            Self::West => -1,
+            Self::Calm => 0,
+            Self::East => 1,
+        }
+    }
+}
+
+/// Global wind configuration. Strength is clamped to 0..=4 by `World`.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct Wind {
+    pub direction: WindDirection,
+    pub strength: u8,
+}
+
 /// Element presentation and lifecycle defaults loaded from the ruleset.
 #[derive(Clone, Debug)]
 pub struct Element {
     pub name: String,
     pub color: [u8; 3],
     pub motion: Motion,
+    /// Relative response to horizontal wind, from 0.0 (none) to 1.0 (full).
+    pub wind_response: f32,
+    /// Relative density used to sort neighboring liquids. Higher values sink.
+    pub density: u8,
     pub lifetime: u16,
     pub decay_to: Option<usize>,
     pub emission: Option<usize>,

@@ -1,6 +1,6 @@
 # Tinderbox
 
-Tinderbox is a native falling-element sandbox built to be played, not measured. Set a fire in a forest, pour water into the flames, and watch ash and smoke spread while you keep painting.
+Tinderbox is a native falling-element sandbox built to be played, not measured. Set a fire in a forest, pour water into the flames, and watch wind carry ash and smoke while soil, seeds, ice, oil, and lava add new chains to the world.
 
 ![MIT licensed](https://img.shields.io/badge/license-MIT-blue)
 
@@ -20,16 +20,17 @@ The same sandbox is at <https://akofink.github.io/tinderbox/>. It uses WebGPU wh
 
 ## Play
 
-- Choose sand, stone, water, tree, fire, ash, smoke, or steam in the left palette.
+- Choose sand, soil, wet or fertile soil, stone, water, ice, tree, plant, seed, fire, oil, lava, ash, smoke, steam, or oil fire in the left palette.
 - Left-click or drag on the world to paint. The brush size is adjustable in the toolbar.
 - Right-click to ignite at the pointer. Choose **Erase** or press `E` to paint air.
 - **Pause/Play** or press `Space`; **Step** or press `.`; **Reset** or press `R`.
-- Adjust simulation speed from 0.25× to 4×. Toggle the frame/simulation/pending-work HUD with **HUD** or `H`.
-- **Ignite** or press `I` selects fire for painting.
+- Adjust simulation speed from 0.25× to 4×. Set wind direction and strength in the toolbar; select **Gust brush** and drag across the world to apply a local burst. Wind drifts ash, smoke, and steam and speeds fire spread downwind.
+- Water wets soil; ash and water make fertile soil, where seeds sprout faster into plants. Ice melts near fire or lava. Lava ignites plants and turns water into stone and steam. Oil floats on water and burns quickly as bright, hot oil fire.
+- Toggle the frame/simulation/pending-work HUD with **HUD** or `H`. **Ignite** or press `I` selects fire for painting.
 
 ## Rules and development
 
-The default human-editable element and interaction definitions are in `crates/sim/rules/default.toml`. Rules are validated when loaded; unknown element references, invalid motion types, and out-of-range probabilities produce actionable errors. The simulation crate has no window, graphics, or wall-clock dependency and can run in headless tests.
+The default human-editable element and interaction definitions are in `crates/sim/rules/default.toml`. Elements can tune wind response and liquid density; interactions can add a downwind spread bonus. Rules are validated when loaded; unknown element references, invalid motion types, and out-of-range probabilities produce actionable errors. The simulation crate has no window, graphics, or wall-clock dependency and can run in headless tests.
 
 ```sh
 cargo fmt --all --check

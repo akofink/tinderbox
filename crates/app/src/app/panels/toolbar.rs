@@ -28,6 +28,7 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
         ui.checkbox(&mut app.show_hud, "HUD");
         #[cfg(target_arch = "wasm32")]
         show_browser_files(ui);
+        super::wind::show(app, ui);
     });
 }
 

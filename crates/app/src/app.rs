@@ -7,7 +7,7 @@ mod render;
 mod web;
 
 use eframe::egui;
-use tinderbox_sim::{DEFAULT_RULES, Rules, World};
+use tinderbox_sim::{DEFAULT_RULES, Rules, WindDirection, World};
 use web_time::Instant;
 
 const DEFAULT_WIDTH: usize = 192;
@@ -18,6 +18,7 @@ pub(super) struct Tinderbox {
     world: World,
     selected: usize,
     brush: usize,
+    gust_mode: bool,
     running: bool,
     speed: f32,
     show_hud: bool,
@@ -40,6 +41,7 @@ impl Tinderbox {
             world,
             selected,
             brush: 3,
+            gust_mode: false,
             running: true,
             speed: 1.0,
             show_hud: true,
@@ -52,6 +54,7 @@ impl Tinderbox {
             stress_total_ms: 0.0,
             stress_max_ms: 0.0,
         };
+        app.world.set_wind(WindDirection::East, 1);
         app.wildfire();
         app
     }

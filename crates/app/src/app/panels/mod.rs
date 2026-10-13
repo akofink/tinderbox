@@ -2,4 +2,5 @@
 pub(super) mod hud;
 pub(super) mod palette;
 pub(super) mod toolbar;
+pub(super) mod wind;
 pub(super) mod world;
