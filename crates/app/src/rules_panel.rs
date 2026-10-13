@@ -2,6 +2,7 @@
 use eframe::egui;
 use tinderbox_sim::World;
 
+#[cfg_attr(target_arch = "wasm32", derive(Default))]
 pub struct RulesPanel {
     pub open: bool,
     #[cfg(not(target_arch = "wasm32"))]
@@ -11,6 +12,7 @@ pub struct RulesPanel {
     error: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Default for RulesPanel {
     fn default() -> Self {
         Self {
