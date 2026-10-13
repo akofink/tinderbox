@@ -1,6 +1,6 @@
 # Level recipes
 
-**Level setup** appears at startup and is available from the game toolbar. Choose a preset, dimensions, seed, terrain, starting wind and element amounts, then **Play level**. Opening setup pauses the game. **Cancel / return to game** preserves the previous world; loading settings does not replace it until you press Play.
+**Level setup** appears at startup and is available from the game toolbar. Choose a preset, dimensions, seed, terrain, starting wind and element amounts, then **Play level**. Ambient oxygen defaults to 21%; set it to 0% to make an airless level. Opening setup pauses the game. **Cancel / return to game** preserves the previous world; loading settings does not replace it until you press Play.
 
 - **Dry forest, east wind**: dense trees on rolling stone hills with a few sparks and a gentle east wind. Try pouring water across the fire front.
 - **Island**: a wooded island and sandy shore surrounded by water. Try damming the shoreline with stone.
@@ -25,6 +25,7 @@ width = 384
 height = 240
 seed = "29"
 generator = "island"
+ambient_oxygen = 21
 
 [wind]
 direction = "calm"
@@ -37,6 +38,6 @@ tree = 50
 water = 100
 ```
 
-Supported generators are `empty`, `hills`, `island`, and `valley`. Seeds are exported as decimal strings to preserve the full 64-bit range; non-negative TOML integers are also accepted. Missing element amounts default to zero. Wind directions are `calm`, `west` and `east`, with strength 0..4; recipes without a wind table default to calm. Unknown element names, unsupported versions, invalid dimensions and amounts outside 0..100 fail clearly. File loading is limited to 64 KiB.
+Supported generators are `empty`, `hills`, `island`, and `valley`. Seeds are exported as decimal strings to preserve the full 64-bit range; non-negative TOML integers are also accepted. Missing element amounts default to zero. Wind directions are `calm`, `west` and `east`, with strength 0..4; recipes without a wind table default to calm. Older recipes without `ambient_oxygen` default to 21%. Unknown element names, unsupported versions, invalid dimensions and amounts outside 0..100 fail clearly. File loading is limited to 64 KiB.
 
 **Reset** (or `R`) discards painting and evolution and regenerates the applied level using its original seed, wind and settings. It does not choose a new seed. To get a different world, open setup and use **Next seed**. Setup drafts and loaded files do not change the reset target until Play succeeds.

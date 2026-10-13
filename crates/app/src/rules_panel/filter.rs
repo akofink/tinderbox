@@ -56,7 +56,7 @@ impl Filter {
     }
 
     pub fn atmosphere(&self, current: &AtmosphereRules, defaults: &AtmosphereRules) -> bool {
-        let text = "atmosphere thresholds rates freeze freezing melt melting boil boiling ignition heat transfer evaporation condensation humidity pressure wind temperature";
+        let text = "atmosphere thresholds rates freeze freezing melt melting boil boiling ignition heat transfer evaporation condensation humidity pressure wind temperature oxygen diffusion moisture flammability";
         self.element.is_none()
             && (!self.changed_only || atmosphere_values(current) != atmosphere_values(defaults))
             && self
@@ -70,7 +70,7 @@ impl Filter {
     }
 }
 
-fn atmosphere_values(a: &AtmosphereRules) -> [f32; 8] {
+fn atmosphere_values(a: &AtmosphereRules) -> [f32; 10] {
     [
         a.freezing_point,
         a.melting_point,
@@ -80,6 +80,8 @@ fn atmosphere_values(a: &AtmosphereRules) -> [f32; 8] {
         a.evaporation_rate,
         a.condensation_humidity,
         a.pressure_wind,
+        a.oxygen_consumption,
+        a.oxygen_diffusion,
     ]
 }
 

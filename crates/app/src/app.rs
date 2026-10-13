@@ -36,6 +36,9 @@ pub(crate) enum Overlay {
     Temperature,
     Humidity,
     Pressure,
+    Oxygen,
+    Moisture,
+    BurnProgress,
 }
 
 #[derive(Default)]

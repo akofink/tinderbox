@@ -50,6 +50,12 @@ pub struct Element {
     pub lifetime: u16,
     pub decay_to: Option<usize>,
     pub emission: Option<usize>,
+    /// Whether this material exchanges moisture with its local atmosphere.
+    pub carries_moisture: bool,
+    /// Per-update fraction of the difference toward ambient humidity.
+    pub moisture_rate: f32,
+    /// Ignition/spread multiplier when fully moist, in the range 0..=1.
+    pub wet_flammability: f32,
 }
 
 /// Read-only view of one cell in the grid.
@@ -57,4 +63,8 @@ pub struct Element {
 pub struct Cell {
     pub element: usize,
     pub(crate) age: u16,
+    /// Intrinsic moisture on a 0..=255 scale.
+    pub moisture: u8,
+    /// Burn progress on a 0..=255 scale.
+    pub burn_progress: u8,
 }

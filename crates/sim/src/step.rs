@@ -35,6 +35,35 @@ impl World {
         if self.rules.elements.get(e).is_none() {
             return;
         }
+        let element_settings = &self.rules.elements[e];
+        if element_settings.carries_moisture {
+            let humidity = self
+                .atmosphere_at(i % self.width, i / self.width)
+                .map_or(0.0, |a| a.humidity);
+            let moisture = f32::from(self.cells[i].moisture);
+            let equilibrated =
+                moisture + (humidity * 2.55 - moisture) * element_settings.moisture_rate;
+            let updated = equilibrated.clamp(0.0, 255.0) as u8;
+            if self.cells[i].moisture != updated {
+                self.cells[i].moisture = updated;
+                self.mark_cell_dirty(i);
+            }
+        }
+        if self.rules.elements[e].name == "fire" || self.rules.elements[e].name == "oil_fire" {
+            let ax = (i % self.width) / ATMOSPHERE_CELL_SIZE;
+            let ay = (i / self.width) / ATMOSPHERE_CELL_SIZE;
+            let oxygen = &mut self.atmosphere[ay * self.atmosphere_width + ax].oxygen;
+            if *oxygen < 2.0 {
+                let extinguished = self.rules.elements[e]
+                    .decay_to
+                    .or_else(|| self.rules.id("air"));
+                if let Some(target) = extinguished {
+                    self.set_element(i, target);
+                }
+                return;
+            }
+            *oxygen = (*oxygen - self.rules.atmosphere.oxygen_consumption).max(0.0);
+        }
         self.apply_temperature_phase(i, e);
         let e = self.cells[i].element;
         let Some(element) = self.rules.elements.get(e) else {
@@ -78,6 +107,11 @@ impl World {
             };
             let j = ny * self.width + nx;
             let other = self.cells[j].element;
+            if self.rules.elements[e].name == "fire" && self.rules.elements[other].carries_moisture
+            {
+                self.cells[j].burn_progress = self.cells[j].burn_progress.saturating_add(4);
+                self.mark_cell_dirty(j);
+            }
             let rule = self
                 .rules
                 .interactions
@@ -94,7 +128,7 @@ impl World {
             if !seed_on_hot_ash
                 && let Some((chance, downwind_bonus, result, self_result)) = rule
                 && self.random_f32()
-                    < (chance
+                    < (chance * self.flammability_factor(j, other)
                         + if (nx as isize - x as isize).signum()
                             == wind.direction.horizontal() as isize
                             && wind.direction != crate::WindDirection::Calm
@@ -188,12 +222,15 @@ impl World {
             .unwrap_or(self.ambient_temperature);
         let name = self.rules.elements[element].name.as_str();
         let atmosphere_rules = &self.rules.atmosphere;
+        let wetness = f32::from(self.cells[index].moisture) / 255.0;
+        let priming = f32::from(self.cells[index].burn_progress) / 255.0;
+        let ignition_point = atmosphere_rules.ignition_point + wetness * 180.0 - priming * 30.0;
         let target = match name {
             "water" if temp <= atmosphere_rules.freezing_point => self.rules.id("ice"),
             "water" if temp >= atmosphere_rules.boiling_point => self.rules.id("steam"),
             "ice" if temp >= atmosphere_rules.melting_point => self.rules.id("water"),
             "tree" | "plant" | "oil" | "deadwood" | "leaf_litter" | "humus"
-                if temp >= atmosphere_rules.ignition_point =>
+                if temp >= ignition_point =>
             {
                 self.rules.id("fire")
             }
@@ -286,6 +323,7 @@ impl World {
             + (self.ambient_humidity - prior.humidity) * 0.01
             + moisture * settings.evaporation_rate * (temperature.max(0.0) / 20.0).min(3.0))
         .clamp(0.0, 100.0);
+        let oxygen = self.diffused_oxygen(index, prior.oxygen, &settings);
         let pressure = (temperature - self.ambient_temperature) * 0.2
             + (if ay > 0 {
                 self.atmosphere[index - self.atmosphere_width].temperature - temperature
@@ -296,6 +334,7 @@ impl World {
             temperature,
             humidity,
             pressure,
+            oxygen,
         };
 
         if humidity >= settings.condensation_humidity && temperature < 25.0 {
@@ -340,6 +379,50 @@ impl World {
                 }
             }
         }
+    }
+
+    pub(crate) fn flammability_factor(&self, index: usize, element: usize) -> f32 {
+        let settings = &self.rules.elements[element];
+        if !settings.carries_moisture {
+            return 1.0;
+        }
+        let wetness = f32::from(self.cells[index].moisture) / 255.0;
+        let priming = f32::from(self.cells[index].burn_progress) / 255.0;
+        (1.0 - wetness * (1.0 - settings.wet_flammability)) * (1.0 + priming * 0.5)
+    }
+
+    fn diffused_oxygen(
+        &self,
+        index: usize,
+        current: f32,
+        settings: &crate::AtmosphereRules,
+    ) -> f32 {
+        let x = index % self.atmosphere_width;
+        let y = index / self.atmosphere_width;
+        let west = if x > 0 {
+            self.atmosphere[index - 1].oxygen
+        } else {
+            current
+        };
+        let east = if x + 1 < self.atmosphere_width {
+            self.atmosphere[index + 1].oxygen
+        } else {
+            current
+        };
+        let north = if y > 0 {
+            self.atmosphere[index - self.atmosphere_width].oxygen
+        } else {
+            current
+        };
+        let south = if y + 1 < self.atmosphere_height {
+            self.atmosphere[index + self.atmosphere_width].oxygen
+        } else {
+            current
+        };
+        (current
+            + (self.ambient_oxygen - current) * 0.01
+            + ((west + east + north + south) * 0.25 - current) * settings.oxygen_diffusion)
+            .clamp(0.0, 100.0)
     }
 
     fn grow_tree_canopy(&mut self, base: usize) {
@@ -452,7 +535,12 @@ impl World {
 
     fn set_element(&mut self, index: usize, element: usize) {
         let changed = self.cells[index].element != element;
-        self.cells[index] = crate::Cell { element, age: 0 };
+        self.cells[index] = crate::Cell {
+            element,
+            age: 0,
+            moisture: 0,
+            burn_progress: 0,
+        };
         if changed {
             self.mark_cell_dirty(index);
         }

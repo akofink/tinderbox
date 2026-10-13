@@ -41,6 +41,11 @@ fn region_image(world: &World, region: DirtyRegion, overlay: Overlay) -> ColorIm
                     Overlay::Temperature => (atmosphere.temperature, -20.0, 200.0),
                     Overlay::Humidity => (atmosphere.humidity, 0.0, 100.0),
                     Overlay::Pressure => (atmosphere.pressure, -40.0, 40.0),
+                    Overlay::Oxygen => (atmosphere.oxygen, 0.0, 21.0),
+                    Overlay::Moisture => (f32::from(cell.moisture) * 100.0 / 255.0, 0.0, 100.0),
+                    Overlay::BurnProgress => {
+                        (f32::from(cell.burn_progress) * 100.0 / 255.0, 0.0, 100.0)
+                    }
                     Overlay::None => unreachable!(),
                 };
                 *pixel = heatmap(value, low, high);

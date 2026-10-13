@@ -148,6 +148,7 @@ impl LevelSetup {
                 ui.horizontal_wrapped(|ui| {
                     ui.add(egui::Slider::new(&mut self.draft.ambient_temperature, -40..=60).text("Ambient temperature").suffix(" °C"));
                     ui.add(egui::Slider::new(&mut self.draft.ambient_humidity, 0..=100).text("Ambient humidity").suffix("%"));
+                    ui.add(egui::Slider::new(&mut self.draft.ambient_oxygen, 0..=21).text("Ambient oxygen").suffix("%"));
                 });
                 ui.small("Amounts are density in each material's terrain region, not percent of the whole world. Empty canvas ignores amounts.");
                 let names: Vec<String> = rules.elements.iter().map(|element| element.name.clone()).collect();

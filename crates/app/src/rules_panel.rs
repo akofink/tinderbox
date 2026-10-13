@@ -200,6 +200,8 @@ impl RulesPanel {
                                     .text("Pressure wind"),
                             )
                             .changed();
+                        changed |= ui.add(egui::Slider::new(&mut atmosphere.oxygen_consumption, 0.0..=2.0).text("Oxygen consumed per fire update")).changed();
+                        changed |= ui.add(egui::Slider::new(&mut atmosphere.oxygen_diffusion, 0.0..=1.0).text("Oxygen diffusion")).changed();
                         if changed {
                             self.report(
                                 world
@@ -210,6 +212,16 @@ impl RulesPanel {
                         }
                     });
                 }
+                ui.collapsing("Material moisture and fire response", |ui| {
+                    let materials: Vec<_> = world.rules().elements.iter().enumerate().map(|(i, e)| (i, e.name.clone(), e.carries_moisture, e.moisture_rate, e.wet_flammability)).collect();
+                    for (index, name, mut enabled, mut rate, mut wet_flammability) in materials {
+                        ui.label(labels::display_name(&name));
+                        let mut changed = ui.checkbox(&mut enabled, "Carries moisture").changed();
+                        changed |= ui.add(egui::Slider::new(&mut rate, 0.0..=0.25).text("Humidity equilibration")).changed();
+                        changed |= ui.add(egui::Slider::new(&mut wet_flammability, 0.0..=1.0).text("Wet flammability")).changed();
+                        if changed { let _ = world.set_material_moisture(index, enabled, rate, wet_flammability); }
+                    }
+                });
                 ui.separator();
                 ui.collapsing("Save / load rules", |ui| {
                 #[cfg(not(target_arch = "wasm32"))]

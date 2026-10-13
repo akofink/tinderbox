@@ -55,6 +55,30 @@ fn atmosphere_rules_validate_and_round_trip_with_legacy_defaults() {
         loaded.atmosphere.condensation_humidity,
         rules.atmosphere.condensation_humidity
     );
+    let tree_id = rules.id("tree").unwrap();
+    assert_eq!(
+        loaded.elements[tree_id].carries_moisture,
+        rules.elements[tree_id].carries_moisture
+    );
+    assert_eq!(
+        loaded.elements[tree_id].wet_flammability,
+        rules.elements[tree_id].wet_flammability
+    );
+    let legacy = DEFAULT_RULES
+        .lines()
+        .filter(|line| {
+            !line.starts_with("carries_moisture =")
+                && !line.starts_with("moisture_rate =")
+                && !line.starts_with("wet_flammability =")
+                && !line.starts_with("oxygen_consumption =")
+                && !line.starts_with("oxygen_diffusion =")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        Rules::load(&legacy).unwrap().atmosphere.oxygen_consumption,
+        0.35
+    );
     let broken = text.replace("melting_point = 2.0", "melting_point = -1.0");
     assert!(
         Rules::load(&broken)
@@ -180,6 +204,8 @@ fn put(world: &mut World, x: usize, y: usize, element: &str) {
     world.cells[index] = crate::Cell {
         element: id,
         age: 0,
+        moisture: 0,
+        burn_progress: 0,
     };
 }
 
@@ -606,6 +632,58 @@ fn dry_forest_fire_front_leaves_a_regrowing_canopy() {
         settled_trees <= initial_trees * 2,
         "a forest left alone should not overgrow: {settled_trees} tree cells from {initial_trees}"
     );
+}
+
+#[test]
+fn humidity_equilibrates_material_moisture_and_reduces_flammability() {
+    let mut world = world(901);
+    let tree = world.rules().id("tree").unwrap();
+    world.paint(4, 4, world.rules().id("tree").unwrap());
+    let atmosphere_index = (4 / crate::world::ATMOSPHERE_CELL_SIZE) * world.atmosphere_width
+        + (4 / crate::world::ATMOSPHERE_CELL_SIZE);
+    world.atmosphere[atmosphere_index].humidity = 100.0;
+    for _ in 0..20 {
+        world.step(1);
+    }
+    assert!(world.cells()[4 * world.width() + 4].moisture > 0);
+    let cell_index = 4 * world.width() + 4;
+    let dry_factor = world.flammability_factor(cell_index, tree);
+    world.cells[cell_index].moisture = 255;
+    let wet_factor = world.flammability_factor(cell_index, tree);
+    assert!(wet_factor < dry_factor);
+    assert!(wet_factor < 0.2);
+}
+
+#[test]
+fn material_attributes_survive_rules_reload_and_reset_to_clean_defaults() {
+    let mut world = world(903);
+    let tree = world.rules().id("tree").unwrap();
+    world.paint(8, 8, tree);
+    let index = 8 * world.width() + 8;
+    world.cells[index].moisture = 187;
+    world.cells[index].burn_progress = 63;
+    let rules = world.rules().to_toml().unwrap();
+    world.load_rules(&rules).unwrap();
+    assert_eq!(world.cells()[index].moisture, 187);
+    assert_eq!(world.cells()[index].burn_progress, 63);
+    world.reset(903);
+    assert_eq!(world.cells()[index].moisture, 0);
+    assert_eq!(world.cells()[index].burn_progress, 0);
+}
+
+#[test]
+fn zero_oxygen_smothering_is_deterministic_and_reset_restores_level_oxygen() {
+    let mut world = world(902);
+    let fire = world.rules().id("fire").unwrap();
+    world.set_ambient(20, 45, 0);
+    put(&mut world, 16, 16, "fire");
+    for _ in 0..3 {
+        world.step(usize::MAX);
+    }
+    assert!(!world.cells().iter().any(|cell| cell.element == fire));
+    world.set_ambient(20, 45, 0);
+    world.reset(902);
+    assert_eq!(world.atmosphere[0].oxygen, 0.0);
 }
 
 #[test]
