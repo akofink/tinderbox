@@ -211,6 +211,9 @@ impl World {
         self.pending = 0;
     }
     pub fn paint(&mut self, x: usize, y: usize, element: usize) {
+        if element >= self.rules.elements.len() {
+            return;
+        }
         let Some(i) = y
             .checked_mul(self.width)
             .and_then(|i| i.checked_add(x))

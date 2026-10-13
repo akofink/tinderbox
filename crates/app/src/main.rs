@@ -93,9 +93,10 @@ impl Tinderbox {
     fn paint_at(&mut self, pos: Pos2, rect: Rect, element: usize) {
         let x = ((pos.x - rect.left()) / rect.width() * self.world.width as f32) as usize;
         let y = ((pos.y - rect.top()) / rect.height() * self.world.height as f32) as usize;
-        let r = self.brush.saturating_sub(1) as isize;
-        for dy in -r..=r {
-            for dx in -r..=r {
+        let size = self.brush as isize;
+        let start = -(size / 2);
+        for dy in start..start + size {
+            for dx in start..start + size {
                 let px = x as isize + dx;
                 let py = y as isize + dy;
                 if px >= 0 && py >= 0 {
