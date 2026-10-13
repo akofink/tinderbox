@@ -145,7 +145,20 @@ fn has(world: &World, x: usize, y: usize, element: &str) -> bool {
 #[test]
 fn default_rules_include_the_remaining_starting_elements() {
     let rules = Rules::load(DEFAULT_RULES).unwrap();
-    for name in ["soil", "ice", "plant", "seed", "lava", "oil"] {
+    for name in [
+        "soil",
+        "ice",
+        "plant",
+        "seed",
+        "lava",
+        "oil",
+        "deadwood",
+        "leaf_litter",
+        "humus",
+        "fungus",
+        "beetle",
+        "termite",
+    ] {
         assert!(rules.id(name).is_some(), "missing {name}");
     }
 }
@@ -171,12 +184,14 @@ fn soil_ash_water_and_seed_interactions_form_regrowth_chain() {
     put(&mut sprouted, 1, 0, "wet_soil");
     sprouted.step(1);
     assert!(has(&sprouted, 0, 0, "plant"));
+    assert!(has(&sprouted, 1, 0, "soil"));
 
     let mut fertile_sprout = guaranteed_world(71, &[("seed", "fertile_soil")]);
     put(&mut fertile_sprout, 0, 0, "seed");
     put(&mut fertile_sprout, 1, 0, "fertile_soil");
     fertile_sprout.step(1);
     assert!(has(&fertile_sprout, 0, 0, "plant"));
+    assert!(has(&fertile_sprout, 1, 0, "soil"));
 }
 
 #[test]
@@ -265,4 +280,107 @@ fn local_gust_is_bounded_and_respects_world_edges() {
     put(&mut world, 0, 0, "smoke");
     world.step(1);
     assert!(has(&world, 1, 0, "smoke"));
+}
+
+#[test]
+fn trees_and_plants_die_into_seed_bearing_organic_matter() {
+    let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+    let tree = rules.id("tree").unwrap();
+    let plant = rules.id("plant").unwrap();
+    rules.elements[tree].lifetime = 1;
+    rules.elements[plant].lifetime = 1;
+    let mut world = World::new(16, 12, 15, rules).unwrap();
+    put(&mut world, 0, 0, "tree");
+    put(&mut world, 2, 1, "plant");
+    world.step(19);
+    assert!(has(&world, 0, 0, "deadwood"));
+    assert!(has(&world, 2, 1, "leaf_litter"));
+    assert!(has(&world, 2, 0, "seed"));
+}
+
+#[test]
+fn damp_organic_matter_wakes_decomposers_and_returns_fertile_soil() {
+    let wake_pairs = [
+        ("wet_soil", "deadwood", "fungus"),
+        ("wet_soil", "leaf_litter", "beetle"),
+        ("wet_soil", "humus", "termite"),
+    ];
+    for (index, (soil, matter, decomposer)) in wake_pairs.into_iter().enumerate() {
+        let mut world = guaranteed_world(20 + index as u64, &[(soil, matter)]);
+        put(&mut world, 0, 0, soil);
+        put(&mut world, 1, 0, matter);
+        world.step(1);
+        assert!(has(&world, 0, 0, "fertile_soil"));
+        assert!(has(&world, 1, 0, decomposer));
+    }
+
+    let meals = [
+        ("fungus", "deadwood"),
+        ("beetle", "leaf_litter"),
+        ("termite", "humus"),
+    ];
+    for (index, (decomposer, matter)) in meals.into_iter().enumerate() {
+        let mut world = guaranteed_world(30 + index as u64, &[(decomposer, matter)]);
+        put(&mut world, 0, 0, decomposer);
+        put(&mut world, 1, 0, matter);
+        world.step(1);
+        assert!(has(&world, 0, 0, "fertile_soil"));
+        assert!(has(&world, 1, 0, "fertile_soil"));
+    }
+}
+
+#[test]
+fn dry_soil_does_not_sprout_seeds() {
+    let mut world = world(42);
+    let y = world.height() - 1;
+    let width = world.width();
+    put(&mut world, 0, y, "seed");
+    put(&mut world, 1, y, "soil");
+    world.step(width * y + 1);
+    assert!(has(&world, 0, y, "seed"));
+    assert!(has(&world, 1, y, "soil"));
+}
+
+#[test]
+fn ash_and_deadwood_make_burnable_humus() {
+    let mut world = guaranteed_world(40, &[("deadwood", "ash")]);
+    put(&mut world, 0, 0, "deadwood");
+    put(&mut world, 1, 0, "ash");
+    world.step(1);
+    assert!(has(&world, 0, 0, "humus"));
+    assert!(has(&world, 1, 0, "humus"));
+}
+
+#[test]
+fn seeded_burned_bed_recovers_through_water_and_fertile_soil() {
+    let mut world = guaranteed_world(41, &[("ash", "water"), ("fertile_soil", "seed")]);
+    put(&mut world, 0, 0, "ash");
+    put(&mut world, 1, 0, "water");
+    put(&mut world, 2, 0, "seed");
+    world.step(3);
+    assert!(has(&world, 0, 0, "fertile_soil"));
+    assert!(has(&world, 1, 0, "soil"));
+    assert!(has(&world, 2, 0, "plant"));
+}
+
+#[test]
+fn burned_patch_regrows_during_a_short_play_session_at_default_rates() {
+    let mut world = World::new(192, 120, 42, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    let soil = world.rules().id("soil").unwrap();
+    let stone = world.rules().id("stone").unwrap();
+    let ash = world.rules().id("ash").unwrap();
+    let water = world.rules().id("water").unwrap();
+    let seed = world.rules().id("seed").unwrap();
+    for x in 85..100 {
+        world.paint(x, 100, soil);
+        world.paint(x, 101, stone);
+    }
+    world.paint(90, 99, ash);
+    world.paint(91, 99, water);
+    world.paint(92, 99, seed);
+    for _ in 0..300 {
+        world.step(12_000);
+    }
+    let plant = world.rules().id("plant").unwrap();
+    assert!(world.cells().iter().any(|cell| cell.element == plant));
 }
