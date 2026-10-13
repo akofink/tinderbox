@@ -269,6 +269,10 @@ impl Tinderbox {
                 _ => None,
             })
         }) {
+            if self.world.pending_dirty_regions() != 0 {
+                self.capture_requested = false;
+                return;
+            }
             if let Some(options) = &self.capture {
                 let path = options
                     .output
@@ -302,11 +306,14 @@ impl Tinderbox {
             return;
         };
         self.capture_frames += 1;
-        if !self.capture_requested
-            && self.capture_frames >= options.after_frames.expect("validated frame count")
-        {
-            self.capture_requested = true;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+        if self.capture_frames >= options.after_frames.expect("validated frame count") {
+            // Stop at the requested simulation frame and let the capped texture
+            // uploader drain every dirty region before asking eframe for a screenshot.
+            self.running = false;
+            if !self.capture_requested && self.world.pending_dirty_regions() == 0 {
+                self.capture_requested = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+            }
         }
     }
 

@@ -319,10 +319,10 @@ impl World {
             + ((west + east + north + south) * 0.25 - prior.temperature) * settings.heat_transfer
             + heat * 0.025)
             .clamp(-100.0, 1200.0);
-        let humidity = (prior.humidity
-            + (self.ambient_humidity - prior.humidity) * 0.01
-            + moisture * settings.evaporation_rate * (temperature.max(0.0) / 20.0).min(3.0))
-        .clamp(0.0, 100.0);
+        // Ambient humidity is the finite initial vapor reservoir, not a source that
+        // refills every update. Vapor is added only when a liquid cell actually
+        // transitions to steam below.
+        let mut humidity = prior.humidity.clamp(0.0, 100.0);
         let oxygen = self.diffused_oxygen(index, prior.oxygen, &settings);
         let pressure = (temperature - self.ambient_temperature) * 0.2
             + (if ay > 0 {
@@ -337,20 +337,13 @@ impl World {
             oxygen,
         };
 
-        if humidity >= settings.condensation_humidity && temperature < 25.0 {
-            let cloud = self.rules.id("cloud");
-            if let Some(cloud) = cloud {
-                let cell = cy * self.width + cx;
-                if self.cells[cell].element == self.rules.id("air").unwrap_or(usize::MAX) {
-                    self.set_element(cell, cloud);
-                    self.atmosphere[index].humidity = (humidity - 18.0).max(0.0);
-                }
-            }
-        }
-        if humidity >= settings.condensation_humidity && temperature <= settings.melting_point + 3.0
+        if humidity >= settings.condensation_humidity
+            && temperature > settings.freezing_point
+            && temperature <= settings.melting_point + 3.0
         {
             let ground_y = (y0 + ATMOSPHERE_CELL_SIZE).min(self.height - 1);
-            let ground = ground_y * self.width + cx;
+            let x = x0 + self.random_u64() as usize % (self.width - x0).min(ATMOSPHERE_CELL_SIZE);
+            let ground = ground_y * self.width + x;
             let above = ground.saturating_sub(self.width);
             if self.rules.elements[self.cells[ground].element]
                 .name
@@ -359,9 +352,25 @@ impl World {
                 && let Some(water) = self.rules.id("water")
             {
                 self.set_element(above, water);
-                self.atmosphere[index].humidity = (humidity - 12.0).max(0.0);
+                humidity = (humidity - 12.0).max(0.0);
             }
         }
+        if humidity >= settings.condensation_humidity && temperature < 25.0 {
+            if let Some(cloud) = self.rules.id("cloud") {
+                // Condensation samples within the atmospheric cell so visible clouds
+                // do not expose the coarse simulation grid as a block pattern.
+                let x =
+                    x0 + self.random_u64() as usize % (self.width - x0).min(ATMOSPHERE_CELL_SIZE);
+                let y =
+                    y0 + self.random_u64() as usize % (self.height - y0).min(ATMOSPHERE_CELL_SIZE);
+                let cell = y * self.width + x;
+                if self.cells[cell].element == self.rules.id("air").unwrap_or(usize::MAX) {
+                    self.set_element(cell, cloud);
+                    humidity = (humidity - 50.0).max(0.0);
+                }
+            }
+        }
+        self.atmosphere[index].humidity = humidity;
         if moisture > 0.0 && temperature > self.ambient_temperature + 4.0 {
             let water = self.rules.id("water");
             let steam = self.rules.id("steam");
@@ -375,7 +384,8 @@ impl World {
                 .clamp(0.0, 1.0);
                 if self.random_f32() < settings.evaporation_rate * warmth {
                     self.set_element(y * self.width + x, steam);
-                    self.atmosphere[index].humidity = (humidity + 8.0).min(100.0);
+                    self.atmosphere[index].humidity =
+                        (self.atmosphere[index].humidity + 8.0).min(100.0);
                 }
             }
         }
