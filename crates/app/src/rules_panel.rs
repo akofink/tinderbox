@@ -86,6 +86,85 @@ impl RulesPanel {
                         "Default rules restored.",
                     );
                 }
+                egui::CollapsingHeader::new("Atmosphere thresholds and rates")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        let mut atmosphere = world.rules().atmosphere.clone();
+                        let mut changed = false;
+                        changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut atmosphere.freezing_point,
+                                    -40.0..=atmosphere.melting_point - 0.1,
+                                )
+                                .text("Freeze below °C"),
+                            )
+                            .changed();
+                        changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut atmosphere.melting_point,
+                                    atmosphere.freezing_point + 0.1
+                                        ..=atmosphere.boiling_point - 0.1,
+                                )
+                                .text("Melt above °C"),
+                            )
+                            .changed();
+                        changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut atmosphere.boiling_point,
+                                    atmosphere.melting_point + 0.1
+                                        ..=atmosphere.ignition_point - 0.1,
+                                )
+                                .text("Boil above °C"),
+                            )
+                            .changed();
+                        changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut atmosphere.ignition_point,
+                                    atmosphere.boiling_point + 0.1..=500.0,
+                                )
+                                .text("Ignition °C"),
+                            )
+                            .changed();
+                        changed |= ui
+                            .add(
+                                egui::Slider::new(&mut atmosphere.heat_transfer, 0.0..=1.0)
+                                    .text("Heat transfer"),
+                            )
+                            .changed();
+                        changed |= ui
+                            .add(
+                                egui::Slider::new(&mut atmosphere.evaporation_rate, 0.0..=1.0)
+                                    .text("Evaporation rate"),
+                            )
+                            .changed();
+                        changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut atmosphere.condensation_humidity,
+                                    0.0..=100.0,
+                                )
+                                .text("Condense humidity %"),
+                            )
+                            .changed();
+                        changed |= ui
+                            .add(
+                                egui::Slider::new(&mut atmosphere.pressure_wind, 0.01..=1.0)
+                                    .text("Pressure wind"),
+                            )
+                            .changed();
+                        if changed {
+                            self.report(
+                                world
+                                    .set_atmosphere_rules(atmosphere)
+                                    .map_err(|e| e.to_string()),
+                                "Atmosphere tuning updated.",
+                            );
+                        }
+                    });
                 ui.separator();
                 #[cfg(not(target_arch = "wasm32"))]
                 {

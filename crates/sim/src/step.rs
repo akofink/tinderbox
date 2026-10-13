@@ -1,5 +1,8 @@
 //! Bounded scheduler updates, interactions, and material movement.
-use crate::{Motion, World};
+use crate::{
+    Motion, World,
+    world::{ATMOSPHERE_CELL_SIZE, ATMOSPHERE_INTERVAL},
+};
 
 impl World {
     /// Processes at most `budget` cells, servicing recent player actions first.
@@ -13,6 +16,11 @@ impl World {
                 .pop_focus()
                 .unwrap_or_else(|| self.scheduler.next_background(self.cells.len()));
             self.update_cell(index);
+            self.atmosphere_credit += 1;
+            if self.atmosphere_credit >= ATMOSPHERE_INTERVAL {
+                self.atmosphere_credit -= ATMOSPHERE_INTERVAL;
+                self.update_atmosphere_cell();
+            }
             completed += 1;
         }
         completed
@@ -23,6 +31,11 @@ impl World {
         if self.gusts[i].remaining > 0 {
             self.gusts[i].remaining -= 1;
         }
+        let e = self.cells[i].element;
+        if self.rules.elements.get(e).is_none() {
+            return;
+        }
+        self.apply_temperature_phase(i, e);
         let e = self.cells[i].element;
         let Some(element) = self.rules.elements.get(e) else {
             return;
@@ -149,6 +162,167 @@ impl World {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn apply_temperature_phase(&mut self, index: usize, element: usize) {
+        let air = self.rules.id("air").unwrap_or(usize::MAX);
+        if self.cells[index].element == air {
+            return;
+        }
+        let temp = self
+            .atmosphere_at(index % self.width, index / self.width)
+            .map(|field| field.temperature)
+            .unwrap_or(self.ambient_temperature);
+        let name = self.rules.elements[element].name.as_str();
+        let atmosphere_rules = &self.rules.atmosphere;
+        let target = match name {
+            "water" if temp <= atmosphere_rules.freezing_point => self.rules.id("ice"),
+            "water" if temp >= atmosphere_rules.boiling_point => self.rules.id("steam"),
+            "ice" if temp >= atmosphere_rules.melting_point => self.rules.id("water"),
+            "tree" | "plant" | "seed" | "oil" | "deadwood" | "leaf_litter" | "humus"
+                if temp >= atmosphere_rules.ignition_point =>
+            {
+                self.rules.id("fire")
+            }
+            _ => None,
+        };
+        if let Some(target) = target {
+            self.set_element(index, target);
+        }
+    }
+
+    fn update_atmosphere_cell(&mut self) {
+        if self.atmosphere.is_empty() {
+            return;
+        }
+        let index = self.atmosphere_cursor;
+        self.atmosphere_cursor = (self.atmosphere_cursor + 1) % self.atmosphere.len();
+        let ax = index % self.atmosphere_width;
+        let ay = index / self.atmosphere_width;
+        let x0 = ax * ATMOSPHERE_CELL_SIZE;
+        let y0 = ay * ATMOSPHERE_CELL_SIZE;
+        let cx = (x0 + ATMOSPHERE_CELL_SIZE / 2).min(self.width - 1);
+        let cy = (y0 + ATMOSPHERE_CELL_SIZE / 2).min(self.height - 1);
+        let sample_points = [
+            (cx, cy),
+            (x0.min(self.width - 1), y0.min(self.height - 1)),
+            (
+                (x0 + ATMOSPHERE_CELL_SIZE - 1).min(self.width - 1),
+                y0.min(self.height - 1),
+            ),
+            (
+                x0.min(self.width - 1),
+                (y0 + ATMOSPHERE_CELL_SIZE - 1).min(self.height - 1),
+            ),
+            (
+                (x0 + ATMOSPHERE_CELL_SIZE - 1).min(self.width - 1),
+                (y0 + ATMOSPHERE_CELL_SIZE - 1).min(self.height - 1),
+            ),
+        ];
+        let mut heat = 0.0;
+        let mut moisture = 0.0;
+        for (x, y) in sample_points {
+            let name = &self.rules.elements[self.cells[y * self.width + x].element].name;
+            match name.as_str() {
+                "fire" | "oil_fire" => heat += 2_000.0,
+                "lava" => heat += 2_600.0,
+                "water" => {
+                    moisture += 1.0;
+                    heat -= 4.0;
+                }
+                "steam" => {
+                    moisture += 0.5;
+                    heat += 6.0;
+                }
+                "ice" => heat -= 3.0,
+                _ => {}
+            }
+        }
+        let west = if ax > 0 {
+            self.atmosphere[index - 1].temperature
+        } else {
+            self.ambient_temperature
+        };
+        let east = if ax + 1 < self.atmosphere_width {
+            self.atmosphere[index + 1].temperature
+        } else {
+            self.ambient_temperature
+        };
+        let north = if ay > 0 {
+            self.atmosphere[index - self.atmosphere_width].temperature
+        } else {
+            self.ambient_temperature
+        };
+        let south = if ay + 1 < self.atmosphere_height {
+            self.atmosphere[index + self.atmosphere_width].temperature
+        } else {
+            self.ambient_temperature
+        };
+        let prior = self.atmosphere[index];
+        let settings = self.rules.atmosphere.clone();
+        let temperature = (prior.temperature
+            + (self.ambient_temperature - prior.temperature) * 0.015
+            + ((west + east + north + south) * 0.25 - prior.temperature) * settings.heat_transfer
+            + heat * 0.025)
+            .clamp(-100.0, 1200.0);
+        let humidity = (prior.humidity
+            + (self.ambient_humidity - prior.humidity) * 0.01
+            + moisture * settings.evaporation_rate * (temperature.max(0.0) / 20.0).min(3.0))
+        .clamp(0.0, 100.0);
+        let pressure = (temperature - self.ambient_temperature) * 0.2
+            + (if ay > 0 {
+                self.atmosphere[index - self.atmosphere_width].temperature - temperature
+            } else {
+                0.0
+            }) * 0.1;
+        self.atmosphere[index] = crate::AtmosphereCell {
+            temperature,
+            humidity,
+            pressure,
+        };
+
+        if humidity >= settings.condensation_humidity && temperature < 25.0 {
+            let cloud = self.rules.id("cloud");
+            if let Some(cloud) = cloud {
+                let cell = cy * self.width + cx;
+                if self.cells[cell].element == self.rules.id("air").unwrap_or(usize::MAX) {
+                    self.set_element(cell, cloud);
+                    self.atmosphere[index].humidity = (humidity - 18.0).max(0.0);
+                }
+            }
+        }
+        if humidity >= settings.condensation_humidity && temperature <= settings.melting_point + 3.0
+        {
+            let ground_y = (y0 + ATMOSPHERE_CELL_SIZE).min(self.height - 1);
+            let ground = ground_y * self.width + cx;
+            let above = ground.saturating_sub(self.width);
+            if self.rules.elements[self.cells[ground].element]
+                .name
+                .ends_with("soil")
+                && self.cells[above].element == self.rules.id("air").unwrap_or(usize::MAX)
+                && let Some(water) = self.rules.id("water")
+            {
+                self.set_element(above, water);
+                self.atmosphere[index].humidity = (humidity - 12.0).max(0.0);
+            }
+        }
+        if moisture > 0.0 && temperature > self.ambient_temperature + 4.0 {
+            let water = self.rules.id("water");
+            let steam = self.rules.id("steam");
+            if let (Some(water), Some(steam)) = (water, steam)
+                && let Some((x, y)) = sample_points
+                    .into_iter()
+                    .find(|(x, y)| self.cells[y * self.width + x].element == water)
+            {
+                let warmth = ((temperature - self.ambient_temperature)
+                    / settings.boiling_point.max(1.0))
+                .clamp(0.0, 1.0);
+                if self.random_f32() < settings.evaporation_rate * warmth {
+                    self.set_element(y * self.width + x, steam);
+                    self.atmosphere[index].humidity = (humidity + 8.0).min(100.0);
+                }
+            }
         }
     }
 

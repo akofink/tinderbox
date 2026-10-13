@@ -11,6 +11,13 @@ impl World {
         });
         self.scheduler.reset();
         self.gusts.fill(Default::default());
+        self.atmosphere.fill(crate::AtmosphereCell {
+            temperature: self.ambient_temperature,
+            humidity: self.ambient_humidity,
+            pressure: 0.0,
+        });
+        self.atmosphere_cursor = 0;
+        self.atmosphere_credit = 0;
         self.dirty_regions.mark_all();
         self.rng = seed.max(1);
     }

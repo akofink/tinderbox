@@ -1,7 +1,14 @@
 //! Atomic live rule edits. Loading never restarts the world or advances its RNG.
-use crate::{Cell, DEFAULT_RULES, Rules, RulesError, World};
+use crate::{AtmosphereRules, Cell, DEFAULT_RULES, Rules, RulesError, World};
 
 impl World {
+    /// Atomically replace the atmospheric tuning after validating thresholds and rates.
+    pub fn set_atmosphere_rules(&mut self, settings: AtmosphereRules) -> Result<(), RulesError> {
+        crate::rules::validate_atmosphere(&settings)?;
+        self.rules.atmosphere = settings;
+        Ok(())
+    }
+
     /// Change one interaction without advancing simulation time.
     pub fn set_interaction(
         &mut self,
