@@ -1,5 +1,6 @@
 //! Setup UI is derived from the current rules, not a hard-coded element list.
 use super::files;
+use crate::labels::{self, GROUPS};
 use eframe::egui;
 use tinderbox_sim::{
     Rules, WindDirection,
@@ -86,8 +87,8 @@ impl LevelSetup {
             .id(egui::Id::new("level_setup"))
             .collapsible(false)
             .resizable(true)
-            .default_width(610.0)
-            .default_height(420.0)
+            .default_width(760.0)
+            .default_height(640.0)
             .max_height((ctx.screen_rect().height() - 64.0).max(180.0))
             .vscroll(true)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
@@ -105,6 +106,13 @@ impl LevelSetup {
                     }
                 });
                 ui.separator();
+                let seed_valid = self.seed_text.parse::<u64>().is_ok();
+                ui.horizontal(|ui| {
+                    if ui.add_enabled(self.draft.validate().is_ok() && seed_valid, egui::Button::new("Play level")).clicked() {
+                        action = Some(SetupAction::Play(self.draft.clone()));
+                    }
+                    if ui.button("Cancel / return to game").clicked() { action = Some(SetupAction::Cancel); }
+                });
                 ui.horizontal_wrapped(|ui| {
                     ui.label("Width");
                     ui.add(egui::DragValue::new(&mut self.draft.width).range(16..=MAX_LEVEL_DIMENSION));
@@ -138,13 +146,29 @@ impl LevelSetup {
                     ui.add(egui::Slider::new(&mut self.draft.wind.strength, 0..=4).text("strength"));
                 });
                 ui.small("Amounts are density in each material's terrain region, not percent of the whole world. Empty canvas ignores amounts.");
-                egui::ScrollArea::vertical().id_salt("level_amounts").max_height(225.0).show(ui, |ui| {
-                    for element in &rules.elements {
-                        if element.name == "air" { continue; }
-                        let amount = self.draft.amounts.entry(element.name.clone()).or_default();
-                        ui.add(egui::Slider::new(amount, 0..=100).text(&element.name).suffix("%"));
+                let names: Vec<String> = rules.elements.iter().map(|element| element.name.clone()).collect();
+                ui.horizontal(|ui| {
+                    let split = GROUPS.len().div_ceil(2);
+                    let column_groups = [&GROUPS[..split], &GROUPS[split..]];
+                    for groups in column_groups {
+                        ui.vertical(|ui| {
+                            ui.set_min_width(330.0);
+                            for group in groups {
+                                let grouped: Vec<_> = names.iter().filter(|name| *name != "air" && labels::group(name) == *group).cloned().collect();
+                                if grouped.is_empty() { continue; }
+                                ui.label(egui::RichText::new(*group).small().strong());
+                                for name in grouped {
+                                    let amount = self.draft.amounts.entry(name.clone()).or_default();
+                                    ui.add(egui::Slider::new(amount, 0..=100).text(labels::display_name(&name)).suffix("%"));
+                                }
+                            }
+                        });
                     }
                 });
+                if let Some(error) = &self.error { ui.colored_label(egui::Color32::LIGHT_RED, error); }
+                if let Err(e) = self.draft.validate() { ui.colored_label(egui::Color32::LIGHT_RED, e.to_string()); }
+                if !seed_valid { ui.colored_label(egui::Color32::LIGHT_RED, "Seed must be a whole number from 0 to 18446744073709551615"); }
+                if !self.message.is_empty() { ui.label(&self.message); }
                 ui.separator();
                 ui.collapsing("Save / load level (TOML)", |ui| {
                     #[cfg(not(target_arch = "wasm32"))]
@@ -201,17 +225,7 @@ impl LevelSetup {
                         ui.add(egui::TextEdit::multiline(&mut self.text).font(egui::TextStyle::Monospace).desired_width(f32::INFINITY).desired_rows(8));
                     });
                 });
-                if let Some(error) = &self.error { ui.colored_label(egui::Color32::LIGHT_RED, error); }
-                if let Err(e) = self.draft.validate() { ui.colored_label(egui::Color32::LIGHT_RED, e.to_string()); }
-                let seed_valid = self.seed_text.parse::<u64>().is_ok();
-                if !seed_valid { ui.colored_label(egui::Color32::LIGHT_RED, "Seed must be a whole number from 0 to 18446744073709551615"); }
-                if !self.message.is_empty() { ui.label(&self.message); }
-                ui.horizontal(|ui| {
-                    if ui.add_enabled(self.draft.validate().is_ok() && seed_valid, egui::Button::new("▶ Play level")).clicked() {
-                        action = Some(SetupAction::Play(self.draft.clone()));
-                    }
-                    if ui.button("Cancel / return to game").clicked() { action = Some(SetupAction::Cancel); }
-                });
+
             });
         action
     }

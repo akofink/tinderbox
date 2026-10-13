@@ -1,5 +1,5 @@
 //! Application loop and shared sandbox state. Native and wasm share this UI.
-mod files;
+pub(crate) mod files;
 mod input;
 mod level_setup;
 mod panels;
@@ -260,8 +260,9 @@ impl eframe::App for Tinderbox {
             ui.add_enabled_ui(!self.level_setup.open, |ui| panels::toolbar::show(self, ui));
         });
         egui::SidePanel::left("palette")
-            .resizable(false)
-            .default_width(142.0)
+            .resizable(true)
+            .default_width(168.0)
+            .min_width(148.0)
             .show(ctx, |ui| {
                 ui.add_enabled_ui(!self.level_setup.open, |ui| panels::palette::show(self, ui));
             });
@@ -389,7 +390,7 @@ fn requested_world_size() -> (usize, usize) {
 pub(super) fn run() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1440.0, 960.0])
+            .with_inner_size([1360.0, 860.0])
             .with_min_inner_size([720.0, 520.0]),
         ..Default::default()
     };

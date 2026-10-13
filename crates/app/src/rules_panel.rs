@@ -1,4 +1,5 @@
 //! Data-generated live interaction controls and portable rules text import/export.
+use crate::labels::{self, GROUPS};
 use eframe::egui;
 use tinderbox_sim::World;
 
@@ -62,7 +63,8 @@ impl RulesPanel {
         egui::Window::new("Rules")
             .open(&mut open)
             .default_width(470.0)
-            .default_height(480.0)
+            .default_height(520.0)
+            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-8.0, 36.0))
             .vscroll(true)
             .show(ctx, |ui| {
                 ui.label("Edits apply immediately. Base chance is per neighbor visit; wind can boost it.");
@@ -120,39 +122,123 @@ impl RulesPanel {
                             .desired_width(f32::INFINITY),
                     );
                 });
+                #[cfg(target_arch = "wasm32")]
+                browser_files(ui, world);
                 ui.separator();
                 ui.label(format!("{} interactions", world.rules().interactions.len()));
-                // Keep persistence and validation feedback reachable as rulesets grow.
-                egui::ScrollArea::vertical().id_salt("interactions")
-                    .max_height(280.0).show(ui, |ui| {
-                    for index in 0..world.rules().interactions.len() {
-                        let rule = &world.rules().interactions[index];
-                        let name = |id: usize| world.rules().elements[id].name.as_str();
-                        let label = format!("{} + {} -> {} + {}",
-                            name(rule.when), name(rule.with),
-                            name(rule.self_result.unwrap_or(rule.when)), name(rule.result));
-                        let mut enabled = rule.enabled;
-                        let mut chance = rule.chance;
-                        let downwind_bonus = rule.downwind_bonus;
-                        ui.push_id(index, |ui| {
-                            let toggle = ui.checkbox(&mut enabled, label).changed();
-                            let tune = ui.indent("chance", |ui| {
-                                let changed = ui.add(egui::Slider::new(&mut chance, 0.0..=1.0)
-                                    .text("base chance")).changed();
-                                if downwind_bonus > 0.0 {
-                                    ui.small(format!("Downwind bonus: up to +{downwind_bonus:.2}"));
-                                }
-                                changed
-                            }).inner;
-                            if toggle || tune {
-                                self.report(world.set_interaction(index, enabled, chance)
-                                    .map_err(|e| e.to_string()), "Interaction updated.");
+                let grouped = grouped_interactions(world);
+                egui::ScrollArea::vertical()
+                    .id_salt("interactions")
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+                    .max_height(360.0)
+                    .show(ui, |ui| {
+                        for (group, indices) in grouped {
+                            if indices.is_empty() {
+                                continue;
                             }
-                        });
-                    }
-                });
+                            egui::CollapsingHeader::new(format!("{group} ({})", indices.len()))
+                                .default_open(group == "Fire")
+                                .show(ui, |ui| {
+                                    for index in indices {
+                                        show_interaction(self, ui, world, index);
+                                    }
+                                });
+                        }
+                    });
             });
         self.open = open;
+    }
+}
+
+fn grouped_interactions(world: &World) -> Vec<(&'static str, Vec<usize>)> {
+    GROUPS
+        .into_iter()
+        .map(|group| {
+            let indices = (0..world.rules().interactions.len())
+                .filter(|index| {
+                    let when = world.rules().interactions[*index].when;
+                    labels::group(&world.rules().elements[when].name) == group
+                })
+                .collect();
+            (group, indices)
+        })
+        .collect()
+}
+
+fn interaction_label(world: &World, index: usize) -> String {
+    let rule = &world.rules().interactions[index];
+    let name = |id: usize| labels::display_name(&world.rules().elements[id].name);
+    let when = name(rule.when);
+    let with = name(rule.with);
+    let result = name(rule.result);
+    match rule.self_result {
+        Some(id) if id != rule.when => {
+            format!("{when} becomes {}; {with} becomes {result}", name(id))
+        }
+        _ => format!("{with} becomes {result}"),
+    }
+}
+
+fn show_interaction(panel: &mut RulesPanel, ui: &mut egui::Ui, world: &mut World, index: usize) {
+    let rule = &world.rules().interactions[index];
+    let label = interaction_label(world, index);
+    let mut enabled = rule.enabled;
+    let mut chance = rule.chance;
+    let downwind_bonus = rule.downwind_bonus;
+    ui.push_id(index, |ui| {
+        let toggle = ui.checkbox(&mut enabled, label).changed();
+        let tune = ui
+            .indent("chance", |ui| {
+                let changed = ui
+                    .add(egui::Slider::new(&mut chance, 0.0..=1.0).text("base chance"))
+                    .changed();
+                if downwind_bonus > 0.0 {
+                    ui.small(format!("Downwind bonus: up to +{downwind_bonus:.2}"));
+                }
+                changed
+            })
+            .inner;
+        if toggle || tune {
+            panel.report(
+                world
+                    .set_interaction(index, enabled, chance)
+                    .map_err(|e| e.to_string()),
+                "Interaction updated.",
+            );
+        }
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn browser_files(ui: &mut egui::Ui, world: &World) {
+    use crate::app::files;
+    ui.horizontal_wrapped(|ui| {
+        if ui.button("Download rules").clicked() {
+            let result = world
+                .rules()
+                .to_toml()
+                .map_err(|e| e.to_string())
+                .and_then(|text| files::save_text("rules", "tinderbox-rules.toml", &text));
+            match result {
+                Ok(()) => files::set_notice("Downloaded the current tuned rules."),
+                Err(err) => files::set_notice(err),
+            }
+        }
+        if ui.button("Upload rules").clicked() {
+            if let Err(err) = files::begin_upload("rules") {
+                files::set_notice(err);
+            }
+        }
+        if ui.button("Stored rules").clicked() {
+            match files::load_text("rules") {
+                Ok(text) => files::finish_upload("rules", Ok(text)),
+                Err(err) => files::set_notice(err),
+            }
+        }
+    });
+    let notice = files::notice();
+    if !notice.is_empty() {
+        ui.label(notice);
     }
 }
 
