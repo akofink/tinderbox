@@ -11,20 +11,20 @@ const MAX_BYTES: usize = 65_536;
 
 static NOTICE: Mutex<String> = Mutex::new(String::new());
 
-pub(in crate::app) fn set_notice(text: impl Into<String>) {
+pub(crate) fn set_notice(text: impl Into<String>) {
     if let Ok(mut notice) = NOTICE.lock() {
         *notice = text.into();
     }
 }
 
-pub(in crate::app) fn notice() -> String {
+pub(crate) fn notice() -> String {
     NOTICE
         .lock()
         .map(|notice| notice.clone())
         .unwrap_or_default()
 }
 
-pub(in crate::app) fn save_text(key: &str, filename: &str, contents: &str) -> Result<(), String> {
+pub(crate) fn save_text(key: &str, filename: &str, contents: &str) -> Result<(), String> {
     check_size(contents)?;
     #[cfg(target_arch = "wasm32")]
     {
@@ -38,7 +38,7 @@ pub(in crate::app) fn save_text(key: &str, filename: &str, contents: &str) -> Re
     }
 }
 
-pub(in crate::app) fn load_text(key: &str) -> Result<String, String> {
+pub(crate) fn load_text(key: &str) -> Result<String, String> {
     #[cfg(target_arch = "wasm32")]
     {
         load_stored(key)?.ok_or_else(|| format!("No stored {key} in this browser."))
@@ -56,7 +56,7 @@ pub(in crate::app) fn load_text(key: &str) -> Result<String, String> {
     }
 }
 
-pub(in crate::app) fn remember(key: &str, contents: &str) -> Result<(), String> {
+pub(crate) fn remember(key: &str, contents: &str) -> Result<(), String> {
     check_size(contents)?;
     #[cfg(target_arch = "wasm32")]
     {
@@ -220,17 +220,17 @@ use browser::{
 };
 
 #[cfg(target_arch = "wasm32")]
-pub(in crate::app) fn begin_upload(key: &str) -> Result<(), String> {
+pub(crate) fn begin_upload(key: &str) -> Result<(), String> {
     begin_upload_browser(key)
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(in crate::app) fn finish_upload(key: &str, text: Result<String, String>) {
+pub(crate) fn finish_upload(key: &str, text: Result<String, String>) {
     finish_upload_browser(key, text);
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(in crate::app) fn poll(ctx: &eframe::egui::Context) -> Option<(String, String)> {
+pub(crate) fn poll(ctx: &eframe::egui::Context) -> Option<(String, String)> {
     match poll_browser(ctx)? {
         (key, Ok(text)) => Some((key, text)),
         (_, Err(err)) => {

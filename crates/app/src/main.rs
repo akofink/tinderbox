@@ -1,4 +1,5 @@
 mod app;
+mod labels;
 mod rules_panel;
 
 #[cfg(not(target_arch = "wasm32"))]

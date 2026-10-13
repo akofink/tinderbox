@@ -5,7 +5,7 @@ use eframe::egui;
 pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
     ui.horizontal_wrapped(|ui| {
         if ui
-            .button(if app.running { "⏸ Pause" } else { "▶ Play" })
+            .button(if app.running { "Pause" } else { "Play" })
             .clicked()
         {
             app.running = !app.running;
@@ -29,42 +29,8 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
         ui.add(egui::Slider::new(&mut app.speed, 0.25..=4.0).suffix("×"));
         ui.checkbox(&mut app.show_hud, "HUD");
         ui.toggle_value(&mut app.rules_panel.open, "Rules");
-        #[cfg(target_arch = "wasm32")]
-        show_browser_files(app, ui);
+    });
+    ui.horizontal_wrapped(|ui| {
         super::wind::show(app, ui);
     });
-}
-
-#[cfg(target_arch = "wasm32")]
-fn show_browser_files(app: &Tinderbox, ui: &mut egui::Ui) {
-    use crate::app::files;
-
-    ui.separator();
-    if ui.button("Download rules").clicked() {
-        let result = app
-            .world
-            .rules()
-            .to_toml()
-            .map_err(|e| e.to_string())
-            .and_then(|text| files::save_text("rules", "tinderbox-rules.toml", &text));
-        match result {
-            Ok(()) => files::set_notice("Downloaded the current tuned rules."),
-            Err(err) => files::set_notice(err),
-        }
-    }
-    if ui.button("Upload rules").clicked() {
-        if let Err(err) = files::begin_upload("rules") {
-            files::set_notice(err);
-        }
-    }
-    if ui.button("Stored rules").clicked() {
-        match files::load_text("rules") {
-            Ok(text) => files::finish_upload("rules", Ok(text)),
-            Err(err) => files::set_notice(err),
-        }
-    }
-    let notice = files::notice();
-    if !notice.is_empty() {
-        ui.label(notice);
-    }
 }

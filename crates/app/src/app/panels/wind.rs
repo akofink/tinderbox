@@ -5,12 +5,11 @@ use tinderbox_sim::WindDirection;
 
 pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
     let mut wind = app.world.wind();
-    ui.separator();
     ui.label("Wind");
     for (label, direction) in [
-        ("←", WindDirection::West),
+        ("West", WindDirection::West),
         ("Calm", WindDirection::Calm),
-        ("→", WindDirection::East),
+        ("East", WindDirection::East),
     ] {
         if ui
             .selectable_value(&mut wind.direction, direction, label)
