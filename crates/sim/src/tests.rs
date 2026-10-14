@@ -1801,6 +1801,56 @@ fn boat_density_adapter_uses_the_per_element_density() {
 }
 
 #[test]
+fn airborne_boat_falls_and_then_floats_on_water_deterministically() {
+    let mut first = world(41);
+    let mut second = world(41);
+    for current in [&mut first, &mut second] {
+        for x in 1..current.width() - 1 {
+            put(current, x, 15, "water");
+            put(current, x, 16, "stone");
+        }
+        assert!(current.place_boat(16, 4));
+    }
+    let wood = first.rules().id("wood").unwrap();
+    let initial_top = first
+        .cells()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, cell)| (cell.element == wood).then_some(index / first.width()))
+        .min()
+        .unwrap();
+    assert_eq!(initial_top, 2);
+
+    for _ in 0..40 {
+        first.step(768);
+        second.step(768);
+    }
+    let boat_rows = |world: &World| {
+        world
+            .cells()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, cell)| (cell.element == wood).then_some(index / world.width()))
+            .collect::<Vec<_>>()
+    };
+    let first_rows = boat_rows(&first);
+    let second_rows = boat_rows(&second);
+    assert_eq!(
+        first_rows, second_rows,
+        "identical seeds keep boat motion deterministic"
+    );
+    assert!(
+        *first_rows.iter().min().unwrap() > initial_top,
+        "the empty boat falls from its spawn point"
+    );
+    assert_eq!(
+        *first_rows.iter().min().unwrap(),
+        12,
+        "the hull comes to rest floating above the lake bed"
+    );
+}
+
+#[test]
 fn empty_boat_floats_as_one_body_and_cargo_pushes_it_down() {
     let mut world = World::new(32, 24, 1, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
     for x in 1..world.width() - 1 {

@@ -21,26 +21,12 @@ pub(super) struct Body {
 
 impl World {
     /// Places a small wooden boat with its keel centered at `(x, y)`.
-    /// The stamp may cover only air or water. It does not consume either material.
+    /// The hull may cover only air or water. It does not consume either material.
     pub fn place_boat(&mut self, x: usize, y: usize) -> bool {
         let Some(wood) = self.rules.id("wood") else {
             return false;
         };
         if x >= self.width || y >= self.height || self.bodies.len() >= MAX_BODIES {
-            return false;
-        }
-        let Some(water_row) = y.checked_add(1).filter(|row| *row < self.height) else {
-            return false;
-        };
-        let water_support = (-3isize..=3)
-            .filter_map(|dx| x.checked_add_signed(dx))
-            .filter(|column| *column < self.width)
-            .filter(|column| {
-                self.rules.elements[self.cells[water_row * self.width + column].element].name
-                    == "water"
-            })
-            .count();
-        if water_support < 3 {
             return false;
         }
         let mut indices = Vec::with_capacity(23);
