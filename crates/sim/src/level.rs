@@ -14,6 +14,8 @@ pub enum Generator {
     Hills,
     Island,
     Valley,
+    BoatLake,
+    DensityLab,
 }
 impl Generator {
     pub const ALL: [Self; 4] = [Self::Empty, Self::Hills, Self::Island, Self::Valley];
@@ -23,6 +25,8 @@ impl Generator {
             Self::Hills => "Rolling hills",
             Self::Island => "Island",
             Self::Valley => "Valley",
+            Self::BoatLake => "Boat lake",
+            Self::DensityLab => "Density lab",
         }
     }
 }
@@ -93,14 +97,24 @@ pub enum Preset {
     DryForest,
     Island,
     SandstormValley,
+    BoatLake,
+    DensityLab,
 }
 impl Preset {
-    pub const ALL: [Self; 3] = [Self::DryForest, Self::Island, Self::SandstormValley];
+    pub const ALL: [Self; 5] = [
+        Self::DryForest,
+        Self::Island,
+        Self::SandstormValley,
+        Self::BoatLake,
+        Self::DensityLab,
+    ];
     pub fn label(self) -> &'static str {
         match self {
             Self::DryForest => "Dry forest, east wind",
             Self::Island => "Island",
             Self::SandstormValley => "Sandstorm valley",
+            Self::BoatLake => "Boat lake",
+            Self::DensityLab => "Density lab",
         }
     }
     pub fn level(self, rules: &Rules, width: usize, height: usize) -> Level {
@@ -133,6 +147,18 @@ impl Preset {
                     ("fire", 5),
                 ],
             ),
+            Self::BoatLake => (Generator::BoatLake, 241, &[("stone", 100), ("water", 100)]),
+            Self::DensityLab => (
+                Generator::DensityLab,
+                307,
+                &[
+                    ("stone", 100),
+                    ("water", 100),
+                    ("sand", 100),
+                    ("ice", 100),
+                    ("oil", 100),
+                ],
+            ),
         };
         let mut level = Level {
             version: 1,
@@ -154,6 +180,11 @@ impl Preset {
                     direction: WindDirection::East,
                     strength: 3,
                 },
+                Self::BoatLake => Wind {
+                    direction: WindDirection::East,
+                    strength: 1,
+                },
+                Self::DensityLab => Wind::default(),
             },
             amounts: BTreeMap::new(),
             spark: matches!(self, Self::DryForest),
@@ -275,6 +306,12 @@ impl Level {
             self.ambient_humidity,
             self.ambient_oxygen,
         );
+        // Showcase scenes use exact, sealed geometry so the demonstrations remain legible.
+        if matches!(self.generator, Generator::BoatLake | Generator::DensityLab) {
+            self.generate_showcase(&mut world)?;
+            world.mark_all_dirty();
+            return Ok(world);
+        }
         // Empty means a blank canvas regardless of amounts, not floating terrain.
         if self.generator == Generator::Empty {
             if self.boat {
@@ -390,6 +427,135 @@ fn place_spark(world: &mut World) {
 }
 
 impl Level {
+    fn generate_showcase(&self, world: &mut World) -> Result<(), LevelError> {
+        let stone = world
+            .rules()
+            .id("stone")
+            .ok_or_else(|| LevelError("Showcase requires stone".into()))?;
+        let water = world
+            .rules()
+            .id("water")
+            .ok_or_else(|| LevelError("Showcase requires water".into()))?;
+        let width = world.width();
+        let height = world.height();
+        let left = width / 10;
+        let right = width - left;
+        let floor = height * 4 / 5;
+        let waterline = height * 3 / 5;
+        for x in 0..left {
+            let distance = left - x;
+            let top = waterline
+                .saturating_sub(height / 12 + distance * height / width / 4)
+                .max(height / 3);
+            for y in top..height {
+                world.paint(x, y, stone);
+            }
+            if let Some(soil) = world.rules().id("soil") {
+                world.paint(x, top, soil);
+            }
+        }
+        for x in right..width {
+            let distance = x - right + 1;
+            let top = waterline
+                .saturating_sub(height / 12 + distance * height / width / 4)
+                .max(height / 3);
+            for y in top..height {
+                world.paint(x, y, stone);
+            }
+            if let Some(soil) = world.rules().id("soil") {
+                world.paint(x, top, soil);
+            }
+        }
+        for x in left..right {
+            world.paint(x, floor, stone);
+        }
+        for y in waterline..floor {
+            world.paint(left, y, stone);
+            world.paint(right - 1, y, stone);
+            for x in left + 1..right - 1 {
+                world.paint(x, y, water);
+            }
+        }
+        if self.generator == Generator::BoatLake {
+            let centers = if width >= 48 {
+                vec![width / 3, width / 2, width * 2 / 3]
+            } else {
+                vec![width / 2]
+            };
+            for (index, x) in centers.into_iter().enumerate() {
+                if x < 5 || x + 5 >= width {
+                    continue;
+                }
+                let y = waterline - 1;
+                if !world.place_boat(x, y) {
+                    return Err(LevelError("Boat lake could not place its boats".into()));
+                }
+                if index == 1 {
+                    let sand = world
+                        .rules()
+                        .id("sand")
+                        .ok_or_else(|| LevelError("Boat lake requires sand".into()))?;
+                    for cargo in 0..8 {
+                        let dx = cargo % 4;
+                        world.paint(x + dx - 2, y - 3 - cargo / 4, sand);
+                    }
+                } else if index == 2 {
+                    let fire = world
+                        .rules()
+                        .id("fire")
+                        .ok_or_else(|| LevelError("Boat lake requires fire".into()))?;
+                    world.paint(x + 3, y - 2, fire);
+                }
+            }
+        } else {
+            let sand = world
+                .rules()
+                .id("sand")
+                .ok_or_else(|| LevelError("Density lab requires sand".into()))?;
+            let ice = world
+                .rules()
+                .id("ice")
+                .ok_or_else(|| LevelError("Density lab requires ice".into()))?;
+            let oil = world
+                .rules()
+                .id("oil")
+                .ok_or_else(|| LevelError("Density lab requires oil".into()))?;
+            let oil_fire = world
+                .rules()
+                .id("oil_fire")
+                .ok_or_else(|| LevelError("Density lab requires oil fire".into()))?;
+            let fire = world
+                .rules()
+                .id("fire")
+                .ok_or_else(|| LevelError("Density lab requires fire".into()))?;
+            let steam = world
+                .rules()
+                .id("steam")
+                .ok_or_else(|| LevelError("Density lab requires steam".into()))?;
+            let third = (right - left) / 3;
+            for y in waterline.saturating_sub(height / 10)..waterline {
+                for x in left + third / 2..left + third {
+                    world.paint(x, y, sand);
+                }
+            }
+            for x in left + third..left + third + width / 12 {
+                world.paint(x, waterline - 1, ice);
+            }
+            let oil_x = left + third * 2;
+            for x in oil_x..oil_x + width / 12 {
+                world.paint(x, waterline - 1, oil);
+            }
+            world.paint(oil_x, waterline - 2, oil_fire);
+            let vent_x = left + third + width / 20;
+            world.paint(vent_x, waterline + 2, fire);
+            world.paint(vent_x + 1, waterline + 2, steam);
+        }
+        if self.boat {
+            self.place_recipe_boat(world)?;
+        }
+        Ok(())
+    }
+
     fn place_recipe_boat(&self, world: &mut World) -> Result<(), LevelError> {
         let y = self.height * 3 / 4 - 1;
         let x = (4..self.width - 4)
@@ -478,6 +644,7 @@ impl Level {
             Generator::Valley => {
                 self.height * 5 / 6 - center_distance * self.height / self.width / 3
             }
+            Generator::BoatLake | Generator::DensityLab => self.height * 4 / 5,
             Generator::Empty => self.height,
         };
         (base + noise).min(self.height - 1)
@@ -658,6 +825,8 @@ mod tests {
                 Preset::DryForest => &["stone", "tree", "fire"],
                 Preset::Island => &["stone", "tree", "water", "sand"],
                 Preset::SandstormValley => &["stone", "sand", "smoke"],
+                Preset::BoatLake => &["stone", "water", "wood", "sand", "fire"],
+                Preset::DensityLab => &["stone", "water", "sand", "ice", "oil", "fire"],
             };
             for name in names {
                 assert!(
@@ -677,6 +846,81 @@ mod tests {
             preset.level(&rules(), 16, 16).generate(rules()).unwrap();
         }
     }
+    #[test]
+    fn showcase_presets_have_sealed_water_and_distinct_demonstrations() {
+        let rules = rules();
+        let mut boats = Preset::BoatLake
+            .level(&rules, 96, 64)
+            .generate(rules.clone())
+            .unwrap();
+        let stone = boats.rules.id("stone").unwrap();
+        let sand = boats.rules.id("sand").unwrap();
+        let fire = boats.rules.id("fire").unwrap();
+        assert_eq!(
+            boats
+                .cells
+                .iter()
+                .filter(|cell| cell.body_id != 0)
+                .map(|cell| cell.body_id)
+                .max(),
+            Some(3)
+        );
+        assert!(boats.cells.iter().any(|cell| cell.element == fire));
+        for _ in 0..4 {
+            boats.step(8_000);
+        }
+        assert!(
+            boats
+                .cells
+                .iter()
+                .filter(|cell| cell.element == sand && cell.body_id != 0)
+                .count()
+                >= 4
+        );
+        let lab = Preset::DensityLab
+            .level(&rules, 96, 64)
+            .generate(rules)
+            .unwrap();
+        for name in ["water", "stone", "sand", "ice", "oil", "fire"] {
+            let id = lab.rules.id(name).unwrap();
+            assert!(
+                lab.cells.iter().any(|cell| cell.element == id),
+                "Density lab lacks {name}"
+            );
+        }
+        let water = lab.rules.id("water").unwrap();
+        let oil_fire = lab.rules.id("oil_fire").unwrap();
+        let steam = lab.rules.id("steam").unwrap();
+        assert!(lab.cells.iter().any(|cell| cell.element == oil_fire));
+        let width = lab.width();
+        let wall_x = width / 10;
+        let wall_y = lab.height() * 4 / 5 - 1;
+        assert_eq!(lab.cells[wall_y * width + wall_x].element, stone);
+        assert!(
+            lab.cells
+                .iter()
+                .filter(|cell| cell.element == water)
+                .count()
+                > 100
+        );
+        let mut lab = lab;
+        for _ in 0..300 {
+            lab.step(2_048);
+        }
+        assert!(
+            lab.cells.iter().any(|cell| cell.element == steam),
+            "submerged vent should produce steam"
+        );
+        assert!(
+            lab.cells
+                .iter()
+                .filter(|cell| cell.element == water)
+                .count()
+                > 100,
+            "lake should remain contained"
+        );
+    }
+
     #[test]
     fn full_width_seeds_round_trip_and_numeric_seeds_load() {
         let mut level = Preset::Island.level(&rules(), 96, 64);
