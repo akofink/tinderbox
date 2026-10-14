@@ -642,6 +642,9 @@ fn fire_front_spreads_downwind_and_respects_humidity_and_oxygen() {
                 ("tree".into(), 75),
             ]),
             spark: true,
+            boat: false,
+            boat_sand: 0,
+            boat_burning: false,
         };
         let mut world = level.generate(rules.clone()).unwrap();
         let tree = world.rules().id("tree").unwrap();
