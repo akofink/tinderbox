@@ -58,6 +58,8 @@ fn decomposers_persist_on_a_well_fed_forest_floor_and_decline_without_food() {
             }
         }
     }
+    // Rain from the newly modeled humid atmosphere can restore edible wet soil.
+    starved.set_ambient(20, 0, 21);
     let counts = |world: &World, name: &str| {
         let id = world.rules().id(name).unwrap();
         world
