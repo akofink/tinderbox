@@ -31,9 +31,13 @@ const DEFAULT_HEIGHT: usize = 250;
 const DEFAULT_CELL_SIZE: f32 = 3.5;
 const WORK_PER_FRAME: usize = 12_000;
 const WORK_UNITS_PER_SECOND: f64 = (WORK_PER_FRAME * 60) as f64;
-const MAX_WORK_PER_FRAME: usize = WORK_PER_FRAME * 4;
+const MAX_WORK_PER_FRAME: usize = WORK_PER_FRAME;
 const MAX_CARRY_FRAMES: usize = 8;
 pub(super) const MAX_TEXTURE_REGIONS_PER_FRAME: usize = 32;
+const FIXED_FRAME_DT: f32 = 1.0 / 60.0;
+#[cfg(not(target_arch = "wasm32"))]
+const MIN_SMOOTH_PLAY_FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_millis(15);
+const MAX_INTERACTIVE_FRAME_DT: f32 = 0.25;
 
 fn fitted_world_dimensions(available: egui::Vec2, cell_size: f32) -> (usize, usize) {
     let width = (available.x / cell_size)
@@ -652,7 +656,7 @@ impl Tinderbox {
         }
     }
 
-    fn simulate_frame(&mut self, ctx: &egui::Context, dt: f32) {
+    fn simulate_frame(&mut self, ctx: &egui::Context, dt: f32, wall_dt: f32) {
         if self.stress_play && self.stress_frames < 900 {
             let water = self.world.rules().id("water").unwrap_or(0);
             let fire = self.world.rules().id("fire").unwrap_or(0);
@@ -667,8 +671,8 @@ impl Tinderbox {
                 );
             }
             self.stress_frames += 1;
-            self.stress_total_ms += dt as f64 * 1000.0;
-            self.stress_max_ms = self.stress_max_ms.max(dt * 1000.0);
+            self.stress_total_ms += wall_dt as f64 * 1000.0;
+            self.stress_max_ms = self.stress_max_ms.max(wall_dt * 1000.0);
             if self.stress_frames == 900 {
                 println!(
                     "NATIVE_SMOOTH_PLAY world={}x{} frames={} max_work_per_frame={} peak_carry_work={} dirty_region_cap={} max_dirty_regions_uploaded={} avg_frame_ms={:.2} worst_frame_ms={:.2}",
@@ -731,12 +735,34 @@ impl eframe::App for Tinderbox {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         #[cfg(not(target_arch = "wasm32"))]
         let _ = frame;
+        #[cfg(not(target_arch = "wasm32"))]
+        let mut now = Instant::now();
+        #[cfg(target_arch = "wasm32")]
         let now = Instant::now();
-        let dt = now.duration_since(self.last_frame).as_secs_f32();
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.stress_play
+            && let Some(wait) =
+                MIN_SMOOTH_PLAY_FRAME_INTERVAL.checked_sub(now.duration_since(self.last_frame))
+        {
+            std::thread::sleep(wait);
+            now = Instant::now();
+        }
+        let wall_dt = now.duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
-        self.frame_ms = self.frame_ms * 0.9 + dt * 100.0;
-        self.simulate_frame(ctx, dt);
+        self.frame_ms = self.frame_ms * 0.9 + wall_dt * 100.0;
+        #[cfg(not(target_arch = "wasm32"))]
+        let fixed_step = self.stress_play || self.capture.is_some();
+        #[cfg(target_arch = "wasm32")]
+        let fixed_step = false;
+        let dt = if fixed_step {
+            FIXED_FRAME_DT
+        } else {
+            wall_dt.clamp(0.0, MAX_INTERACTIVE_FRAME_DT)
+        };
+        self.simulate_frame(ctx, dt, wall_dt);
         input::handle_keyboard(self, ctx);
+        // Interactive play and smooth-play use native vsync. Captures request frames
+        // immediately but advance by deterministic fixed simulation steps.
         ctx.request_repaint();
 
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
@@ -958,12 +984,15 @@ fn requested_world_size() -> (usize, usize) {
 #[cfg(not(target_arch = "wasm32"))]
 fn background_window_requested(args: impl IntoIterator<Item = String>) -> bool {
     let args = args.into_iter().collect::<Vec<_>>();
-    args.iter().any(|arg| arg == "--smooth-play")
+    native_args_from(args).is_ok_and(|parsed| {
+        parsed.capture.after_frames.is_some() || parsed.capture.at_seconds.is_some()
+    })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn run() -> eframe::Result {
     let options = eframe::NativeOptions {
+        vsync: true,
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1360.0, 860.0])
             .with_min_inner_size([720.0, 520.0])

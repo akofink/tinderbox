@@ -868,6 +868,23 @@ fn burning_trees_release_a_seed_into_the_canopy_gap() {
 }
 
 #[test]
+fn burned_ash_finds_seed_space_above_a_crowded_canopy() {
+    let mut world = World::new(12, 12, 43, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    for (x, y) in [(5, 7), (4, 8), (6, 8), (5, 9)] {
+        put(&mut world, x, y, "stone");
+    }
+    put(&mut world, 5, 8, "ash");
+    let ash = 8 * world.width() + 5;
+    world.cells[ash].burn_progress = 2;
+
+    world.step(usize::MAX);
+
+    let seed = world.rules().id("seed").unwrap();
+    assert!(world.cells().iter().any(|cell| cell.element == seed));
+    assert_eq!(world.cells()[ash].burn_progress, 0);
+}
+
+#[test]
 fn unsupported_tree_cells_wither_within_64_updates() {
     let mut world = World::new(12, 12, 43, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
     put(&mut world, 5, 3, "tree");

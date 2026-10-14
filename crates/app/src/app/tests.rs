@@ -263,14 +263,22 @@ fn level_recipe_round_trip_and_reset_reproduce_per_cell_attributes() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn smooth_play_is_background_but_capture_windows_are_active() {
+fn smooth_play_is_vsynced_while_capture_windows_are_background() {
     assert!(!background_window_requested(Vec::<String>::new()));
-    assert!(background_window_requested(["--smooth-play".into()]));
-    assert!(!background_window_requested([
+    assert!(!background_window_requested(["--smooth-play".into()]));
+    assert!(background_window_requested([
         "--level".into(),
         "dry.toml".into(),
         "--capture-at-seconds".into(),
         "5".into(),
+        "--screenshot".into(),
+        "dry.png".into(),
+    ]));
+    assert!(background_window_requested([
+        "--level".into(),
+        "dry.toml".into(),
+        "--capture-after".into(),
+        "300".into(),
         "--screenshot".into(),
         "dry.png".into(),
     ]));
@@ -368,7 +376,13 @@ fn smooth_play_skips_setup_and_handles_small_worlds() {
     );
     let level = Preset::DryForest.level(app.world.rules(), 16, 16);
     app.set_level(level).unwrap();
-    app.simulate_frame(&egui::Context::default(), 1.0 / 60.0);
+    app.simulate_frame(&egui::Context::default(), FIXED_FRAME_DT, FIXED_FRAME_DT);
+}
+
+#[test]
+fn deterministic_native_step_targets_sixty_hertz() {
+    assert!((FIXED_FRAME_DT - 1.0 / 60.0).abs() < f32::EPSILON);
+    assert_eq!(MAX_INTERACTIVE_FRAME_DT, 0.25);
 }
 
 #[test]
@@ -390,8 +404,8 @@ fn frame_cap_carries_backlog_but_bounds_long_hitches() {
     assert!(work.pending > 0.0);
     work.accrue(1.0 / 60.0, 1.0);
     let next = work.take();
-    assert!((MAX_WORK_PER_FRAME / 2..=MAX_WORK_PER_FRAME).contains(&next));
-    assert!(work.pending < 0.01);
+    assert_eq!(next, MAX_WORK_PER_FRAME);
+    assert!(work.pending > 0.0);
     let carry_cap = (MAX_WORK_PER_FRAME * MAX_CARRY_FRAMES) as f64;
     work.accrue(10.0, 4.0);
     assert_eq!(work.take(), MAX_WORK_PER_FRAME);
