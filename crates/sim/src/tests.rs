@@ -339,7 +339,7 @@ fn gases_bubble_up_through_water_without_losing_cells() {
 
 #[test]
 fn buoyant_materials_rise_and_dense_lava_sinks() {
-    for buoyant in ["ice", "oil"] {
+    for buoyant in ["ice", "oil", "wood"] {
         let mut world = World::new(1, 8, 31, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
         if buoyant == "ice" {
             world.rules.atmosphere.freezing_point = -20.0;
