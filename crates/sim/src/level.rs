@@ -495,7 +495,7 @@ impl Level {
                         .rules()
                         .id("sand")
                         .ok_or_else(|| LevelError("Boat lake requires sand".into()))?;
-                    let cargo_count = if index == 1 { 3 } else { 8 };
+                    let cargo_count = if index == 1 { 1 } else { 8 };
                     for cargo in 0..cargo_count {
                         let dx = cargo % 4;
                         world.paint(x + dx - 2, y - 3 - cargo / 4, sand);
@@ -861,6 +861,7 @@ mod tests {
         let stone = boats.rules.id("stone").unwrap();
         let sand = boats.rules.id("sand").unwrap();
         let fire = boats.rules.id("fire").unwrap();
+        let wood = boats.rules.id("wood").unwrap();
         assert_eq!(
             boats
                 .cells
@@ -889,12 +890,27 @@ mod tests {
                 .count()
         };
         assert!(
-            cargo_in(2) >= 3,
-            "the loaded boat should carry its three sand cells"
+            cargo_in(2) >= 1,
+            "the lightly loaded boat should carry one sand cell"
         );
         assert!(
             cargo_in(3) >= 8,
             "the overloaded boat should carry eight sand cells"
+        );
+        let hull_top = |body_id| {
+            boats
+                .cells
+                .iter()
+                .enumerate()
+                .filter_map(|(index, cell)| {
+                    (cell.body_id == body_id && cell.element == wood).then_some(index / boats.width)
+                })
+                .min()
+                .unwrap()
+        };
+        assert!(
+            hull_top(2) < hull_top(3),
+            "one sand cell should leave its boat higher than the overloaded hull"
         );
         let lab = Preset::DensityLab
             .level(&rules, 96, 64)
