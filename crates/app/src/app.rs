@@ -191,6 +191,15 @@ pub(super) struct Tinderbox {
     stress_frames: usize,
     stress_total_ms: f64,
     stress_max_ms: f32,
+    stress_max_pan_ms: f32,
+    stress_max_extend_ms: f32,
+    stress_max_texture_ms: f32,
+    stress_max_upload_ms: f32,
+    stress_max_pending_dirty_regions: usize,
+    stress_max_draw_ms: f32,
+    stress_max_step_ms: f32,
+    stress_max_update_work_ms: f32,
+    stress_slow_frames: usize,
     #[cfg(not(target_arch = "wasm32"))]
     capture: Option<CaptureOptions>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -396,6 +405,15 @@ impl Tinderbox {
             stress_frames: 0,
             stress_total_ms: 0.0,
             stress_max_ms: 0.0,
+            stress_max_pan_ms: 0.0,
+            stress_max_extend_ms: 0.0,
+            stress_max_texture_ms: 0.0,
+            stress_max_upload_ms: 0.0,
+            stress_max_pending_dirty_regions: 0,
+            stress_max_draw_ms: 0.0,
+            stress_max_step_ms: 0.0,
+            stress_max_update_work_ms: 0.0,
+            stress_slow_frames: 0,
             #[cfg(not(target_arch = "wasm32"))]
             capture: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -503,6 +521,11 @@ impl Tinderbox {
         if self.level.mode != LevelMode::Endless {
             return;
         }
+        let previous_camera_x = self.camera_x;
+        let previous_view_width = self.camera_view_width;
+        let previous_camera_initialized = self.camera_initialized;
+        let previous_world_width = self.world.width();
+        let previous_world_start = self.world_start_chunk;
         self.center_camera_on_origin(view_width);
         let max_camera_x = (self.world.width() as f32 - view_width.max(1.0)).max(0.0);
         self.camera_x = (self.camera_x + delta).clamp(0.0, max_camera_x);
@@ -514,6 +537,41 @@ impl Tinderbox {
         } else if self.camera_x + view_width > self.world.width() as f32 - chunk * 2.0 {
             self.append_endless_chunk();
         }
+        if self.camera_x != previous_camera_x
+            || self.world.width() != previous_world_width
+            || self.world_start_chunk != previous_world_start
+        {
+            if !previous_camera_initialized
+                || previous_view_width != self.camera_view_width
+                || self.world_start_chunk != previous_world_start
+            {
+                self.mark_visible_world_dirty();
+            } else {
+                self.mark_newly_visible_world_span(previous_camera_x, previous_view_width);
+            }
+        }
+    }
+
+    fn mark_newly_visible_world_span(&mut self, previous_camera_x: f32, previous_view_width: f32) {
+        let old_left = previous_camera_x.floor().max(0.0) as usize;
+        let old_right = (previous_camera_x + previous_view_width).ceil().max(0.0) as usize;
+        let new_left = self.camera_x.floor().max(0.0) as usize;
+        let new_right = (self.camera_x + self.camera_view_width).ceil().max(0.0) as usize;
+        if new_left < old_left {
+            self.world
+                .mark_dirty_rect(new_left, 0, old_left - new_left, self.world.height());
+        }
+        if new_right > old_right {
+            self.world
+                .mark_dirty_rect(old_right, 0, new_right - old_right, self.world.height());
+        }
+    }
+
+    fn mark_visible_world_dirty(&mut self) {
+        let left = self.camera_x.floor().max(0.0) as usize;
+        let right = (self.camera_x + self.camera_view_width).ceil().max(0.0) as usize;
+        self.world
+            .mark_dirty_rect(left, 0, right.saturating_sub(left), self.world.height());
     }
 
     fn append_endless_chunk(&mut self) -> bool {
@@ -522,11 +580,24 @@ impl Tinderbox {
         let Ok(generated) = self.level.generate_chunk(chunk_index, self.world.rules()) else {
             return false;
         };
-        if self.world.extend_horizontal(&generated, false).is_err() {
+        let extend_started = Instant::now();
+        let extended = self.world.extend_horizontal(&generated, false);
+        if self.stress_play {
+            self.stress_max_extend_ms = self
+                .stress_max_extend_ms
+                .max(extend_started.elapsed().as_secs_f32() * 1000.0);
+        }
+        if extended.is_err() {
             return false;
         }
+        let texture_started = Instant::now();
         if self.resize_world_texture() {
             self.world.mark_all_dirty();
+        }
+        if self.stress_play {
+            self.stress_max_texture_ms = self
+                .stress_max_texture_ms
+                .max(texture_started.elapsed().as_secs_f32() * 1000.0);
         }
         true
     }
@@ -536,12 +607,25 @@ impl Tinderbox {
         let Ok(generated) = self.level.generate_chunk(chunk_index, self.world.rules()) else {
             return false;
         };
-        if self.world.extend_horizontal(&generated, true).is_err() {
+        let extend_started = Instant::now();
+        let extended = self.world.extend_horizontal(&generated, true);
+        if self.stress_play {
+            self.stress_max_extend_ms = self
+                .stress_max_extend_ms
+                .max(extend_started.elapsed().as_secs_f32() * 1000.0);
+        }
+        if extended.is_err() {
             return false;
         }
         self.world_start_chunk = chunk_index;
+        let texture_started = Instant::now();
         self.resize_world_texture();
         self.world.mark_all_dirty();
+        if self.stress_play {
+            self.stress_max_texture_ms = self
+                .stress_max_texture_ms
+                .max(texture_started.elapsed().as_secs_f32() * 1000.0);
+        }
         true
     }
 
@@ -978,15 +1062,20 @@ impl Tinderbox {
                     if n % 4 == 0 { fire } else { water },
                 );
             }
-            if self.level.mode == LevelMode::Endless {
-                self.pan_camera(3.0, self.level.width as f32);
+            if self.level.mode == LevelMode::Endless && self.camera_initialized {
+                let pan_started = Instant::now();
+                self.pan_camera(3.0, self.camera_view_width);
+                self.stress_max_pan_ms = self
+                    .stress_max_pan_ms
+                    .max(pan_started.elapsed().as_secs_f32() * 1000.0);
             }
             self.stress_frames += 1;
             self.stress_total_ms += wall_dt as f64 * 1000.0;
             self.stress_max_ms = self.stress_max_ms.max(wall_dt * 1000.0);
+            self.stress_slow_frames += usize::from(wall_dt * 1000.0 > 33.3);
             if self.stress_frames == 900 {
                 println!(
-                    "NATIVE_SMOOTH_PLAY world={}x{} frames={} max_work_per_frame={} peak_carry_work={} dirty_region_cap={} max_dirty_regions_uploaded={} avg_frame_ms={:.2} worst_frame_ms={:.2}",
+                    "NATIVE_SMOOTH_PLAY world={}x{} frames={} max_work_per_frame={} peak_carry_work={} dirty_region_cap={} max_dirty_regions_uploaded={} avg_frame_ms={:.2} worst_frame_ms={:.2} slow_frames_33ms={} max_pan_ms={:.2} max_extend_ms={:.2} max_texture_ms={:.2} max_upload_ms={:.2} max_pending_dirty_regions={} max_draw_ms={:.2} max_step_ms={:.2} max_update_work_ms={:.2}",
                     self.world.width(),
                     self.world.height(),
                     self.stress_frames,
@@ -995,7 +1084,16 @@ impl Tinderbox {
                     MAX_TEXTURE_REGIONS_PER_FRAME,
                     self.max_dirty_regions_uploaded,
                     self.stress_total_ms / self.stress_frames as f64,
-                    self.stress_max_ms
+                    self.stress_max_ms,
+                    self.stress_slow_frames,
+                    self.stress_max_pan_ms,
+                    self.stress_max_extend_ms,
+                    self.stress_max_texture_ms,
+                    self.stress_max_upload_ms,
+                    self.stress_max_pending_dirty_regions,
+                    self.stress_max_draw_ms,
+                    self.stress_max_step_ms,
+                    self.stress_max_update_work_ms
                 );
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
@@ -1029,9 +1127,12 @@ impl Tinderbox {
             let previous_cloud_second = self.sim_seconds.floor();
             let step_started = Instant::now();
             let completed = self.step_world_with_budget(budget);
+            let step_ms = step_started.elapsed().as_secs_f32() * 1000.0;
+            if self.stress_play {
+                self.stress_max_step_ms = self.stress_max_step_ms.max(step_ms);
+            }
             if !fixed_budget {
-                self.adaptive_budget
-                    .observe(completed, step_started.elapsed().as_secs_f64() * 1000.0);
+                self.adaptive_budget.observe(completed, f64::from(step_ms));
             }
             let completed_seconds = completed as f64 / WORK_UNITS_PER_SECOND;
             self.sim_seconds += completed_seconds;
@@ -1040,8 +1141,9 @@ impl Tinderbox {
                 self.sim_rate = self.sim_rate * 0.8 + frame_rate * 0.2;
             }
             if self.sim_seconds.floor() > previous_cloud_second {
-                // Cloud noise and weather fade depend on simulation time, not cell changes.
-                self.world.mark_all_dirty();
+                // Cloud noise and weather fade depend on simulation time. Only visible
+                // columns need an immediate refresh; panning dirties the newly visible span.
+                self.mark_visible_world_dirty();
             }
         }
     }
@@ -1095,6 +1197,7 @@ impl eframe::App for Tinderbox {
         }
         let wall_dt = now.duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
+        let update_work_started = Instant::now();
         self.frame_ms = self.frame_ms * 0.9 + wall_dt * 100.0;
         #[cfg(not(target_arch = "wasm32"))]
         let fixed_step = self.stress_play
@@ -1159,6 +1262,11 @@ impl eframe::App for Tinderbox {
         }
         #[cfg(target_arch = "wasm32")]
         poll_browser_files(ctx, frame, self);
+        if self.stress_play {
+            self.stress_max_update_work_ms = self
+                .stress_max_update_work_ms
+                .max(update_work_started.elapsed().as_secs_f32() * 1000.0);
+        }
     }
 }
 

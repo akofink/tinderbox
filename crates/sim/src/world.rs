@@ -350,6 +350,23 @@ impl World {
         self.dirty_regions.mark_all();
     }
 
+    /// Marks texture regions intersecting a clipped rectangle dirty.
+    pub fn mark_dirty_rect(&mut self, x: usize, y: usize, width: usize, height: usize) {
+        let x_end = x.saturating_add(width).min(self.width);
+        let y_end = y.saturating_add(height).min(self.height);
+        if x >= x_end || y >= y_end {
+            return;
+        }
+        let side = crate::dirty::DIRTY_REGION_SIDE;
+        let x_start = x / side * side;
+        let y_start = y / side * side;
+        for region_y in (y_start..y_end).step_by(side) {
+            for region_x in (x_start..x_end).step_by(side) {
+                self.dirty_regions.mark_cell(region_x, region_y);
+            }
+        }
+    }
+
     /// Removes the oldest dirty texture region, if any.
     ///
     /// Callers should drain a bounded number per frame and preserve the returned region until it

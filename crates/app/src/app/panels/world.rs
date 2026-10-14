@@ -16,7 +16,18 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) -> egui::Rect
         render::fitted_size(&app.world, ui.available_size())
     };
     let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
+    if app.stress_play {
+        app.stress_max_pending_dirty_regions = app
+            .stress_max_pending_dirty_regions
+            .max(app.world.pending_dirty_regions());
+    }
+    let upload_started = std::time::Instant::now();
     let sky = render::upload_dirty(app);
+    if app.stress_play {
+        app.stress_max_upload_ms = app
+            .stress_max_upload_ms
+            .max(upload_started.elapsed().as_secs_f32() * 1000.0);
+    }
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 2.0, Color32::from_rgb(18, 22, 34));
     let view_width = if app.level.mode == tinderbox_sim::level::LevelMode::Endless {
@@ -46,6 +57,7 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) -> egui::Rect
     } else {
         false
     };
+    let draw_started = std::time::Instant::now();
     render::draw_world(
         &app.world_texture,
         &painter,
@@ -86,5 +98,10 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) -> egui::Rect
         }
     }
     super::hud::show(app, &painter, rect);
+    if app.stress_play {
+        app.stress_max_draw_ms = app
+            .stress_max_draw_ms
+            .max(draw_started.elapsed().as_secs_f32() * 1000.0);
+    }
     rect
 }
