@@ -109,15 +109,25 @@ pub(super) struct Tinderbox {
     #[cfg(not(target_arch = "wasm32"))]
     preview_job: Option<PreviewJob>,
     #[cfg(not(target_arch = "wasm32"))]
+    level_reload_job: Option<LevelReloadJob>,
     setup_backup: Option<World>,
     preview_revision: Option<u64>,
     last_setup_revision: u64,
     last_setup_change: Instant,
+    play_when_preview_ready: bool,
+    failed_preview_revision: Option<u64>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 struct PreviewJob {
     revision: u64,
+    receiver: Receiver<Result<World, LevelError>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct LevelReloadJob {
+    level: Level,
+    modified: SystemTime,
     receiver: Receiver<Result<World, LevelError>>,
 }
 
@@ -238,10 +248,13 @@ impl Tinderbox {
             #[cfg(not(target_arch = "wasm32"))]
             preview_job: None,
             #[cfg(not(target_arch = "wasm32"))]
+            level_reload_job: None,
             setup_backup: None,
             preview_revision: None,
             last_setup_revision: setup_revision,
             last_setup_change: Instant::now(),
+            play_when_preview_ready: false,
+            failed_preview_revision: None,
         }
     }
 
@@ -301,54 +314,69 @@ impl Tinderbox {
         self.last_setup_revision = self.level_setup.revision;
         self.preview_revision = None;
         self.last_setup_change = Instant::now();
+        self.play_when_preview_ready = false;
+        self.failed_preview_revision = None;
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.preview_job = None;
-            self.setup_backup = None;
+            self.level_reload_job = None;
         }
+        self.setup_backup = None;
     }
 
     fn setup_action(&mut self, action: SetupAction) {
         match action {
             SetupAction::Play(level) => {
-                let applied = if self.preview_revision == Some(self.level_setup.revision) {
-                    self.level = level;
-                    self.reset_simulation_clock();
-                    Ok(())
+                if let Err(error) = level.validate() {
+                    self.level_setup.error = Some(error.to_string());
+                    return;
+                }
+                if self.failed_preview_revision == Some(self.level_setup.revision) {
+                    return;
+                }
+                if self.preview_revision == Some(self.level_setup.revision) {
+                    self.finish_setup_play(level);
                 } else {
-                    self.set_level(level)
-                };
-                match applied {
-                    Ok(()) => {
-                        #[cfg(not(target_arch = "wasm32"))]
-                        {
-                            self.preview_job = None;
-                            self.setup_backup = None;
-                        }
-                        self.preview_revision = None;
-                        self.level_setup.open = false;
-                        self.running = true;
-                    }
-                    Err(error) => self.level_setup.error = Some(error.to_string()),
+                    self.play_when_preview_ready = true;
+                    self.level_setup.set_message(
+                        "Preparing this level. Play will start when its preview is ready.",
+                    );
+                    self.last_setup_change = Instant::now() - std::time::Duration::from_millis(200);
                 }
             }
             SetupAction::Cancel => {
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     self.preview_job = None;
-                    if let Some(world) = self.setup_backup.take() {
-                        self.install_world(world);
-                    }
+                }
+                if let Some(world) = self.setup_backup.take() {
+                    self.install_world(world);
                 }
                 self.preview_revision = None;
+                self.play_when_preview_ready = false;
                 self.level_setup.open = false;
                 self.running = self.return_running;
             }
         }
     }
 
-    fn apply_setup_preview(&mut self, world: World, revision: u64) {
+    fn finish_setup_play(&mut self, level: Level) {
+        self.level = level;
+        self.reset_simulation_clock();
+        self.preview_revision = None;
+        self.play_when_preview_ready = false;
         #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.preview_job = None;
+            self.level_reload_job = None;
+        }
+        self.setup_backup = None;
+        self.level_setup.open = false;
+        self.level_setup.set_message("");
+        self.running = true;
+    }
+
+    fn apply_setup_preview(&mut self, world: World, revision: u64) {
         if self.setup_backup.is_none() {
             let size_changed =
                 (world.width(), world.height()) != (self.world.width(), self.world.height());
@@ -360,10 +388,11 @@ impl Tinderbox {
         } else {
             self.install_world(world);
         }
-        #[cfg(target_arch = "wasm32")]
-        self.install_world(world);
         self.preview_revision = Some(revision);
         self.level_setup.error = None;
+        if self.play_when_preview_ready {
+            self.finish_setup_play(self.level_setup.draft.clone());
+        }
     }
 
     fn update_setup_preview(&mut self) {
@@ -373,9 +402,11 @@ impl Tinderbox {
         let revision = self.level_setup.revision;
         if revision != self.last_setup_revision {
             self.last_setup_revision = revision;
+            self.failed_preview_revision = None;
             self.last_setup_change = Instant::now();
         }
         if self.preview_revision == Some(revision)
+            || self.failed_preview_revision == Some(revision)
             || self.last_setup_change.elapsed() < std::time::Duration::from_millis(200)
         {
             return;
@@ -389,12 +420,19 @@ impl Tinderbox {
                     if job.revision == self.level_setup.revision && self.level_setup.open {
                         match result {
                             Ok(world) => self.apply_setup_preview(world, job.revision),
-                            Err(error) => self.level_setup.error = Some(error.to_string()),
+                            Err(error) => {
+                                self.failed_preview_revision = Some(job.revision);
+                                self.play_when_preview_ready = false;
+                                self.level_setup.error = Some(error.to_string());
+                            }
                         }
                     }
                 }
             }
-            if self.preview_job.is_none() && self.preview_revision != Some(revision) {
+            if self.level_setup.open
+                && self.preview_job.is_none()
+                && self.preview_revision != Some(revision)
+            {
                 let rules = self.world.rules().clone();
                 let (sender, receiver) = mpsc::channel();
                 let worker_level = level.clone();
@@ -408,13 +446,32 @@ impl Tinderbox {
         if self.preview_revision != Some(revision) {
             match level.generate(self.world.rules().clone()) {
                 Ok(world) => self.apply_setup_preview(world, revision),
-                Err(error) => self.level_setup.error = Some(error.to_string()),
+                Err(error) => {
+                    self.failed_preview_revision = Some(revision);
+                    self.play_when_preview_ready = false;
+                    self.level_setup.error = Some(error.to_string());
+                }
             }
         }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     fn poll_level_file(&mut self) {
+        if let Some(job) = &self.level_reload_job {
+            if let Ok(result) = job.receiver.try_recv() {
+                let job = self.level_reload_job.take().expect("reload job exists");
+                match result {
+                    Ok(world) => {
+                        self.install_world(world);
+                        self.level = job.level;
+                        self.level_file_modified = Some(job.modified);
+                        self.reset_simulation_clock();
+                        self.running = true;
+                    }
+                    Err(_) => self.level_file_modified = Some(job.modified),
+                }
+            }
+        }
         if self.next_level_file_check > Instant::now() {
             return;
         }
@@ -432,12 +489,25 @@ impl Tinderbox {
         let Ok(level) = Level::load(&text) else {
             return;
         };
-        self.level_file_modified = Some(modified);
         if self.level_setup.open {
+            self.level_file_modified = Some(modified);
             self.level_setup.import_text(text, self.world.rules());
-        } else if self.set_level(level).is_ok() {
-            self.running = true;
+            return;
         }
+        if self.level_reload_job.is_some() {
+            return;
+        }
+        let rules = self.world.rules().clone();
+        let worker_level = level.clone();
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(worker_level.generate(rules));
+        });
+        self.level_reload_job = Some(LevelReloadJob {
+            level,
+            modified,
+            receiver,
+        });
     }
 
     fn wildfire(&mut self) {

@@ -57,6 +57,9 @@ impl LevelSetup {
     pub(super) fn take_loaded_path(&mut self) -> Option<std::path::PathBuf> {
         self.loaded_path.take()
     }
+    pub(super) fn set_message(&mut self, message: impl Into<String>) {
+        self.message = message.into();
+    }
     fn load_text(&mut self, rules: &Rules) {
         match Level::load(&self.text).and_then(|level| {
             // Validate names before replacing the draft, but don't touch the game.
