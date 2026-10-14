@@ -9,6 +9,7 @@
     (() => {
       const retryKey = "_tinderbox_reload";
       let pendingMessage;
+      let recoveryScheduled = false;
       const loadingMessage = (message) => {
         const loading = document.getElementById("loading_text");
         if (loading) loading.textContent = message;
@@ -23,6 +24,8 @@
           loadingMessage("Tinderbox couldn't load after updating. Please reload this page.");
           return;
         }
+        if (recoveryScheduled) return;
+        recoveryScheduled = true;
         loadingMessage("A new version is available. Reloading…");
         url.searchParams.set(retryKey, Date.now().toString());
         window.setTimeout(() => window.location.replace(url.href), 500);
