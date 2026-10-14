@@ -934,6 +934,18 @@ fn burned_patch_regrows_a_recognizable_canopy_within_a_short_play_session() {
 }
 
 #[test]
+fn boat_density_adapter_uses_the_per_element_density() {
+    let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+    let wood = rules.id("wood").unwrap();
+    let water = rules.id("water").unwrap();
+    assert!(rules.elements[wood].density < rules.elements[water].density);
+    rules.elements[wood].density = 45;
+    let world = World::new(32, 24, 1, rules).unwrap();
+    assert_eq!(world.body_material_density(wood), 0.5);
+    assert_eq!(world.body_material_density(water), 1.0);
+}
+
+#[test]
 fn empty_boat_floats_as_one_body_and_cargo_pushes_it_down() {
     let mut world = World::new(32, 24, 1, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
     for x in 1..world.width() - 1 {

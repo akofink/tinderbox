@@ -161,6 +161,18 @@ impl World {
         None
     }
 
+    /// Scale a ruleset density into the boat's existing material-mass units.
+    pub(super) fn body_material_density(&self, element: usize) -> f32 {
+        let element = &self.rules.elements[element];
+        let density = f32::from(element.density);
+        match element.name.as_str() {
+            "wood" => WOOD_MASS as f32 * density / WOOD_DENSITY_REFERENCE,
+            "sand" => SAND_MASS as f32 * density / SAND_DENSITY_REFERENCE,
+            "water" => density / WATER_DENSITY_REFERENCE,
+            _ => density / 100.0,
+        }
+    }
+
     pub(super) fn update_body_at(&mut self, index: usize) {
         let id = self.cells[index].body_id;
         let Some(body_index) = id.checked_sub(1).map(|id| id as usize) else {
@@ -178,8 +190,7 @@ impl World {
         let water_density = self
             .rules
             .id("water")
-            .map(|water| self.rules.elements[water].density as f32 / WATER_DENSITY_REFERENCE)
-            .unwrap_or(1.0);
+            .map_or(1.0, |water| self.body_material_density(water));
         let mut water_above = false;
         for &member in &body.members {
             let x = member % self.width;
@@ -187,15 +198,10 @@ impl World {
             let element_name = self.rules.elements[self.cells[member].element]
                 .name
                 .as_str();
-            let density = self.rules.elements[self.cells[member].element].density as f32;
-            mass += match element_name {
-                "wood" => {
-                    hull_cells += 1;
-                    WOOD_MASS as f32 * density / WOOD_DENSITY_REFERENCE
-                }
-                "sand" => SAND_MASS as f32 * density / SAND_DENSITY_REFERENCE,
-                _ => density / 100.0,
-            };
+            if element_name == "wood" {
+                hull_cells += 1;
+            }
+            mass += self.body_material_density(self.cells[member].element);
             for (dx, dy) in [(0isize, -1isize), (1, 0), (0, 1), (-1, 0)] {
                 let Some(nx) = x
                     .checked_add_signed(dx)
