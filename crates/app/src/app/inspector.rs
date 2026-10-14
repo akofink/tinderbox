@@ -124,7 +124,11 @@ fn describe_cell(world: &World, x: usize, y: usize) -> Option<CellDescription> {
     events.dedup();
     lines.extend(events.into_iter().map(|event| format!("May: {event}")));
     if cell.is_in_body() {
-        lines.push("Part of a moving body or boat".into());
+        lines.push(if element.name == "wood" {
+            "Boat hull: moves as one body with wind and currents".into()
+        } else {
+            "Boat cargo: moves with its hull as one body".into()
+        });
     }
     Some(CellDescription {
         title: crate::labels::display_name(&element.name),
@@ -268,7 +272,28 @@ mod tests {
             seed_description
                 .lines
                 .iter()
-                .any(|line| line.contains("soil"))
+                .any(|line| line.contains("seed may sprout into Plant"))
+        );
+    }
+
+    #[test]
+    fn describes_boat_hull_behavior() {
+        let mut world = World::new(12, 8, 1, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+        let water = world.rules().id("water").unwrap();
+        for x in 3..=9 {
+            world.paint(x, 5, water);
+        }
+        assert!(world.place_boat(6, 4));
+        let wood = world.rules().id("wood").unwrap();
+        let hull_x = 6;
+        let hull_y = 2;
+        assert_eq!(world.cells()[hull_y * world.width() + hull_x].element, wood);
+        let description = describe_cell(&world, hull_x, hull_y).unwrap();
+        assert!(
+            description
+                .lines
+                .iter()
+                .any(|line| line.contains("Boat hull: moves as one body"))
         );
     }
 
