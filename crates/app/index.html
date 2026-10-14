@@ -25,7 +25,7 @@
         }
         loadingMessage("A new version is available. Reloading…");
         url.searchParams.set(retryKey, Date.now().toString());
-        window.location.replace(url.href);
+        window.setTimeout(() => window.location.replace(url.href), 500);
       };
       window.addEventListener("error", (event) => {
         const target = event.target;
