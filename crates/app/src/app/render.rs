@@ -475,7 +475,7 @@ fn heatmap(value: f32, low: f32, high: f32) -> Color32 {
 
 pub(super) fn draw_endless_cursor(painter: &Painter, rect: Rect) {
     let center = rect.center();
-    let stroke = Stroke::new(1.5, Color32::from_rgb(232, 224, 182));
+    let stroke = Stroke::new(1.5_f32, Color32::from_rgb(232, 224, 182));
     painter.circle_stroke(center, 6.0, stroke);
     painter.line_segment(
         [
