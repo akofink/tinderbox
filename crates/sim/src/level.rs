@@ -5,6 +5,30 @@ use std::{collections::BTreeMap, fmt};
 
 pub const MAX_LEVEL_CELLS: usize = 1_048_576;
 pub const MAX_LEVEL_DIMENSION: usize = 2048;
+/// Horizontal cell width of independently generated endless-world regions.
+pub const ENDLESS_CHUNK_WIDTH: usize = 128;
+
+/// A seed-generated strip addressed by its signed horizontal chunk coordinate.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GeneratedChunk {
+    pub index: i64,
+    pub width: usize,
+    pub height: usize,
+    pub cells: Vec<crate::Cell>,
+}
+impl GeneratedChunk {
+    pub fn cell(&self, x: usize, y: usize) -> Option<crate::Cell> {
+        (x < self.width && y < self.height).then(|| self.cells[y * self.width + x])
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LevelMode {
+    #[default]
+    Fixed,
+    Endless,
+}
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -59,6 +83,8 @@ pub struct Level {
     #[serde(with = "seed_format")]
     pub seed: u64,
     pub generator: Generator,
+    #[serde(default)]
+    pub mode: LevelMode,
     #[serde(default)]
     pub wind: Wind,
     #[serde(default = "default_ambient_temperature")]
@@ -167,6 +193,7 @@ impl Preset {
             fit_window: false,
             seed,
             generator,
+            mode: LevelMode::Fixed,
             ambient_temperature: if self == Self::DensityLab { 1 } else { 20 },
             ambient_humidity: 45,
             ambient_oxygen: 21,
@@ -203,6 +230,175 @@ impl Preset {
 }
 
 impl Level {
+    /// Generate an initial resident span of deterministic chunks for endless play.
+    /// The viewport-sized recipe width determines the number of preloaded chunks.
+    pub fn generate_endless_region(&self, rules: &Rules) -> Result<World, LevelError> {
+        self.validate()?;
+        let chunks = self.width.div_ceil(ENDLESS_CHUNK_WIDTH).saturating_add(4);
+        let start = -(chunks as i64 / 2);
+        let mut world = self.generate_endless_region_at(start, chunks, rules)?;
+        if self.spark {
+            place_spark(&mut world);
+        }
+        if self.boat {
+            self.place_recipe_boat(&mut world)?;
+        }
+        world.mark_all_dirty();
+        Ok(world)
+    }
+
+    /// Generate a contiguous resident span at an explicit signed chunk origin.
+    pub fn generate_endless_region_at(
+        &self,
+        start_chunk: i64,
+        chunks: usize,
+        rules: &Rules,
+    ) -> Result<World, LevelError> {
+        if chunks == 0 {
+            return Err(LevelError(
+                "Endless region must contain at least one chunk".into(),
+            ));
+        }
+        let width = chunks
+            .checked_mul(ENDLESS_CHUNK_WIDTH)
+            .ok_or_else(|| LevelError("Endless region width overflow".into()))?;
+        let mut world = World::new(width, self.height, self.seed, rules.clone())
+            .map_err(|error| LevelError(error.to_string()))?;
+        world.set_wind(self.wind.direction, self.wind.strength);
+        world.set_ambient(
+            self.ambient_temperature,
+            self.ambient_humidity,
+            self.ambient_oxygen,
+        );
+        for offset in 0..chunks {
+            let chunk = self.generate_chunk(start_chunk + offset as i64, rules)?;
+            for y in 0..self.height {
+                let destination = y * width + offset * ENDLESS_CHUNK_WIDTH;
+                let source = y * ENDLESS_CHUNK_WIDTH;
+                world.cells[destination..destination + ENDLESS_CHUNK_WIDTH]
+                    .copy_from_slice(&chunk.cells[source..source + ENDLESS_CHUNK_WIDTH]);
+            }
+        }
+        world.mark_all_dirty();
+        Ok(world)
+    }
+
+    /// Generate one endless terrain chunk. Content is a pure function of the level seed,
+    /// signed chunk index, and cell coordinate, so generation order cannot change the result.
+    pub fn generate_chunk(&self, index: i64, rules: &Rules) -> Result<GeneratedChunk, LevelError> {
+        self.validate()?;
+        if self.height < 16 || self.height > MAX_LEVEL_DIMENSION {
+            return Err(LevelError(format!(
+                "Endless world height must be 16..={MAX_LEVEL_DIMENSION}"
+            )));
+        }
+        for name in self.amounts.keys() {
+            if rules.id(name).is_none() {
+                return Err(LevelError(format!(
+                    "Level refers to unknown element '{name}'"
+                )));
+            }
+        }
+        let width = ENDLESS_CHUNK_WIDTH;
+        let height = self.height;
+        let air = rules
+            .id("air")
+            .ok_or_else(|| LevelError("Ruleset must define 'air'".into()))?;
+        let mut cells = vec![
+            crate::Cell {
+                element: air,
+                ..crate::Cell::default()
+            };
+            width * height
+        ];
+        if self.generator == Generator::Empty {
+            return Ok(GeneratedChunk {
+                index,
+                width,
+                height,
+                cells,
+            });
+        }
+        let waterline = height * 3 / 4;
+        let mut materials: Vec<_> = rules
+            .elements
+            .iter()
+            .enumerate()
+            .filter_map(|(id, element)| {
+                let amount = self.amounts.get(&element.name).copied().unwrap_or(0);
+                (amount > 0).then_some((layer(&element.name, element.motion), id, element, amount))
+            })
+            .collect();
+        materials.sort_by(|a, b| (a.0, &a.2.name).cmp(&(b.0, &b.2.name)));
+        for (_, id, element, amount) in materials {
+            let salt = name_hash(&element.name);
+            for local_x in 0..width {
+                let world_x = index
+                    .wrapping_mul(width as i64)
+                    .wrapping_add(local_x as i64);
+                let ground = endless_surface(self.seed, world_x, height, self.generator);
+                let canopy = (height / 12
+                    + (sample_signed(self.seed ^ name_hash("tree"), world_x / 4, 1)
+                        % (height / 8).max(1) as u64) as usize)
+                    .max(2);
+                let flooded =
+                    ground > waterline && self.amounts.get("water").copied().unwrap_or(0) > 0;
+                for y in 0..height {
+                    let eligible = match element.name.as_str() {
+                        "stone" => y >= ground,
+                        "soil" => y >= ground && y < ground + (height / 32).max(2),
+                        "tree" => {
+                            let column = world_x.rem_euclid(4) as usize;
+                            let above = ground.saturating_sub(y);
+                            !flooded
+                                && y < ground
+                                && ((column == 1 && above <= canopy)
+                                    || (column <= 2 && above > 1 && above <= canopy / 2))
+                        }
+                        "plant" | "grass" => !flooded && y < ground && y + 3 >= ground,
+                        "water" => y >= waterline && y < ground,
+                        "sand" | "ash" => y >= ground && y < ground + (height / 16).max(2),
+                        "fire" => !flooded && y + (canopy / 2).max(1) == ground,
+                        _ => match element.motion {
+                            Motion::Static => y < ground && y + (height / 16).max(2) >= ground,
+                            Motion::Fall => y >= ground && y < ground + (height / 24).max(2),
+                            Motion::Liquid => y >= waterline && y < ground,
+                            Motion::Gas => y < ground && y >= height / 3 && y < height / 2,
+                        },
+                    };
+                    let density_x = if element.name == "tree" {
+                        world_x.div_euclid(4) as u64
+                    } else {
+                        world_x as u64
+                    };
+                    if eligible
+                        && sample_signed(self.seed ^ salt, density_x as i64, y as u64 as i64) % 100
+                            < u64::from(amount)
+                    {
+                        let cell = &mut cells[y * width + local_x];
+                        cell.element = id;
+                        if element.name == "tree" && element.lifetime > 0 {
+                            let age_span = u64::from(element.lifetime) * 98 / 100;
+                            if age_span > 0 {
+                                cell.age = (sample_signed(
+                                    self.seed ^ name_hash("tree_age_phase"),
+                                    world_x / 4,
+                                    0,
+                                ) % age_span) as u16;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(GeneratedChunk {
+            index,
+            width,
+            height,
+            cells,
+        })
+    }
+
     /// New ruleset elements automatically get an amount control; air is implicit.
     pub fn add_missing_elements(&mut self, rules: &Rules) {
         for element in &rules.elements {
@@ -298,7 +494,10 @@ impl Level {
                 )));
             }
         }
-        let mut world = World::new(self.width, self.height, self.seed, rules)
+        if self.mode == LevelMode::Endless {
+            return self.generate_endless_region(&rules);
+        }
+        let mut world = World::new(self.width, self.height, self.seed, rules.clone())
             .map_err(|e| LevelError(e.to_string()))?;
         world.set_wind(self.wind.direction, self.wind.strength);
         world.set_ambient(
@@ -789,13 +988,34 @@ fn name_hash(name: &str) -> u64 {
         (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
     })
 }
-fn sample(seed: u64, x: usize, y: usize) -> u64 {
+fn endless_surface(seed: u64, x: i64, height: usize, generator: Generator) -> usize {
+    let span = 96i64;
+    let section = x.div_euclid(span);
+    let offset = x.rem_euclid(span) as usize;
+    let a = sample_signed(seed ^ 913, section, 0) % 1024;
+    let b = sample_signed(seed ^ 913, section.wrapping_add(1), 0) % 1024;
+    let noise = (a as usize * (span as usize - offset) + b as usize * offset) / span as usize;
+    let phase = x.rem_euclid(1024) as usize;
+    let distance = phase.abs_diff(512);
+    let base = match generator {
+        Generator::Island => height / 3 + distance * height / 1024,
+        Generator::Valley => height / 2 - distance * height / 3072,
+        Generator::Empty => height,
+        _ => height * 2 / 3,
+    };
+    (base + noise * height / 1024 / 12).min(height - 1)
+}
+
+fn sample_signed(seed: u64, x: i64, y: i64) -> u64 {
     let mut n = seed
         .wrapping_add((x as u64).wrapping_mul(0x9e3779b97f4a7c15))
         .wrapping_add((y as u64).wrapping_mul(0xd1b54a32d192ed03));
     n = (n ^ (n >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
     n = (n ^ (n >> 27)).wrapping_mul(0x94d049bb133111eb);
     n ^ (n >> 31)
+}
+fn sample(seed: u64, x: usize, y: usize) -> u64 {
+    sample_signed(seed, x as i64, y as i64)
 }
 
 #[cfg(test)]
@@ -804,6 +1024,85 @@ mod tests {
     use crate::DEFAULT_RULES;
     fn rules() -> Rules {
         Rules::load(DEFAULT_RULES).unwrap()
+    }
+
+    #[test]
+    fn endless_chunks_are_seed_and_coordinate_deterministic() {
+        let rules = rules();
+        let level = Preset::DryForest.level(&rules, 128, 96);
+        let east = level.generate_chunk(8, &rules).unwrap();
+        let west = level.generate_chunk(-3, &rules).unwrap();
+        assert_eq!(level.generate_chunk(8, &rules).unwrap(), east);
+        assert_eq!(level.generate_chunk(-3, &rules).unwrap(), west);
+        let mut changed_seed = level.clone();
+        changed_seed.seed = changed_seed.seed.wrapping_add(1);
+        assert_ne!(changed_seed.generate_chunk(8, &rules).unwrap(), east);
+        assert_eq!(east.cells.len(), ENDLESS_CHUNK_WIDTH * east.height);
+    }
+
+    #[test]
+    fn endless_mode_builds_a_resident_span_and_preserves_offset_state() {
+        let rules = rules();
+        let mut level = Preset::DryForest.level(&rules, 128, 64);
+        level.mode = LevelMode::Endless;
+        let mut original = level.generate(rules.clone()).unwrap();
+        assert_eq!(original.width() % ENDLESS_CHUNK_WIDTH, 0);
+        let sand = rules.id("sand").unwrap();
+        original.paint(3, 5, sand);
+        let old_width = original.width();
+        let expanded = level
+            .generate_endless_region_at(-3, old_width / ENDLESS_CHUNK_WIDTH + 1, &rules)
+            .unwrap();
+        let mut expanded = expanded;
+        expanded.preserve_resize_state_from_offset(&original, ENDLESS_CHUNK_WIDTH);
+        assert_eq!(
+            expanded.cells()[5 * expanded.width() + ENDLESS_CHUNK_WIDTH + 3].element,
+            sand
+        );
+        assert!(expanded.width() > old_width);
+    }
+
+    #[test]
+    fn endless_extension_preserves_pending_texture_uploads() {
+        let rules = rules();
+        let mut level = Preset::DryForest.level(&rules, 128, 64);
+        level.mode = LevelMode::Endless;
+        let mut world = level.generate_endless_region(&rules).unwrap();
+        let old_pending = world.pending_dirty_regions();
+        let index = world.width() as i64 / ENDLESS_CHUNK_WIDTH as i64 - 2;
+        let chunk = level.generate_chunk(index, &rules).unwrap();
+        world.extend_horizontal(&chunk, false).unwrap();
+        assert!(world.pending_dirty_regions() > old_pending);
+    }
+
+    #[test]
+    fn adjacent_endless_chunks_join_with_continuous_terrain() {
+        let rules = rules();
+        let base_level = Preset::DryForest.level(&rules, 128, 96);
+        let surface = |chunk: &GeneratedChunk, x: usize| {
+            (0..chunk.height)
+                .find(|&y| {
+                    let id = chunk.cell(x, y).unwrap().element;
+                    ["stone", "soil", "sand", "ash"]
+                        .into_iter()
+                        .filter_map(|name| rules.id(name))
+                        .any(|ground| ground == id)
+                })
+                .unwrap()
+        };
+        for generator in [Generator::Hills, Generator::Island, Generator::Valley] {
+            let mut level = base_level.clone();
+            level.generator = generator;
+            let left = level.generate_chunk(-1, &rules).unwrap();
+            let right = level.generate_chunk(0, &rules).unwrap();
+            let left_edge = surface(&left, left.width - 1);
+            let right_edge = surface(&right, 0);
+            assert!(
+                left_edge.abs_diff(right_edge) <= 1,
+                "{generator:?} terrain seam: {left_edge} vs {right_edge}"
+            );
+            assert_eq!(right.index, left.index + 1);
+        }
     }
     #[test]
     fn generators_and_presets_are_deterministic_including_simulation() {
@@ -1162,6 +1461,7 @@ mod tests {
         let recipe = "version=1\nseed=7\ngenerator='hills'\n[amounts]\nstone=100\n";
         let mut level = Level::load(recipe).unwrap();
         assert!(level.fit_window);
+        assert_eq!(level.mode, LevelMode::Fixed);
         assert_eq!((level.width, level.height), (0, 0));
         assert!(level.generate(rules()).is_err());
         level.width = 96;
@@ -1170,6 +1470,11 @@ mod tests {
         assert!(!text.contains("width ="));
         assert!(!text.contains("height ="));
         assert!(Level::load(&text).unwrap().fit_window);
+        level.mode = LevelMode::Endless;
+        assert_eq!(
+            Level::load(&level.to_toml().unwrap()).unwrap().mode,
+            LevelMode::Endless
+        );
     }
 
     #[test]

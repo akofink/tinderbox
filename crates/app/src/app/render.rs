@@ -473,11 +473,42 @@ fn heatmap(value: f32, low: f32, high: f32) -> Color32 {
     Color32::from_rgb(r as u8, g as u8, b as u8)
 }
 
-pub(super) fn draw_world(texture: &TextureHandle, painter: &Painter, rect: Rect) {
+pub(super) fn draw_endless_cursor(painter: &Painter, rect: Rect) {
+    let center = rect.center();
+    let stroke = Stroke::new(1.5_f32, Color32::from_rgb(232, 224, 182));
+    painter.circle_stroke(center, 6.0, stroke);
+    painter.line_segment(
+        [
+            Pos2::new(center.x - 10.0, center.y),
+            Pos2::new(center.x + 10.0, center.y),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            Pos2::new(center.x, center.y - 10.0),
+            Pos2::new(center.x, center.y + 10.0),
+        ],
+        stroke,
+    );
+}
+
+pub(super) fn draw_world(
+    texture: &TextureHandle,
+    painter: &Painter,
+    rect: Rect,
+    world_width: usize,
+    camera_x: f32,
+    view_width: f32,
+) {
+    let texture_width = texture.size()[0] as f32;
+    let left = (camera_x / texture_width).clamp(0.0, 1.0);
+    let right =
+        ((camera_x + view_width) / texture_width).clamp(left, world_width as f32 / texture_width);
     painter.image(
         texture.id(),
         rect,
-        Rect::from_min_max(Pos2::ZERO, eframe::egui::pos2(1.0, 1.0)),
+        Rect::from_min_max(Pos2::new(left, 0.0), eframe::egui::pos2(right, 1.0)),
         Color32::WHITE,
     );
 }
@@ -531,31 +562,37 @@ pub(super) fn draw_life_sprites(
     rect: Rect,
     overlay: Overlay,
     sky: &[bool],
+    camera_x: f32,
+    view_width: f32,
 ) {
     if overlay != Overlay::None {
         return;
     }
-    let cell_width = rect.width() / world.width() as f32;
+    let cell_width = rect.width() / view_width.max(1.0);
     let cell_height = rect.height() / world.height() as f32;
-    for (index, cell) in world.cells().iter().enumerate() {
-        let name = &world.rules().elements[cell.element].name;
-        let Some(kind) = life_sprite(name) else {
-            continue;
-        };
-        let x = index % world.width();
-        let y = index / world.width();
-        let exposed = has_sky_neighbor(x, y, world.width(), world.height(), sky);
-        if !exposed || (kind == LifeSprite::Fungus && !fungus_cap_anchor(world, x, y, sky)) {
-            continue;
-        }
-        let center = Pos2::new(
-            rect.left() + (x as f32 + 0.5) * cell_width,
-            rect.top() + (y as f32 + 0.5) * cell_height,
-        );
-        match kind {
-            LifeSprite::Beetle => draw_beetle(painter, center, cell_width, cell_height),
-            LifeSprite::Termite => draw_termite(painter, center, cell_width, cell_height),
-            LifeSprite::Fungus => draw_fungus(painter, center, cell_width, cell_height),
+    let x_start = camera_x.floor().max(0.0) as usize;
+    let x_end = (camera_x + view_width).ceil().min(world.width() as f32) as usize;
+    for y in 0..world.height() {
+        for x in x_start..x_end {
+            let index = y * world.width() + x;
+            let cell = &world.cells()[index];
+            let name = &world.rules().elements[cell.element].name;
+            let Some(kind) = life_sprite(name) else {
+                continue;
+            };
+            let exposed = has_sky_neighbor(x, y, world.width(), world.height(), sky);
+            if !exposed || (kind == LifeSprite::Fungus && !fungus_cap_anchor(world, x, y, sky)) {
+                continue;
+            }
+            let center = Pos2::new(
+                rect.left() + (x as f32 + 0.5 - camera_x) * cell_width,
+                rect.top() + (y as f32 + 0.5) * cell_height,
+            );
+            match kind {
+                LifeSprite::Beetle => draw_beetle(painter, center, cell_width, cell_height),
+                LifeSprite::Termite => draw_termite(painter, center, cell_width, cell_height),
+                LifeSprite::Fungus => draw_fungus(painter, center, cell_width, cell_height),
+            }
         }
     }
 }
@@ -703,7 +740,7 @@ mod tests {
     use std::collections::BTreeMap;
     use tinderbox_sim::{
         Cell, DEFAULT_RULES, Rules, Wind, WindDirection,
-        level::{Generator, Level},
+        level::{Generator, Level, LevelMode},
     };
 
     fn cloud_coverage_at(humidity: u8, sim_seconds: f64) -> f32 {
@@ -998,6 +1035,7 @@ mod tests {
             fit_window: false,
             seed: 731,
             generator: Generator::Hills,
+            mode: LevelMode::Fixed,
             wind: Wind {
                 direction: WindDirection::East,
                 strength: 1,

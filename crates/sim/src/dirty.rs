@@ -78,6 +78,15 @@ impl DirtyRegions {
         })
     }
 
+    pub(super) fn pending_origins(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+        self.order.iter().map(|index| {
+            (
+                index % self.chunks_x * DIRTY_REGION_SIDE,
+                index / self.chunks_x * DIRTY_REGION_SIDE,
+            )
+        })
+    }
+
     pub(super) fn len(&self) -> usize {
         self.order.len()
     }

@@ -1,6 +1,6 @@
 //! Application loop and shared sandbox state. Native and wasm share this UI.
 pub(crate) mod files;
-mod input;
+pub(crate) mod input;
 mod inspector;
 mod level_setup;
 mod panels;
@@ -20,10 +20,10 @@ use std::{
     sync::mpsc::{self, Receiver},
     time::SystemTime,
 };
-use tinderbox_sim::level::{MAX_LEVEL_CELLS, MAX_LEVEL_DIMENSION};
+use tinderbox_sim::level::{ENDLESS_CHUNK_WIDTH, MAX_LEVEL_CELLS, MAX_LEVEL_DIMENSION};
 use tinderbox_sim::{
     DEFAULT_RULES, Rules, World,
-    level::{Level, LevelError, Preset},
+    level::{Level, LevelError, LevelMode, Preset},
 };
 use web_time::Instant;
 
@@ -118,6 +118,9 @@ pub(super) struct Tinderbox {
     frame_ms: f32,
     resize_target: Option<(usize, usize)>,
     resize_target_since: Instant,
+    camera_x: f32,
+    camera_initialized: bool,
+    world_start_chunk: i64,
     stress_play: bool,
     stress_frames: usize,
     stress_total_ms: f64,
@@ -172,6 +175,7 @@ struct CaptureOptions {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct NativeArgs {
     level_path: Option<PathBuf>,
+    camera_x: Option<usize>,
     capture: CaptureOptions,
 }
 impl Tinderbox {
@@ -209,6 +213,9 @@ impl Tinderbox {
             app.level.fit_window = level.fit_window;
             app.set_level(level)
                 .expect("validated level recipe must generate");
+            if let Some(camera_x) = args.camera_x {
+                app.set_camera_x(camera_x);
+            }
             app.level_setup.open = false;
             app.running =
                 args.capture.after_frames != Some(0) && args.capture.at_seconds != Some(0);
@@ -284,6 +291,9 @@ impl Tinderbox {
             frame_ms: 0.0,
             resize_target: None,
             resize_target_since: Instant::now(),
+            camera_x: 0.0,
+            camera_initialized: false,
+            world_start_chunk: 0,
             stress_play,
             stress_frames: 0,
             stress_total_ms: 0.0,
@@ -314,6 +324,10 @@ impl Tinderbox {
     }
 
     pub(super) fn resize_world_to_fit(&mut self, available: egui::Vec2) {
+        if self.level.mode == LevelMode::Endless {
+            self.resize_target = None;
+            return;
+        }
         let (width, height) = fitted_world_dimensions(available, self.cell_size);
         let target = (width, height);
         if target == (self.world.width(), self.world.height()) {
@@ -342,16 +356,120 @@ impl Tinderbox {
         self.install_world(resized);
     }
 
-    fn resize_world_texture(&mut self) {
+    fn reset_camera(&mut self) {
+        self.reset_camera_mode(self.level.mode);
+    }
+
+    fn reset_camera_mode(&mut self, mode: LevelMode) {
+        if mode == LevelMode::Endless {
+            let chunks = self.world.width() / ENDLESS_CHUNK_WIDTH;
+            self.world_start_chunk = -(chunks as i64 / 2);
+            self.camera_x = (self.world.width().saturating_sub(self.level.width) as f32) / 2.0;
+            self.camera_initialized = false;
+        } else {
+            self.world_start_chunk = 0;
+            self.camera_x = 0.0;
+            self.camera_initialized = true;
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn set_camera_x(&mut self, camera_x: usize) {
+        if self.level.mode != LevelMode::Endless {
+            return;
+        }
+        let camera_x = camera_x as f32;
+        let buffer = (ENDLESS_CHUNK_WIDTH * 2) as f32;
+        while camera_x + self.level.width as f32 > self.world.width() as f32 - buffer {
+            if !self.append_endless_chunk() {
+                break;
+            }
+        }
+        self.camera_x =
+            camera_x.min((self.world.width() as f32 - self.level.width as f32).max(0.0));
+        self.camera_initialized = true;
+    }
+
+    pub(super) fn center_camera_on_origin(&mut self, view_width: f32) {
+        if self.level.mode != LevelMode::Endless || self.camera_initialized {
+            return;
+        }
+        let origin_x = -(self.world_start_chunk as f32) * ENDLESS_CHUNK_WIDTH as f32;
+        let max_camera_x = (self.world.width() as f32 - view_width.max(1.0)).max(0.0);
+        self.camera_x = (origin_x - view_width.max(1.0) / 2.0).clamp(0.0, max_camera_x);
+        self.camera_initialized = true;
+    }
+
+    pub(super) fn pan_camera(&mut self, delta: f32, view_width: f32) {
+        if self.level.mode != LevelMode::Endless {
+            return;
+        }
+        self.center_camera_on_origin(view_width);
+        let max_camera_x = (self.world.width() as f32 - view_width.max(1.0)).max(0.0);
+        self.camera_x = (self.camera_x + delta).clamp(0.0, max_camera_x);
+        let chunk = ENDLESS_CHUNK_WIDTH as f32;
+        if self.camera_x < chunk * 2.0 {
+            if !self.prepend_endless_chunk() {
+                return;
+            }
+            self.camera_x += chunk;
+        } else if self.camera_x + view_width > self.world.width() as f32 - chunk * 2.0 {
+            self.append_endless_chunk();
+        }
+    }
+
+    fn append_endless_chunk(&mut self) -> bool {
+        let chunk_index =
+            self.world_start_chunk + (self.world.width() / ENDLESS_CHUNK_WIDTH) as i64;
+        let Ok(generated) = self.level.generate_chunk(chunk_index, self.world.rules()) else {
+            return false;
+        };
+        if self.world.extend_horizontal(&generated, false).is_err() {
+            return false;
+        }
+        if self.resize_world_texture() {
+            self.world.mark_all_dirty();
+        }
+        true
+    }
+
+    fn prepend_endless_chunk(&mut self) -> bool {
+        let chunk_index = self.world_start_chunk - 1;
+        let Ok(generated) = self.level.generate_chunk(chunk_index, self.world.rules()) else {
+            return false;
+        };
+        if self.world.extend_horizontal(&generated, true).is_err() {
+            return false;
+        }
+        self.world_start_chunk = chunk_index;
+        self.resize_world_texture();
+        self.world.mark_all_dirty();
+        true
+    }
+
+    fn resize_world_texture(&mut self) -> bool {
+        self.resize_world_texture_for_mode(self.level.mode)
+    }
+
+    fn resize_world_texture_for_mode(&mut self, mode: LevelMode) -> bool {
+        let texture_width = if mode == LevelMode::Endless {
+            self.world.width().next_power_of_two()
+        } else {
+            self.world.width()
+        };
+        if self.world_texture.size() == [texture_width, self.world.height()] {
+            return false;
+        }
         let air = self.world.rules().id("air").unwrap_or(0);
         let color = self.world.rules().elements[air].color;
         self.world_texture.set(
             egui::ColorImage::new(
-                [self.world.width(), self.world.height()],
+                [texture_width, self.world.height()],
                 egui::Color32::from_rgb(color[0], color[1], color[2]),
             ),
             egui::TextureOptions::NEAREST,
         );
+        true
     }
 
     fn install_world(&mut self, world: World) {
@@ -373,8 +491,9 @@ impl Tinderbox {
 
     fn set_level(&mut self, level: Level) -> Result<(), LevelError> {
         let world = level.generate(self.world.rules().clone())?;
-        self.install_world(world);
         self.level = level;
+        self.install_world(world);
+        self.reset_camera();
         self.reset_simulation_clock();
         self.preview_revision = None;
         Ok(())
@@ -430,6 +549,7 @@ impl Tinderbox {
             SetupAction::Cancel => {
                 if let Some(world) = self.setup_backup.take() {
                     self.install_world(world);
+                    self.reset_camera();
                 }
                 self.preview_revision = None;
                 self.play_when_preview_ready = false;
@@ -441,6 +561,7 @@ impl Tinderbox {
 
     fn finish_setup_play(&mut self, level: Level) {
         self.level = level;
+        self.reset_camera();
         self.reset_simulation_clock();
         self.preview_revision = None;
         self.play_when_preview_ready = false;
@@ -463,9 +584,14 @@ impl Tinderbox {
             if size_changed {
                 self.resize_world_texture();
             }
+            self.reset_camera_mode(self.level_setup.draft.mode);
             self.world.mark_all_dirty();
         } else {
             self.install_world(world);
+            self.reset_camera_mode(self.level_setup.draft.mode);
+        }
+        if self.resize_world_texture_for_mode(self.level_setup.draft.mode) {
+            self.world.mark_all_dirty();
         }
         self.preview_revision = Some(revision);
         self.level_setup.error = None;
@@ -679,6 +805,9 @@ impl Tinderbox {
                     self.world.height() * 2 / 3,
                     if n % 4 == 0 { fire } else { water },
                 );
+            }
+            if self.level.mode == LevelMode::Endless {
+                self.pan_camera(3.0, self.level.width as f32);
             }
             self.stress_frames += 1;
             self.stress_total_ms += wall_dt as f64 * 1000.0;
@@ -901,6 +1030,10 @@ fn native_args_from(args: impl IntoIterator<Item = String>) -> Result<NativeArgs
                 "screenshot",
                 args.next().ok_or("--screenshot requires a PNG path")?,
             )),
+            "--camera-x" => Some((
+                "camera-x",
+                args.next().ok_or("--camera-x requires a cell coordinate")?,
+            )),
             "--capture-after" => Some((
                 "frames",
                 args.next()
@@ -923,6 +1056,13 @@ fn native_args_from(args: impl IntoIterator<Item = String>) -> Result<NativeArgs
         };
         match flag {
             "level" => parsed.level_path = Some(PathBuf::from(value)),
+            "camera-x" => {
+                parsed.camera_x = Some(
+                    value
+                        .parse::<usize>()
+                        .map_err(|_| "--camera-x must be a non-negative world-cell coordinate")?,
+                );
+            }
             "screenshot" => parsed.capture.output = Some(PathBuf::from(value)),
             "frames" => {
                 let count = value

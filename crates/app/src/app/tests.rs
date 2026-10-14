@@ -40,6 +40,96 @@ fn debounced_canvas_resize_preserves_cells_and_updates_the_texture_grid() {
 }
 
 #[test]
+fn endless_arrow_keys_scroll_the_camera() {
+    let mut app = Tinderbox::new_state(false);
+    let mut level = app.level.clone();
+    level.mode = LevelMode::Endless;
+    level.width = 128;
+    level.height = 64;
+    app.set_level(level).unwrap();
+    app.center_camera_on_origin(128.0);
+    app.level_setup.open = false;
+    let before = app.world_start_chunk * ENDLESS_CHUNK_WIDTH as i64 + app.camera_x as i64;
+    let ctx = egui::Context::default();
+    let _ = ctx.run(
+        egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::ArrowRight,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        },
+        |ctx| input::handle_keyboard(&mut app, ctx),
+    );
+    let after = app.world_start_chunk * ENDLESS_CHUNK_WIDTH as i64 + app.camera_x as i64;
+    assert_eq!(after, before + 8);
+}
+
+#[test]
+fn endless_camera_centers_the_world_origin_in_the_actual_viewport() {
+    let mut app = Tinderbox::new_state(false);
+    let mut level = app.level.clone();
+    level.mode = LevelMode::Endless;
+    level.width = 1024;
+    level.height = 240;
+    app.set_level(level).unwrap();
+    let origin_x = -(app.world_start_chunk as f32) * ENDLESS_CHUNK_WIDTH as f32;
+    app.center_camera_on_origin(360.0);
+    assert_eq!(app.camera_x, origin_x - 180.0);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn endless_capture_offset_generates_chunks_until_the_camera_is_in_bounds() {
+    let mut app = Tinderbox::new_state(false);
+    let mut level = app.level.clone();
+    level.mode = LevelMode::Endless;
+    level.width = 128;
+    level.height = 64;
+    app.set_level(level).unwrap();
+    app.set_camera_x(900);
+    assert_eq!(app.camera_x, 900.0);
+    assert!(app.world.width() >= 900 + 128 + 2 * ENDLESS_CHUNK_WIDTH);
+    assert_eq!(app.world_start_chunk, -2);
+}
+
+#[test]
+fn endless_camera_expands_deterministic_chunks_in_both_directions() {
+    let mut app = Tinderbox::new_state(false);
+    let mut level = app.level.clone();
+    level.mode = LevelMode::Endless;
+    level.width = 128;
+    level.height = 64;
+    level.fit_window = false;
+    app.set_level(level).unwrap();
+    app.center_camera_on_origin(128.0);
+    let stone = app.world.rules().id("stone").unwrap();
+    let original_global_x = app.world_start_chunk * ENDLESS_CHUNK_WIDTH as i64 + 260;
+    app.world.paint(260, 3, stone);
+    app.pan_camera(-320.0, 128.0);
+    assert_eq!(app.world_start_chunk, -3);
+    assert_eq!(app.camera_x, 128.0);
+    for _ in 0..48 {
+        app.pan_camera(32.0, 128.0);
+    }
+    let east_width = app.world.width();
+    assert!(east_width > 5 * ENDLESS_CHUNK_WIDTH);
+    for _ in 0..96 {
+        app.pan_camera(-32.0, 128.0);
+    }
+    let local_x = (original_global_x - app.world_start_chunk * ENDLESS_CHUNK_WIDTH as i64) as usize;
+    assert_eq!(
+        app.world.cells()[3 * app.world.width() + local_x].element,
+        stone
+    );
+    assert!(app.world_start_chunk < -3);
+    assert!(app.camera_x >= 0.0);
+}
+
+#[test]
 fn startup_waits_for_setup_and_cancel_preserves_a_running_game() {
     let mut app = Tinderbox::new_state(false);
     assert!(app.level_setup.open);
@@ -294,6 +384,8 @@ fn native_recipe_capture_arguments_validate_as_a_pair() {
     let args = native_args_from([
         "--level".into(),
         "dry.toml".into(),
+        "--camera-x".into(),
+        "700".into(),
         "--capture-after".into(),
         "120".into(),
         "--screenshot".into(),
@@ -303,6 +395,7 @@ fn native_recipe_capture_arguments_validate_as_a_pair() {
     ])
     .unwrap();
     assert_eq!(args.level_path, Some(PathBuf::from("dry.toml")));
+    assert_eq!(args.camera_x, Some(700));
     assert_eq!(args.capture.after_frames, Some(120));
     assert_eq!(args.capture.at_seconds, None);
     assert_eq!(args.capture.output, Some(PathBuf::from("dry.png")));
@@ -330,6 +423,7 @@ fn native_recipe_capture_arguments_validate_as_a_pair() {
     assert_eq!(timed.capture.at_seconds, Some(60));
     assert!(native_args_from(["--capture-after".into(), "-1".into()]).is_err());
     assert!(native_args_from(["--capture-at-seconds".into(), "-1".into()]).is_err());
+    assert!(native_args_from(["--camera-x".into(), "west".into()]).is_err());
     assert!(
         native_args_from([
             "--capture-at-seconds".into(),

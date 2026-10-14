@@ -121,10 +121,122 @@ impl World {
         })
     }
 
+    /// Append or prepend one generated horizontal chunk, preserving resident simulation state.
+    pub fn extend_horizontal(
+        &mut self,
+        chunk: &crate::GeneratedChunk,
+        prepend: bool,
+    ) -> Result<(), WorldError> {
+        if chunk.height != self.height
+            || chunk.width == 0
+            || chunk.cells.len() != chunk.width * chunk.height
+        {
+            return Err(WorldError(
+                "generated chunk dimensions do not match the world".into(),
+            ));
+        }
+        let old_width = self.width;
+        let pending_dirty = self.dirty_regions.pending_origins().collect::<Vec<_>>();
+        let new_width = old_width
+            .checked_add(chunk.width)
+            .filter(|width| {
+                width
+                    .checked_mul(self.height)
+                    .is_some_and(|count| count <= 16_777_216)
+            })
+            .ok_or_else(|| WorldError("extended world exceeds the 16,777,216-cell limit".into()))?;
+        let offset_x = if prepend { chunk.width } else { 0 };
+        let count = new_width * self.height;
+        let mut cells = vec![Cell::default(); count];
+        let mut support_age = vec![0; count];
+        let mut gusts = vec![GustCell::default(); count];
+        let old_cells = std::mem::take(&mut self.cells);
+        let old_support_age = std::mem::take(&mut self.tree_support_age);
+        let old_gusts = std::mem::take(&mut self.gusts);
+        for y in 0..self.height {
+            let source = y * old_width;
+            let target = y * new_width + offset_x;
+            cells[target..target + old_width]
+                .copy_from_slice(&old_cells[source..source + old_width]);
+            support_age[target..target + old_width]
+                .copy_from_slice(&old_support_age[source..source + old_width]);
+            gusts[target..target + old_width]
+                .copy_from_slice(&old_gusts[source..source + old_width]);
+            let chunk_target = y * new_width + if prepend { 0 } else { old_width };
+            let chunk_source = y * chunk.width;
+            cells[chunk_target..chunk_target + chunk.width]
+                .copy_from_slice(&chunk.cells[chunk_source..chunk_source + chunk.width]);
+            if let Some(tree) = self.rules.id("tree") {
+                for x in 0..chunk.width {
+                    if cells[chunk_target + x].element == tree {
+                        support_age[chunk_target + x] =
+                            ((y * new_width + if prepend { x } else { old_width + x }) % 64) as u8;
+                    }
+                }
+            }
+        }
+        let mut atmosphere = vec![
+            AtmosphereCell {
+                temperature: self.ambient_temperature,
+                humidity: self.ambient_humidity,
+                pressure: 0.0,
+                oxygen: self.ambient_oxygen,
+            };
+            new_width.div_ceil(ATMOSPHERE_CELL_SIZE) * self.atmosphere_height
+        ];
+        let new_atmosphere_width = new_width.div_ceil(ATMOSPHERE_CELL_SIZE);
+        let atmosphere_offset = offset_x / ATMOSPHERE_CELL_SIZE;
+        for y in 0..self.atmosphere_height {
+            let source = y * self.atmosphere_width;
+            let target = y * new_atmosphere_width + atmosphere_offset;
+            atmosphere[target..target + self.atmosphere_width]
+                .copy_from_slice(&self.atmosphere[source..source + self.atmosphere_width]);
+        }
+        for body in &mut self.bodies {
+            for member in &mut body.members {
+                let x = *member % old_width;
+                let y = *member / old_width;
+                *member = y * new_width + offset_x + x;
+            }
+            body.anchor = *body.members.iter().min().unwrap_or(&0);
+        }
+        self.width = new_width;
+        self.cells = cells;
+        self.tree_support_age = support_age;
+        self.gusts = gusts;
+        self.atmosphere = atmosphere;
+        self.atmosphere_width = new_atmosphere_width;
+        self.atmosphere_cursor = 0;
+        self.atmosphere_credit = 0;
+        self.scheduler = Scheduler::new(count);
+        self.dirty_regions = DirtyRegions::new(new_width, self.height);
+        for (x, y) in pending_dirty {
+            self.dirty_regions.mark_cell(x + offset_x, y);
+        }
+        if prepend {
+            self.mark_all_dirty();
+        } else {
+            for y in 0..self.height {
+                for x in old_width..new_width {
+                    self.dirty_regions.mark_cell(x, y);
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Overlays the overlapping cells and live simulation state from an earlier world.
     /// The receiver supplies newly exposed cells, typically generated from the same level seed.
     pub fn preserve_resize_state_from(&mut self, previous: &World) {
-        let copy_width = self.width.min(previous.width);
+        self.preserve_resize_state_from_offset(previous, 0);
+    }
+
+    /// Preserves a previous world at a horizontal cell offset in a larger regenerated region.
+    pub fn preserve_resize_state_from_offset(&mut self, previous: &World, offset_x: usize) {
+        if offset_x >= self.width {
+            return;
+        }
+        let copy_width = previous.width.min(self.width - offset_x);
         // Keep the world bottom-anchored: shrinking discards sky from the top,
         // while growing adds rows of generated sky above existing terrain.
         let row_offset = self.height as isize - previous.height as isize;
@@ -140,7 +252,7 @@ impl World {
             }
             for x in 0..copy_width {
                 let source = previous.cells[source_y as usize * previous.width + x];
-                let target = y * self.width + x;
+                let target = y * self.width + offset_x + x;
                 self.cells[target] = source;
                 self.cells[target].body_id = 0;
                 if self.rules.id("tree") == Some(source.element) {
@@ -157,8 +269,8 @@ impl World {
                     let x = index % previous.width;
                     let y = index / previous.width;
                     let target_y = y as isize + row_offset;
-                    (x < self.width && (0..self.height as isize).contains(&target_y))
-                        .then(|| target_y as usize * self.width + x)
+                    (x + offset_x < self.width && (0..self.height as isize).contains(&target_y))
+                        .then(|| target_y as usize * self.width + offset_x + x)
                 })
                 .collect();
             if body.members.is_empty() {
@@ -188,9 +300,14 @@ impl World {
                 continue;
             }
             let source_y = source_cell_y as usize / ATMOSPHERE_CELL_SIZE;
-            for x in 0..self.atmosphere_width.min(previous.atmosphere_width) {
+            let target_start = offset_x / ATMOSPHERE_CELL_SIZE;
+            let column_count = self
+                .atmosphere_width
+                .saturating_sub(target_start)
+                .min(previous.atmosphere_width);
+            for x in 0..column_count {
                 if source_y < previous.atmosphere_height {
-                    self.atmosphere[y * self.atmosphere_width + x] =
+                    self.atmosphere[y * self.atmosphere_width + target_start + x] =
                         previous.atmosphere[source_y * previous.atmosphere_width + x];
                 }
             }
