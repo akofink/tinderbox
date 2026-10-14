@@ -2,47 +2,55 @@
 name = "air"
 color = [18, 22, 34]
 motion = "static"
+density = 100
 
 [[elements]]
 name = "sand"
 color = [224, 190, 106]
 motion = "fall"
+density = 220
 
 [[elements]]
 name = "soil"
 color = [121, 82, 54]
 motion = "static"
+density = 230
 
 [[elements]]
 name = "wet_soil"
 color = [91, 68, 53]
 motion = "static"
+density = 230
 
 [[elements]]
 name = "fertile_soil"
 color = [126, 168, 72]
 motion = "static"
+density = 230
 
 [[elements]]
 name = "stone"
 color = [112, 119, 132]
 motion = "static"
+density = 255
 
 [[elements]]
 name = "water"
 color = [50, 133, 232]
 motion = "liquid"
-density = 3
+density = 150
 
 [[elements]]
 name = "ice"
 color = [157, 218, 241]
-motion = "static"
+motion = "fall"
+density = 80
 
 [[elements]]
 name = "wood"
 color = [132, 88, 52]
 motion = "static"
+density = 90
 carries_moisture = true
 moisture_rate = 0.02
 wet_flammability = 0.12
@@ -51,6 +59,7 @@ wet_flammability = 0.12
 name = "tree"
 color = [55, 156, 78]
 motion = "static"
+density = 100
 carries_moisture = true
 moisture_rate = 0.012
 wet_flammability = 0.12
@@ -62,6 +71,7 @@ emission = "seed"
 name = "plant"
 color = [92, 190, 74]
 motion = "static"
+density = 90
 carries_moisture = true
 moisture_rate = 0.04
 wet_flammability = 0.2
@@ -72,6 +82,7 @@ decay_to = "tree"
 name = "deadwood"
 color = [102, 70, 48]
 motion = "fall"
+density = 90
 carries_moisture = true
 moisture_rate = 0.025
 wet_flammability = 0.08
@@ -81,6 +92,7 @@ wind_response = 0.35
 name = "leaf_litter"
 color = [145, 112, 55]
 motion = "fall"
+density = 55
 carries_moisture = true
 moisture_rate = 0.08
 wet_flammability = 0.16
@@ -90,6 +102,7 @@ wind_response = 0.65
 name = "humus"
 color = [76, 74, 46]
 motion = "fall"
+density = 170
 carries_moisture = true
 moisture_rate = 0.05
 wet_flammability = 0.3
@@ -99,6 +112,7 @@ wind_response = 0.5
 name = "fungus"
 color = [202, 186, 155]
 motion = "static"
+density = 90
 lifetime = 240
 decay_to = "soil"
 
@@ -106,6 +120,7 @@ decay_to = "soil"
 name = "beetle"
 color = [112, 67, 42]
 motion = "static"
+density = 80
 lifetime = 180
 decay_to = "wet_soil"
 
@@ -113,6 +128,7 @@ decay_to = "wet_soil"
 name = "termite"
 color = [183, 139, 80]
 motion = "static"
+density = 80
 lifetime = 180
 decay_to = "wet_soil"
 
@@ -120,11 +136,13 @@ decay_to = "wet_soil"
 name = "seed"
 color = [156, 115, 55]
 motion = "fall"
+density = 75
 
 [[elements]]
 name = "fire"
 color = [255, 105, 36]
 motion = "static"
+density = 10
 lifetime = 24
 wind_response = 0.1
 decay_to = "ash"
@@ -134,12 +152,13 @@ emission = "smoke"
 name = "oil"
 color = [91, 72, 29]
 motion = "liquid"
-density = 1
+density = 120
 
 [[elements]]
 name = "oil_fire"
 color = [255, 226, 117]
 motion = "static"
+density = 10
 lifetime = 10
 wind_response = 0.15
 decay_to = "ash"
@@ -149,7 +168,7 @@ emission = "smoke"
 name = "lava"
 color = [237, 75, 26]
 motion = "liquid"
-density = 5
+density = 210
 lifetime = 240
 decay_to = "stone"
 
@@ -157,12 +176,14 @@ decay_to = "stone"
 name = "ash"
 color = [138, 132, 122]
 motion = "fall"
+density = 85
 wind_response = 0.9
 
 [[elements]]
 name = "smoke"
 color = [75, 82, 98]
 motion = "gas"
+density = 20
 wind_response = 1.0
 lifetime = 120
 decay_to = "air"
@@ -171,6 +192,7 @@ decay_to = "air"
 name = "steam"
 color = [183, 205, 224]
 motion = "gas"
+density = 25
 wind_response = 0.7
 lifetime = 120
 decay_to = "water"
@@ -179,6 +201,7 @@ decay_to = "water"
 name = "cloud"
 color = [190, 204, 220]
 motion = "gas"
+density = 30
 wind_response = 0.25
 lifetime = 90
 decay_to = "water"

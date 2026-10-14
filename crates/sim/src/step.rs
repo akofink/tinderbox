@@ -87,7 +87,6 @@ impl World {
         let emission = element.emission;
         let motion = element.motion;
         let wind_response = element.wind_response;
-        let density = element.density;
         if lifetime > 0 {
             self.cells[i].age = self.cells[i].age.saturating_add(1);
             if self.cells[i].age >= lifetime {
@@ -191,37 +190,23 @@ impl World {
             }
         }
         match motion {
-            Motion::Fall if y + 1 < self.height => {
-                self.swap_if_empty(i, i + self.width);
+            Motion::Fall => {
+                if y + 1 < self.height && self.try_density_move(i, i + self.width, true) {
+                    return;
+                }
+                if y > 0 {
+                    self.try_density_move(i, i - self.width, false);
+                }
             }
             Motion::Gas if y > 0 => {
-                self.swap_if_empty(i, i - self.width);
+                self.try_density_move(i, i - self.width, false);
             }
             Motion::Liquid => {
-                if y > 0 {
-                    let above = i - self.width;
-                    let above_element = self.cells[above].element;
-                    if self.rules.elements[above_element].motion == Motion::Liquid
-                        && density < self.rules.elements[above_element].density
-                    {
-                        self.cells.swap(i, above);
-                        self.mark_cell_dirty(i);
-                        self.mark_cell_dirty(above);
-                        return;
-                    }
+                if y + 1 < self.height && self.try_density_move(i, i + self.width, true) {
+                    return;
                 }
-                if y + 1 < self.height {
-                    let below = i + self.width;
-                    let below_element = self.cells[below].element;
-                    if Some(below_element) == self.rules.id("air")
-                        || (self.rules.elements[below_element].motion == Motion::Liquid
-                            && density > self.rules.elements[below_element].density)
-                    {
-                        self.cells.swap(i, below);
-                        self.mark_cell_dirty(i);
-                        self.mark_cell_dirty(below);
-                        return;
-                    }
+                if y > 0 && self.try_density_move(i, i - self.width, false) {
+                    return;
                 }
                 let dir = if self.random_u64() & 1 == 0 {
                     -1isize
@@ -538,12 +523,26 @@ impl World {
         }
     }
 
-    fn swap_if_empty(&mut self, a: usize, b: usize) -> bool {
-        if self
-            .cells
-            .get(b)
-            .is_some_and(|c| Some(c.element) == self.rules.id("air"))
-        {
+    /// Move vertically into empty air or probabilistically displace a less-dense movable neighbor.
+    fn try_density_move(&mut self, a: usize, b: usize, downward: bool) -> bool {
+        let air = self.rules.id("air").unwrap_or(usize::MAX);
+        let moving = self.cells[a].element;
+        let other = self.cells[b].element;
+        let can_displace = self.rules.elements[other].motion != Motion::Static
+            && if downward {
+                self.rules.elements[moving].density > self.rules.elements[other].density
+            } else {
+                self.rules.elements[moving].density < self.rules.elements[other].density
+            };
+        let chance = 0.06
+            + (self.rules.elements[moving]
+                .density
+                .abs_diff(self.rules.elements[other].density) as f32
+                / 255.0)
+                * 0.12;
+        let can_enter_air =
+            other == air && (downward || self.rules.elements[moving].motion == Motion::Gas);
+        if can_enter_air || (can_displace && self.random_f32() < chance) {
             self.cells.swap(a, b);
             self.mark_cell_dirty(a);
             self.mark_cell_dirty(b);
@@ -551,6 +550,13 @@ impl World {
         } else {
             false
         }
+    }
+
+    fn swap_if_empty(&mut self, a: usize, b: usize) -> bool {
+        self.cells
+            .get(b)
+            .is_some_and(|cell| Some(cell.element) == self.rules.id("air"))
+            && self.try_density_move(a, b, true)
     }
 
     fn emit_into_air_near(&mut self, index: usize, element: usize) {

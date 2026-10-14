@@ -212,10 +212,14 @@ impl RulesPanel {
                         }
                     });
                 }
-                ui.collapsing("Material moisture and fire response", |ui| {
-                    let materials: Vec<_> = world.rules().elements.iter().enumerate().map(|(i, e)| (i, e.name.clone(), e.carries_moisture, e.moisture_rate, e.wet_flammability)).collect();
-                    for (index, name, mut enabled, mut rate, mut wet_flammability) in materials {
+                ui.collapsing("Material density, moisture, and fire response", |ui| {
+                    ui.small("Density: air = 100; lower materials rise and higher materials sink when movable.");
+                    let materials: Vec<_> = world.rules().elements.iter().enumerate().map(|(i, e)| (i, e.name.clone(), e.density, e.carries_moisture, e.moisture_rate, e.wet_flammability)).collect();
+                    for (index, name, mut density, mut enabled, mut rate, mut wet_flammability) in materials {
                         ui.label(labels::display_name(&name));
+                        if ui.add(egui::Slider::new(&mut density, 0..=255).text("Density")).changed() {
+                            let _ = world.set_material_density(index, density);
+                        }
                         let mut changed = ui.checkbox(&mut enabled, "Carries moisture").changed();
                         changed |= ui.add(egui::Slider::new(&mut rate, 0.0..=0.25).text("Humidity equilibration")).changed();
                         changed |= ui.add(egui::Slider::new(&mut wet_flammability, 0.0..=1.0).text("Wet flammability")).changed();

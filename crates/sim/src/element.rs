@@ -45,7 +45,7 @@ pub struct Element {
     pub motion: Motion,
     /// Relative response to horizontal wind, from 0.0 (none) to 1.0 (full).
     pub wind_response: f32,
-    /// Relative density used to sort neighboring liquids. Higher values sink.
+    /// Relative density for buoyancy and displacement. Lower values rise; air is the reference.
     pub density: u8,
     pub lifetime: u16,
     pub decay_to: Option<usize>,
