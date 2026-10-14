@@ -25,6 +25,8 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
         ui.separator();
         ui.label("Brush");
         ui.add(egui::Slider::new(&mut app.brush, 1..=16).suffix(" cells"));
+        ui.label("Cell size");
+        ui.add(egui::Slider::new(&mut app.cell_size, 2.0..=8.0).suffix(" pt"));
         ui.label("Speed");
         ui.add(egui::Slider::new(&mut app.speed, 0.25..=4.0).suffix("×"));
         ui.checkbox(&mut app.show_hud, "HUD");

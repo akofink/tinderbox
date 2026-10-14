@@ -1,6 +1,6 @@
 # Level recipes
 
-**Level setup** appears at startup and is available from the game toolbar. Choose a preset, dimensions, seed, terrain, starting wind and element amounts; the world behind the panel regenerates after edits settle. Ambient oxygen defaults to 21%; set it to 0% to make an airless level. Opening setup pauses the game. **Play level** keeps the current preview, while **Cancel / return to game** restores the previous world and run state. On native desktop, a recipe loaded from a file also reloads when that file changes on disk.
+**Level setup** appears at startup and is available from the game toolbar. Choose a preset, fit-to-canvas or advanced explicit dimensions, seed, terrain, starting wind and element amounts; the world behind the panel regenerates after edits settle. By default the grid follows the visible canvas at 3.5 logical points per cell. Change **Cell size** in the toolbar to zoom; resize changes are debounced by 120 ms. Existing cells are kept, newly exposed cells use the recipe's same-seed terrain, and shrinking crops cells beyond the new right or bottom edge. Ambient oxygen defaults to 21%; set it to 0% to make an airless level. Opening setup pauses the game. **Play level** keeps the current preview, while **Cancel / return to game** restores the previous world and run state. On native desktop, a recipe loaded from a file also reloads when that file changes on disk.
 
 - **Dry forest, east wind**: dense trees on rolling stone hills with a few sparks and a gentle east wind. Try pouring water across the fire front.
 - **Island**: a wooded island and sandy shore surrounded by water. Try damming the shoreline with stone.
@@ -9,7 +9,7 @@
 
 Amounts are percentages within a material's terrain region, not fractions of the entire world. Stone makes the underlying terrain, soil and sand coat the ground, trees form clumps above it, water fills depressions, and fire starts along the surface. Other elements use their movement type to choose a region. Every non-air element in the active rules automatically gets a slider, including newly added ones. Zero disables generation of that element, but does not stop painting it or producing it through interactions.
 
-Dimensions range from 16 to 2048 cells per side, with a maximum of 1,048,576 cells total. Large worlds take longer to evolve under the same fixed per-frame simulation work budget. Terrain setup is a one-time operation, outside the simulation hot path.
+Explicit dimensions range from 16 to 2048 cells per side, with a maximum of 1,048,576 cells total. Expand **Advanced world size override** and disable **Fit world to canvas** to store an explicit recipe size. Recipes that omit both `width` and `height` fit the available canvas; specifying only one is invalid. Large worlds take longer to evolve under the same fixed per-frame simulation work budget. Terrain setup is outside the simulation hot path.
 
 ## Save, load and share
 
@@ -41,6 +41,6 @@ tree = 50
 water = 100
 ```
 
-Supported generators are `empty`, `hills`, `island`, and `valley`. Set `boat = true` to add a small wooden hull over water; `boat_sand` stacks 0..8 sand cargo cells, and `boat_burning = true` starts a fire in a hull plank. These optional recipe fields default to no boat, no cargo, and no fire. Seeds are exported as decimal strings to preserve the full 64-bit range; non-negative TOML integers are also accepted. Missing element amounts default to zero. Wind directions are `calm`, `west` and `east`, with strength 0..4; recipes without a wind table default to calm. Older recipes without `ambient_oxygen` default to 21%. Unknown element names, unsupported versions, invalid dimensions and amounts outside 0..100 fail clearly. File loading is limited to 64 KiB.
+Supported generators are `empty`, `hills`, `island`, and `valley`. Set `boat = true` to add a small wooden hull over water; `boat_sand` stacks 0..8 sand cargo cells, and `boat_burning = true` starts a fire in a hull plank. These optional recipe fields default to no boat, no cargo, and no fire. Seeds are exported as decimal strings to preserve the full 64-bit range; non-negative TOML integers are also accepted. Missing element amounts default to zero. Wind directions are `calm`, `west` and `east`, with strength 0..4; recipes without a wind table default to calm. Older recipes without `ambient_oxygen` default to 21%. Unknown element names, unsupported versions, invalid dimensions and amounts outside 0..100 fail clearly. Omit both dimension fields to make the recipe fit the canvas, or include both for an explicit size. File loading is limited to 64 KiB.
 
 **Reset** (or `R`) discards painting and evolution and regenerates the applied level using its original seed, wind and settings. It does not choose a new seed. To get a different world, open setup and use **Next seed**. Setup drafts and loaded files do not change the reset target until Play succeeds.

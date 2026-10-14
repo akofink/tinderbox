@@ -14,6 +14,32 @@ fn play_level(app: &mut Tinderbox, level: Level) {
 }
 
 #[test]
+fn default_world_dimensions_follow_canvas_size_and_cell_size() {
+    let a = fitted_world_dimensions(egui::vec2(960.0, 700.0), 3.5);
+    let b = fitted_world_dimensions(egui::vec2(1280.0, 700.0), 3.5);
+    let zoomed = fitted_world_dimensions(egui::vec2(960.0, 700.0), 4.0);
+    assert_eq!(a, (274, 200));
+    assert_eq!(b, (365, 200));
+    assert_eq!(zoomed, (240, 175));
+}
+
+#[test]
+fn debounced_canvas_resize_preserves_cells_and_updates_the_texture_grid() {
+    let mut app = Tinderbox::new_state(false);
+    let water = app.world.rules().id("water").unwrap();
+    app.world.paint(3, 4, water);
+    let previous = app.world.cells().to_vec();
+    let size = egui::vec2(224.0, 168.0);
+    app.resize_world_to_fit(size);
+    assert_eq!((app.world.width(), app.world.height()), (400, 250));
+    app.resize_target_since = Instant::now() - std::time::Duration::from_millis(121);
+    app.resize_world_to_fit(size);
+    assert_eq!((app.world.width(), app.world.height()), (64, 48));
+    assert_eq!(app.world.cells()[4 * 64 + 3], previous[4 * 400 + 3]);
+    assert_eq!(app.world_texture.size(), [64, 48]);
+}
+
+#[test]
 fn startup_waits_for_setup_and_cancel_preserves_a_running_game() {
     let mut app = Tinderbox::new_state(false);
     assert!(app.level_setup.open);

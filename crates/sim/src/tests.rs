@@ -961,6 +961,7 @@ fn fire_front_spreads_downwind_and_respects_humidity_and_oxygen() {
             version: 1,
             width: 192,
             height: 120,
+            fit_window: false,
             seed: 731,
             generator: Generator::Hills,
             wind: crate::Wind {

@@ -83,7 +83,9 @@ impl RulesPanel {
             .open(&mut open)
             .default_width(470.0)
             .default_height(520.0)
-            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-8.0, 36.0))
+            .default_pos(egui::pos2(190.0, 80.0))
+            .movable(true)
+            .constrain(true)
             .vscroll(true)
             .show(ctx, |ui| {
                 ui.label("Edits apply immediately. Base chance is per neighbor visit; wind can boost it.");

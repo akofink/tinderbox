@@ -118,6 +118,65 @@ impl World {
         })
     }
 
+    /// Overlays the overlapping cells and live simulation state from an earlier world.
+    /// The receiver supplies newly exposed cells, typically generated from the same level seed.
+    pub fn preserve_resize_state_from(&mut self, previous: &World) {
+        let copy_width = self.width.min(previous.width);
+        let copy_height = self.height.min(previous.height);
+
+        self.bodies.clear();
+        for cell in &mut self.cells {
+            cell.body_id = 0;
+        }
+        for y in 0..copy_height {
+            for x in 0..copy_width {
+                let source = previous.cells[y * previous.width + x];
+                let target = y * self.width + x;
+                self.cells[target] = source;
+                self.cells[target].body_id = 0;
+            }
+        }
+        for old_body in &previous.bodies {
+            let mut body = old_body.clone();
+            body.members = old_body
+                .members
+                .iter()
+                .filter_map(|&index| {
+                    let x = index % previous.width;
+                    let y = index / previous.width;
+                    (x < self.width && y < self.height).then_some(y * self.width + x)
+                })
+                .collect();
+            if body.members.is_empty() {
+                continue;
+            }
+            body.anchor = *body.members.iter().min().unwrap_or(&0);
+            body.active = old_body.active;
+            let id = self.bodies.len() as u32 + 1;
+            for &index in &body.members {
+                self.cells[index].body_id = id;
+            }
+            self.bodies.push(body);
+        }
+
+        self.rng = previous.rng;
+        self.density_rng = previous.density_rng;
+        self.weather_rng = previous.weather_rng;
+        self.wind = previous.wind;
+        self.ambient_temperature = previous.ambient_temperature;
+        self.ambient_humidity = previous.ambient_humidity;
+        self.ambient_oxygen = previous.ambient_oxygen;
+        for y in 0..self.atmosphere_height {
+            for x in 0..self.atmosphere_width {
+                if x < previous.atmosphere_width && y < previous.atmosphere_height {
+                    self.atmosphere[y * self.atmosphere_width + x] =
+                        previous.atmosphere[y * previous.atmosphere_width + x];
+                }
+            }
+        }
+        self.mark_all_dirty();
+    }
+
     /// Grid width in cells.
     pub const fn width(&self) -> usize {
         self.width
