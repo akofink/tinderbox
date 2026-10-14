@@ -1,5 +1,5 @@
 //! Atomic live rule edits. Loading never restarts the world or advances its RNG.
-use crate::{AtmosphereRules, Cell, DEFAULT_RULES, Rules, RulesError, World};
+use crate::{AtmosphereRules, Cell, DEFAULT_RULES, EcologyRules, Rules, RulesError, World};
 
 impl World {
     /// Change one material's relative density without advancing simulation time.
@@ -17,6 +17,13 @@ impl World {
     pub fn set_atmosphere_rules(&mut self, settings: AtmosphereRules) -> Result<(), RulesError> {
         crate::rules::validate_atmosphere(&settings)?;
         self.rules.atmosphere = settings;
+        Ok(())
+    }
+
+    /// Atomically replace decomposer and fungus tuning after validation.
+    pub fn set_ecology_rules(&mut self, settings: EcologyRules) -> Result<(), RulesError> {
+        crate::rules::validate_ecology(&settings)?;
+        self.rules.ecology = settings;
         Ok(())
     }
 

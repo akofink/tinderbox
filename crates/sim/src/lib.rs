@@ -9,6 +9,7 @@
 mod bodies;
 mod commands;
 mod dirty;
+mod ecology;
 mod element;
 pub mod level;
 mod rule_controls;
@@ -22,5 +23,5 @@ mod tests;
 
 pub use dirty::DirtyRegion;
 pub use element::{Cell, Element, Motion, Wind, WindDirection};
-pub use rules::{AtmosphereRules, DEFAULT_RULES, Interaction, Rules, RulesError};
+pub use rules::{AtmosphereRules, DEFAULT_RULES, EcologyRules, Interaction, Rules, RulesError};
 pub use world::{AtmosphereCell, World, WorldError};

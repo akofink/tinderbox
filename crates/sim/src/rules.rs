@@ -26,6 +26,7 @@ pub struct Rules {
     pub elements: Vec<Element>,
     pub interactions: Vec<Interaction>,
     pub atmosphere: AtmosphereRules,
+    pub ecology: EcologyRules,
 }
 
 /// Tunable atmospheric physics. Temperatures are in Celsius; rates are per atmosphere update.
@@ -62,6 +63,42 @@ impl Default for AtmosphereRules {
     }
 }
 
+/// Data-driven rates for decomposers and fungus.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct EcologyRules {
+    /// Chance per update that a beetle or termite attempts a one-cell move.
+    pub critter_move_chance: f32,
+    /// Chance of moving away from nearby fire or water.
+    pub flee_chance: f32,
+    /// Chance of breeding when adjacent to a same-species adult.
+    pub breeding_chance: f32,
+    /// Chance per fungus update of colonizing a suitable adjacent cell.
+    pub fungus_spread_chance: f32,
+    /// Chance per update of fading into soil when no adjacent food remains.
+    pub fungus_starvation_chance: f32,
+    /// Humidity below which fungus cannot colonize.
+    pub fungus_min_humidity: f32,
+    /// Temperature above which fungus is killed.
+    pub fungus_kill_temperature: f32,
+    /// Temperature above which fungus colonization slows.
+    pub fungus_slow_temperature: f32,
+}
+impl Default for EcologyRules {
+    fn default() -> Self {
+        Self {
+            critter_move_chance: 0.22,
+            flee_chance: 0.8,
+            breeding_chance: 0.01,
+            fungus_spread_chance: 0.12,
+            fungus_starvation_chance: 0.03,
+            fungus_min_humidity: 35.0,
+            fungus_kill_temperature: 55.0,
+            fungus_slow_temperature: 30.0,
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct RawRules {
@@ -70,6 +107,8 @@ struct RawRules {
     interactions: Vec<RawInteraction>,
     #[serde(default)]
     atmosphere: AtmosphereRules,
+    #[serde(default)]
+    ecology: EcologyRules,
 }
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -108,6 +147,28 @@ struct RawInteraction {
 
 fn default_enabled() -> bool {
     true
+}
+
+pub(crate) fn validate_ecology(settings: &EcologyRules) -> Result<(), RulesError> {
+    let rates = [
+        settings.critter_move_chance,
+        settings.flee_chance,
+        settings.breeding_chance,
+        settings.fungus_spread_chance,
+        settings.fungus_starvation_chance,
+    ];
+    if rates
+        .iter()
+        .any(|rate| !rate.is_finite() || !(0.0..=1.0).contains(rate))
+        || !settings.fungus_min_humidity.is_finite()
+        || !(0.0..=100.0).contains(&settings.fungus_min_humidity)
+        || !settings.fungus_kill_temperature.is_finite()
+        || !settings.fungus_slow_temperature.is_finite()
+        || settings.fungus_slow_temperature >= settings.fungus_kill_temperature
+    {
+        return Err(RulesError("invalid ecology settings".into()));
+    }
+    Ok(())
 }
 
 pub(crate) fn validate_atmosphere(settings: &AtmosphereRules) -> Result<(), RulesError> {
@@ -252,10 +313,12 @@ impl Rules {
             });
         }
         validate_atmosphere(&raw.atmosphere)?;
+        validate_ecology(&raw.ecology)?;
         Ok(Self {
             elements,
             interactions,
             atmosphere: raw.atmosphere,
+            ecology: raw.ecology,
         })
     }
 
@@ -317,6 +380,7 @@ impl Rules {
             elements,
             interactions,
             atmosphere: self.atmosphere.clone(),
+            ecology: self.ecology.clone(),
         })
         .map_err(|e| RulesError(format!("cannot serialize rules: {e}")))?;
         // Public Rules values may have been manually constructed or modified.
