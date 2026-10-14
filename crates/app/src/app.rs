@@ -41,6 +41,8 @@ pub(super) const MAX_TEXTURE_REGIONS_PER_FRAME: usize = 32;
 const FIXED_FRAME_DT: f32 = 1.0 / 60.0;
 #[cfg(not(target_arch = "wasm32"))]
 const MIN_SMOOTH_PLAY_FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_millis(15);
+// Exclude the initial window/surface startup intervals from steady-play metrics.
+const SMOOTH_PLAY_WARMUP_FRAMES: usize = 2;
 const MAX_INTERACTIVE_FRAME_DT: f32 = 0.25;
 
 fn fitted_world_dimensions(available: egui::Vec2, cell_size: f32) -> (usize, usize) {
@@ -191,6 +193,7 @@ pub(super) struct Tinderbox {
     stress_frames: usize,
     stress_total_ms: f64,
     stress_max_ms: f32,
+    stress_frame_intervals_ms: Vec<f32>,
     stress_max_pan_ms: f32,
     stress_max_extend_ms: f32,
     stress_max_texture_ms: f32,
@@ -405,6 +408,7 @@ impl Tinderbox {
             stress_frames: 0,
             stress_total_ms: 0.0,
             stress_max_ms: 0.0,
+            stress_frame_intervals_ms: Vec::new(),
             stress_max_pan_ms: 0.0,
             stress_max_extend_ms: 0.0,
             stress_max_texture_ms: 0.0,
@@ -1050,6 +1054,8 @@ impl Tinderbox {
 
     fn simulate_frame(&mut self, ctx: &egui::Context, dt: f32, wall_dt: f32) {
         if self.stress_play && self.stress_frames < 900 {
+            let frame_index = self.stress_frames;
+            let previous_world_width = self.world.width();
             let water = self.world.rules().id("water").unwrap_or(0);
             let fire = self.world.rules().id("fire").unwrap_or(0);
             for n in 0..32 {
@@ -1070,21 +1076,63 @@ impl Tinderbox {
                     .max(pan_started.elapsed().as_secs_f32() * 1000.0);
             }
             self.stress_frames += 1;
-            self.stress_total_ms += wall_dt as f64 * 1000.0;
-            self.stress_max_ms = self.stress_max_ms.max(wall_dt * 1000.0);
-            self.stress_slow_frames += usize::from(wall_dt * 1000.0 > 33.3);
-            if self.stress_frames == 900 {
+            let frame_ms = wall_dt * 1000.0;
+            self.stress_total_ms += f64::from(frame_ms);
+            self.stress_max_ms = self.stress_max_ms.max(frame_ms);
+            self.stress_frame_intervals_ms.push(frame_ms);
+            if frame_ms > 33.3 {
                 println!(
-                    "NATIVE_SMOOTH_PLAY world={}x{} frames={} max_work_per_frame={} peak_carry_work={} dirty_region_cap={} max_dirty_regions_uploaded={} avg_frame_ms={:.2} worst_frame_ms={:.2} slow_frames_33ms={} max_pan_ms={:.2} max_extend_ms={:.2} max_texture_ms={:.2} max_upload_ms={:.2} max_pending_dirty_regions={} max_draw_ms={:.2} max_step_ms={:.2} max_update_work_ms={:.2}",
+                    "NATIVE_SMOOTH_PLAY_SLOW_FRAME frame={} elapsed_s={:.3} interval_ms={:.2} world={}x{} width_changed={}",
+                    frame_index + 1,
+                    self.stress_total_ms / 1000.0,
+                    frame_ms,
+                    self.world.width(),
+                    self.world.height(),
+                    self.world.width() != previous_world_width
+                );
+            }
+            self.stress_slow_frames += usize::from(frame_ms > 33.3);
+            if self.stress_frames == 900 {
+                let mut sorted_intervals = self.stress_frame_intervals_ms.clone();
+                sorted_intervals.sort_by(f32::total_cmp);
+                let p99_index = (sorted_intervals.len() * 99 / 100).min(sorted_intervals.len() - 1);
+                let mut steady_intervals = self
+                    .stress_frame_intervals_ms
+                    .iter()
+                    .skip(SMOOTH_PLAY_WARMUP_FRAMES)
+                    .copied()
+                    .collect::<Vec<_>>();
+                steady_intervals.sort_by(f32::total_cmp);
+                let steady_p99_index =
+                    (steady_intervals.len() * 99 / 100).min(steady_intervals.len() - 1);
+                let startup_worst_ms = self
+                    .stress_frame_intervals_ms
+                    .iter()
+                    .take(SMOOTH_PLAY_WARMUP_FRAMES)
+                    .copied()
+                    .fold(0.0_f32, f32::max);
+                let steady_avg_ms = steady_intervals
+                    .iter()
+                    .map(|ms| f64::from(*ms))
+                    .sum::<f64>()
+                    / steady_intervals.len() as f64;
+                println!(
+                    "NATIVE_SMOOTH_PLAY world={}x{} frames={} warmup_frames={} max_work_per_frame={} peak_carry_work={} dirty_region_cap={} max_dirty_regions_uploaded={} avg_frame_ms={:.2} p99_frame_ms={:.2} worst_frame_ms={:.2} startup_worst_ms={:.2} steady_avg_frame_ms={:.2} steady_p99_frame_ms={:.2} steady_worst_frame_ms={:.2} slow_frames_33ms={} max_pan_ms={:.2} max_extend_ms={:.2} max_texture_ms={:.2} max_upload_ms={:.2} max_pending_dirty_regions={} max_draw_ms={:.2} max_step_ms={:.2} max_update_work_ms={:.2}",
                     self.world.width(),
                     self.world.height(),
                     self.stress_frames,
+                    SMOOTH_PLAY_WARMUP_FRAMES,
                     MAX_WORK_PER_FRAME,
                     self.peak_carry_work,
                     MAX_TEXTURE_REGIONS_PER_FRAME,
                     self.max_dirty_regions_uploaded,
                     self.stress_total_ms / self.stress_frames as f64,
+                    sorted_intervals[p99_index],
                     self.stress_max_ms,
+                    startup_worst_ms,
+                    steady_avg_ms,
+                    steady_intervals[steady_p99_index],
+                    steady_intervals[steady_intervals.len() - 1],
                     self.stress_slow_frames,
                     self.stress_max_pan_ms,
                     self.stress_max_extend_ms,
