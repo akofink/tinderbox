@@ -25,6 +25,8 @@ impl World {
         self.atmosphere_cursor = 0;
         self.atmosphere_credit = 0;
         self.dirty_regions.mark_all();
+        self.dormant_chunks.clear();
+        self.dormant_bodies.clear();
         self.rng = seed.max(1);
     }
 

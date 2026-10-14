@@ -53,11 +53,12 @@ Example interactions to seed the default ruleset:
 
 Instead of one fixed screen, the world generates seemingly without end and scrolls side to side, with a cursor or
 a simple character as the player's point of presence. Simulating the whole generated span is acceptable at first.
-Implications to keep in mind now: generation stays deterministic per seed and region so terrain regenerates
-identically; storage, dirty uploads, and the coarse atmosphere grid should be expressible as chunks rather than one
-fixed grid; and Cascade's focus-near-the-player lesson becomes the path to simulating only an active span around the
-camera, with distant chunks dormant or coarsely stepped. Edge-dependent rules (for example ambient humidity sources
-at world edges) should not assume fixed edges.
+Generation stays deterministic per seed and region so untouched terrain regenerates identically. Storage,
+dirty uploads, and the coarse atmosphere grid are chunked rather than one fixed grid. The resident simulation is
+an active span around the camera: visible chunks plus a two-chunk margin. The span edge is sealed, the same
+missing-neighbor rule as a fixed world edge, so fire, water, sand, and wind-carried ash do not read or spill into
+dormant chunks. Edited or simulated chunks are restored exactly from a compact snapshot; woken chunks do not catch
+up. Edge-dependent rules (for example ambient humidity sources at world edges) should not assume fixed edges.
 
 ## Engine lessons carried over from Cascade
 

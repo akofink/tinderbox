@@ -2,7 +2,9 @@
 use crate::bodies::Body;
 use crate::dirty::DirtyRegions;
 use crate::scheduler::Scheduler;
+use crate::span::{DormantBody, DormantChunk};
 use crate::{Cell, DirtyRegion, Rules, RulesError, Wind, WindDirection};
+use std::collections::BTreeMap;
 use std::fmt;
 
 /// Invalid grid dimensions or missing required world definitions.
@@ -72,6 +74,13 @@ pub struct World {
     pub(super) ambient_temperature: f32,
     pub(super) ambient_humidity: f32,
     pub(super) ambient_oxygen: f32,
+    /// Signed index of the leftmost resident chunk. Unused while `chunk_width` is 0.
+    pub(super) chunk_origin: i64,
+    /// Endless chunk width. Zero keeps the fixed-world whole-grid behavior.
+    pub(super) chunk_width: usize,
+    pub(super) active_margin_chunks: usize,
+    pub(super) dormant_chunks: BTreeMap<i64, DormantChunk>,
+    pub(super) dormant_bodies: Vec<DormantBody>,
 }
 impl World {
     /// Creates a world with preallocated cells and focus-queue storage.
@@ -118,6 +127,11 @@ impl World {
             ambient_temperature: 20.0,
             ambient_humidity: 45.0,
             ambient_oxygen: 21.0,
+            chunk_origin: 0,
+            chunk_width: 0,
+            active_margin_chunks: 2,
+            dormant_chunks: BTreeMap::new(),
+            dormant_bodies: Vec::new(),
         })
     }
 
@@ -221,6 +235,9 @@ impl World {
                     self.dirty_regions.mark_cell(x, y);
                 }
             }
+        }
+        if prepend && self.chunk_width > 0 && chunk.width == self.chunk_width {
+            self.chunk_origin -= 1;
         }
         Ok(())
     }

@@ -16,6 +16,7 @@ pub mod level;
 mod rule_controls;
 mod rules;
 mod scheduler;
+mod span;
 mod step;
 mod world;
 
@@ -26,4 +27,5 @@ pub use dirty::DirtyRegion;
 pub use element::{Cell, Element, Motion, Wind, WindDirection};
 pub use level::{ENDLESS_CHUNK_WIDTH, GeneratedChunk, LevelMode};
 pub use rules::{AtmosphereRules, DEFAULT_RULES, EcologyRules, Interaction, Rules, RulesError};
+pub use span::SpanAdjustment;
 pub use world::{AtmosphereCell, World, WorldError};
