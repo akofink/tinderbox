@@ -318,7 +318,6 @@ impl Tinderbox {
         self.failed_preview_revision = None;
         #[cfg(not(target_arch = "wasm32"))]
         {
-            self.preview_job = None;
             self.level_reload_job = None;
         }
         self.setup_backup = None;
@@ -345,10 +344,6 @@ impl Tinderbox {
                 }
             }
             SetupAction::Cancel => {
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    self.preview_job = None;
-                }
                 if let Some(world) = self.setup_backup.take() {
                     self.install_world(world);
                 }
@@ -397,6 +392,14 @@ impl Tinderbox {
 
     fn update_setup_preview(&mut self) {
         if !self.level_setup.open {
+            #[cfg(not(target_arch = "wasm32"))]
+            if self
+                .preview_job
+                .as_ref()
+                .is_some_and(|job| job.receiver.try_recv().is_ok())
+            {
+                self.preview_job = None;
+            }
             return;
         }
         let revision = self.level_setup.revision;

@@ -42,6 +42,7 @@ impl LevelSetup {
         }
     }
     pub fn begin(&mut self, level: &Level, rules: &Rules) {
+        self.revision = self.revision.wrapping_add(1);
         self.draft = level.clone();
         self.draft.add_missing_elements(rules);
         self.seed_text = self.draft.seed.to_string();
