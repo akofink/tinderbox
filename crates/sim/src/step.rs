@@ -105,9 +105,12 @@ impl World {
         let wind_response = element.wind_response;
         let is_ash = element.name == "ash";
         let is_tree = element.name == "tree";
-        if is_ash && self.cells[i].burn_progress == 2 && !self.has_nearby_fire(i, 8) {
-            self.release_tree_seed_near(i);
-            self.cells[i].burn_progress = 0;
+        if is_ash && self.cells[i].burn_progress == 2 {
+            let retry_due = self.cells[i].age % 64 == 0;
+            self.cells[i].age = self.cells[i].age.wrapping_add(1);
+            if retry_due && !self.has_nearby_fire(i, 8) && self.release_tree_seed_near(i) {
+                self.cells[i].burn_progress = 0;
+            }
         }
         if is_tree && self.tree_support_age[i] < 64 {
             self.tree_support_age[i] += 1;
@@ -929,12 +932,12 @@ impl World {
             .any(|ny| (min_x..=max_x).any(|nx| self.cells[ny * self.width + nx].element == fire))
     }
 
-    fn release_tree_seed_near(&mut self, index: usize) {
+    fn release_tree_seed_near(&mut self, index: usize) -> bool {
         let Some(seed) = self.rules.id("seed") else {
-            return;
+            return false;
         };
         let Some(air) = self.rules.id("air") else {
-            return;
+            return false;
         };
         let x = index % self.width;
         let y = index / self.width;
@@ -946,9 +949,29 @@ impl World {
         for candidate in candidates.into_iter().flatten() {
             if self.cells[candidate].element == air {
                 self.set_element_inner(candidate, seed, false);
-                break;
+                return true;
             }
         }
+        // Burned ash can be surrounded by the dense canopy the fire front leaves
+        // behind. Search above it like other tree seed emissions rather than
+        // permanently losing regrowth when all three adjacent cells are occupied.
+        let canopy_clearance = self.height.min((self.height / 4).max(8));
+        for dy in 2..=canopy_clearance {
+            let Some(row) = y.checked_sub(dy) else {
+                break;
+            };
+            for dx in [0isize, -1, 1, -2, 2] {
+                let Some(column) = x.checked_add_signed(dx).filter(|x| *x < self.width) else {
+                    continue;
+                };
+                let candidate = row * self.width + column;
+                if self.cells[candidate].element == air {
+                    self.set_element_inner(candidate, seed, false);
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     pub(super) fn mark_cell_dirty(&mut self, index: usize) {
