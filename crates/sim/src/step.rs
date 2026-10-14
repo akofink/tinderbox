@@ -222,6 +222,9 @@ impl World {
                     if self.rules.elements[e].name == "ash" && self.try_roll_down(i, x, y) {
                         return;
                     }
+                    if self.rules.elements[e].name == "sand" && self.try_sand_roll(i, x, y) {
+                        return;
+                    }
                 }
                 if y > 0 {
                     self.try_density_move(i, i - self.width, false);
@@ -231,6 +234,9 @@ impl World {
                 self.try_density_move(i, i - self.width, false);
             }
             Motion::Liquid => {
+                if self.try_liquid_pressure_flow(i, x, y, e) {
+                    return;
+                }
                 if is_water
                     && (x == 0 || x + 1 == self.width)
                     && (y..self.height)
@@ -251,13 +257,27 @@ impl World {
                 if y > 0 && self.try_density_move(i, i - self.width, false) {
                     return;
                 }
-                let dir = if self.random_u64() & 1 == 0 {
+                let first_direction = if self.random_u64() & 1 == 0 {
                     -1isize
                 } else {
                     1
                 };
-                if let Some(nx) = x.checked_add_signed(dir).filter(|v| *v < self.width) {
-                    self.swap_if_empty(i, y * self.width + nx);
+                // Keep rainfall puddles on the original one-sided flow; deep lakes can check both banks.
+                let deep_water = self.rules.elements[e].name == "water"
+                    && (0..8).all(|offset| {
+                        y + offset < self.height && self.cells[i + offset * self.width].element == e
+                    });
+                let directions = if deep_water {
+                    [first_direction, -first_direction]
+                } else {
+                    [first_direction, 0]
+                };
+                for direction in directions.into_iter().filter(|direction| *direction != 0) {
+                    if let Some(nx) = x.checked_add_signed(direction).filter(|v| *v < self.width)
+                        && self.swap_if_empty(i, y * self.width + nx)
+                    {
+                        return;
+                    }
                 }
             }
             _ => {}
@@ -584,6 +604,96 @@ impl World {
         }
     }
 
+    /// Let a surface liquid flow across a bounded horizontal distance toward a lower head.
+    fn try_liquid_pressure_flow(
+        &mut self,
+        index: usize,
+        x: usize,
+        y: usize,
+        element: usize,
+    ) -> bool {
+        // Pressure transfers are for lake columns, not transient shallow rain puddles.
+        if self.cells[index].body_id != 0
+            || self.rules.elements[element].name != "water"
+            || (y > 0 && self.cells[index - self.width].element == element)
+            || !(0..6).all(|offset| {
+                y + offset < self.height
+                    && self.cells[index + offset * self.width].element == element
+            })
+        {
+            return false;
+        }
+        let first_direction = if (x + y) % 2 == 0 { 1isize } else { -1 };
+        let air = self.rules.id("air").unwrap_or(usize::MAX);
+        for direction in [first_direction, -first_direction] {
+            for distance in 1..=256isize {
+                let Some(target_x) = x
+                    .checked_add_signed(direction * distance)
+                    .filter(|x| *x < self.width)
+                else {
+                    break;
+                };
+                let mut surface_y = None;
+                for row in y + 1..(y + 33).min(self.height) {
+                    let target_element = self.cells[row * self.width + target_x].element;
+                    if target_element == element {
+                        surface_y = Some(row);
+                        break;
+                    }
+                    let target_settings = &self.rules.elements[target_element];
+                    if target_element == air
+                        || matches!(target_settings.motion, Motion::Liquid | Motion::Fall)
+                    {
+                        continue;
+                    }
+                    break;
+                }
+                let Some(surface_y) = surface_y else {
+                    continue;
+                };
+                let target = surface_y * self.width + target_x;
+                if surface_y <= y + 1 {
+                    continue;
+                }
+                // A small bounded batch approximates pressure transfer without scanning the lake.
+                let transfer_limit = ((surface_y - y - 1) / 2).min(2);
+                let mut transferred = 0;
+                for offset in 0..transfer_limit {
+                    let source = index + offset * self.width;
+                    let destination = target - (offset + 1) * self.width;
+                    if self.cells[source].element != element
+                        || self.cells[destination].element != air
+                    {
+                        break;
+                    }
+                    self.cells.swap(source, destination);
+                    self.mark_cell_dirty(source);
+                    self.mark_cell_dirty(destination);
+                    transferred += 1;
+                }
+                if transferred > 0 {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Let loose sand roll down a diagonal when the cell directly below is blocked.
+    fn try_sand_roll(&mut self, index: usize, x: usize, y: usize) -> bool {
+        let first_direction = if (x + y) % 2 == 0 { -1isize } else { 1 };
+        for direction in [first_direction, -first_direction] {
+            let Some(target_x) = x.checked_add_signed(direction).filter(|x| *x < self.width) else {
+                continue;
+            };
+            let target = (y + 1) * self.width + target_x;
+            if self.try_density_move(index, target, true) {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Move into empty air or probabilistically displace a less-dense movable neighbor.
     fn try_density_move(&mut self, a: usize, b: usize, downward: bool) -> bool {
         let air = self.rules.id("air").unwrap_or(usize::MAX);
@@ -596,12 +706,20 @@ impl World {
             } else {
                 self.rules.elements[moving].density < self.rules.elements[other].density
             };
-        let chance = 0.06
-            + (self.rules.elements[moving]
-                .density
-                .abs_diff(self.rules.elements[other].density) as f32
-                / 255.0)
-                * 0.12;
+        let density_delta = self.rules.elements[moving]
+            .density
+            .abs_diff(self.rules.elements[other].density) as f32
+            / 255.0;
+        let forceful_fluid_displacement = self.rules.elements[other].motion == Motion::Liquid
+            && matches!(
+                self.rules.elements[moving].name.as_str(),
+                "sand" | "steam" | "ice" | "oil"
+            );
+        let chance = if forceful_fluid_displacement {
+            0.8 + density_delta * 0.2
+        } else {
+            0.06 + density_delta * 0.12
+        };
         let can_enter_air =
             other == air && (downward || self.rules.elements[moving].motion == Motion::Gas);
         if can_enter_air || (can_displace && self.random_density_f32() < chance) {
