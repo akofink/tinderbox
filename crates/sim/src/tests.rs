@@ -17,6 +17,7 @@ fn decomposers_persist_on_a_well_fed_forest_floor_and_decline_without_food() {
         fit_window: false,
         seed: 20_261_013,
         generator: Generator::Hills,
+        mode: crate::level::LevelMode::Fixed,
         wind: Default::default(),
         ambient_temperature: 20,
         ambient_humidity: 100,
@@ -118,6 +119,7 @@ fn forest_floor_critters_move_each_five_second_window() {
         fit_window: false,
         seed: 20_261_013,
         generator: Generator::Hills,
+        mode: crate::level::LevelMode::Fixed,
         wind: Default::default(),
         ambient_temperature: 20,
         ambient_humidity: 100,
@@ -1517,6 +1519,7 @@ fn fire_front_spreads_downwind_and_respects_humidity_and_oxygen() {
             fit_window: false,
             seed: 731,
             generator: Generator::Hills,
+            mode: crate::level::LevelMode::Fixed,
             wind: crate::Wind {
                 direction,
                 strength: 1,

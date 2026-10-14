@@ -4,7 +4,7 @@ use crate::labels::{self, GROUPS};
 use eframe::egui;
 use tinderbox_sim::{
     Rules, WindDirection,
-    level::{Generator, Level, MAX_LEVEL_DIMENSION, Preset},
+    level::{Generator, Level, LevelMode, MAX_LEVEL_DIMENSION, Preset},
 };
 
 pub(crate) enum SetupAction {
@@ -133,6 +133,15 @@ impl LevelSetup {
                     if ui.button("Cancel / return to game").clicked() { action = Some(SetupAction::Cancel); }
                 });
                 ui.checkbox(&mut self.draft.fit_window, "Fit world to canvas");
+                egui::ComboBox::from_label("World mode")
+                    .selected_text(match self.draft.mode {
+                        LevelMode::Fixed => "Fixed size",
+                        LevelMode::Endless => "Endless chunks",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.draft.mode, LevelMode::Fixed, "Fixed size");
+                        ui.selectable_value(&mut self.draft.mode, LevelMode::Endless, "Endless chunks");
+                    });
                 ui.collapsing("Advanced world size override", |ui| {
                     ui.horizontal_wrapped(|ui| {
                         ui.label("Width");

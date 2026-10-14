@@ -10,12 +10,21 @@ pub(super) fn show(app: &Tinderbox, painter: &Painter, rect: Rect) {
         rect.left_top() + egui::Vec2::splat(8.0),
         egui::Align2::LEFT_TOP,
         format!(
-            "{:.1} ms/frame   sim {:.1}s   focus {} carry {}   dirty {}",
+            "{:.1} ms/frame   sim {:.1}s   focus {} carry {}   dirty {}{}",
             app.frame_ms,
             app.sim_seconds,
             app.world.pending_work(),
             app.work.pending.ceil() as usize,
-            app.world.pending_dirty_regions()
+            app.world.pending_dirty_regions(),
+            if app.level.mode == tinderbox_sim::level::LevelMode::Endless {
+                format!(
+                    "   chunk {}",
+                    app.world_start_chunk
+                        + (app.camera_x as usize / tinderbox_sim::ENDLESS_CHUNK_WIDTH) as i64
+                )
+            } else {
+                String::new()
+            }
         ),
         egui::FontId::monospace(13.0),
         Color32::WHITE,

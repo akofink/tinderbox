@@ -1,5 +1,5 @@
 //! Read-only magnified view and plain-language description of the hovered cell.
-use super::Tinderbox;
+use super::{Tinderbox, input};
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Stroke, Vec2};
 use tinderbox_sim::{Motion, World};
 
@@ -219,17 +219,28 @@ fn place_overlays(canvas: Rect, pointer: Pos2, lens_size: Vec2, panel_size: Vec2
     )
 }
 
-pub(super) fn show(app: &Tinderbox, painter: &egui::Painter, canvas: Rect, pointer: Pos2) {
-    let local_x =
-        ((pointer.x - canvas.left()) / canvas.width() * app.world.width() as f32) as usize;
-    let local_y =
-        ((pointer.y - canvas.top()) / canvas.height() * app.world.height() as f32) as usize;
-    let x = local_x.min(app.world.width().saturating_sub(1));
-    let y = local_y.min(app.world.height().saturating_sub(1));
+pub(super) fn show(
+    app: &Tinderbox,
+    painter: &egui::Painter,
+    canvas: Rect,
+    pointer: Pos2,
+    view_width: f32,
+) {
+    let (world_x, world_y) = input::screen_to_world(
+        pointer,
+        canvas,
+        view_width,
+        app.world.height(),
+        app.camera_x,
+    );
+    let x =
+        (world_x.floor() as isize).clamp(0, app.world.width().saturating_sub(1) as isize) as usize;
+    let y =
+        (world_y.floor() as isize).clamp(0, app.world.height().saturating_sub(1) as isize) as usize;
     let Some(description) = describe_cell(&app.world, x, y) else {
         return;
     };
-    let cell_w = canvas.width() / app.world.width() as f32;
+    let cell_w = canvas.width() / view_width.max(1.0);
     let cell_h = canvas.height() / app.world.height() as f32;
     let lens_size = Vec2::new(
         cell_w * LENS_WIDTH as f32 * MAGNIFICATION,
@@ -259,15 +270,16 @@ pub(super) fn show(app: &Tinderbox, painter: &egui::Painter, canvas: Rect, point
         (content_height + 30.0).min(canvas.height() * 0.5),
     );
     let (lens, panel) = place_overlays(canvas, pointer, lens_size, panel_size);
-    let half_w = LENS_WIDTH as f32 / (2.0 * app.world.width() as f32);
+    let texture_width = app.world_texture.size()[0] as f32;
+    let half_w = LENS_WIDTH as f32 / (2.0 * texture_width);
     let half_h = LENS_HEIGHT as f32 / (2.0 * app.world.height() as f32);
     let uv = Rect::from_min_max(
         Pos2::new(
-            (x as f32 / app.world.width() as f32 - half_w).max(0.0),
+            (x as f32 / texture_width - half_w).max(0.0),
             (y as f32 / app.world.height() as f32 - half_h).max(0.0),
         ),
         Pos2::new(
-            (x as f32 / app.world.width() as f32 + half_w).min(1.0),
+            (x as f32 / texture_width + half_w).min(app.world.width() as f32 / texture_width),
             (y as f32 / app.world.height() as f32 + half_h).min(1.0),
         ),
     );
@@ -278,9 +290,13 @@ pub(super) fn show(app: &Tinderbox, painter: &egui::Painter, canvas: Rect, point
         Stroke::new(2.0_f32, Color32::WHITE),
         egui::StrokeKind::Outside,
     );
-    let cell_center = Pos2::new(
-        canvas.left() + (x as f32 + 0.5) * cell_w,
-        canvas.top() + (y as f32 + 0.5) * cell_h,
+    let cell_center = input::world_to_screen(
+        x as f32 + 0.5,
+        y as f32 + 0.5,
+        canvas,
+        view_width,
+        app.world.height(),
+        app.camera_x,
     );
     painter.circle_stroke(
         cell_center,
