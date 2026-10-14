@@ -369,7 +369,10 @@ fn cloud_coverage(humidity: f32) -> f32 {
     if humidity < 45.0 {
         0.0
     } else {
-        (0.10 + (humidity - 50.0).max(0.0) / 50.0 * 0.62).clamp(0.0, 0.72)
+        // Ease the first occasional clouds in between 45% and 50% instead of stepping on at 45%.
+        let onset = ((humidity - 45.0) / 5.0).clamp(0.0, 1.0);
+        let onset = onset * onset * (3.0 - 2.0 * onset);
+        (0.10 * onset + (humidity - 50.0).max(0.0) / 50.0 * 0.62).clamp(0.0, 0.72)
     }
 }
 
@@ -413,13 +416,18 @@ fn interpolated_humidity(world: &World, x: usize, y: usize) -> f32 {
     top * (1.0 - ty) + bottom * ty
 }
 
+// Blending the octaves narrows the noise (standard deviation 0.181, down from 0.216 at #43). Coverage
+// thresholds were tuned against the wider spread, so stretch the blend back to it.
+const CLOUD_NOISE_SPREAD: f32 = 1.19;
+
 fn cloud_noise(x: f32, y: f32) -> f32 {
     // Domain-warped isotropic value noise forms soft, irregular cloud lobes instead of streaks.
     let warp_x = (value_noise(x / 48.0, y / 48.0) - 0.5) * 14.0;
     let warp_y = (value_noise((x + 23.0) / 48.0, (y - 37.0) / 48.0) - 0.5) * 14.0;
     let broad = value_noise((x + warp_x) / 18.0, (y + warp_y) / 18.0);
     let detail = value_noise((x - 31.0) / 9.0, (y + 17.0) / 9.0);
-    (broad * 0.82 + detail * 0.18).clamp(0.0, 1.0)
+    let blended = broad * 0.82 + detail * 0.18;
+    ((blended - 0.5) * CLOUD_NOISE_SPREAD + 0.5).clamp(0.0, 1.0)
 }
 
 fn value_noise(x: f32, y: f32) -> f32 {
@@ -987,7 +995,7 @@ mod tests {
         assert!(cloud_drift_offset(Wind::default(), 20.0) > calm);
     }
 
-    fn weather_capture_coverage(world: &World, sim_seconds: f64) -> f32 {
+    fn weather_capture_coverage(world: &World, ambient_humidity: u8, sim_seconds: f64) -> f32 {
         const CAPTURE_X: usize = 8;
         const CAPTURE_Y: usize = 17;
         const CAPTURE_WIDTH: usize = 383;
@@ -1009,7 +1017,7 @@ mod tests {
                 height: CAPTURE_HEIGHT,
             },
             Overlay::None,
-            100,
+            ambient_humidity,
             sim_seconds,
             &sky_mask(world),
             &smoothed_skyline(world),
@@ -1023,7 +1031,7 @@ mod tests {
             / image.pixels.len() as f32
     }
 
-    fn full_humidity_weather_level() -> Level {
+    fn hills_weather_level(ambient_humidity: u8) -> Level {
         let mut amounts = BTreeMap::new();
         amounts.insert("stone".into(), 100);
         amounts.insert("soil".into(), 100);
@@ -1041,7 +1049,7 @@ mod tests {
                 strength: 1,
             },
             ambient_temperature: 20,
-            ambient_humidity: 100,
+            ambient_humidity,
             ambient_oxygen: 21,
             amounts,
             spark: true,
@@ -1051,9 +1059,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn full_humidity_cloud_coverage_stays_substantial_through_thirty_seconds() {
-        let mut world = full_humidity_weather_level()
+    fn weather_coverage_through_thirty_seconds(ambient_humidity: u8) -> Vec<f32> {
+        let mut world = hills_weather_level(ambient_humidity)
             .generate(Rules::load(DEFAULT_RULES).unwrap())
             .unwrap();
         let mut coverage = Vec::new();
@@ -1061,16 +1068,60 @@ mod tests {
             world.step(12_000);
             if frame % 600 == 0 {
                 let seconds = frame / 60;
-                coverage.push(weather_capture_coverage(&world, seconds as f64));
+                coverage.push(weather_capture_coverage(
+                    &world,
+                    ambient_humidity,
+                    seconds as f64,
+                ));
             }
         }
         assert_eq!(coverage.len(), 3);
+        coverage
+    }
+
+    #[test]
+    fn full_humidity_cloud_coverage_stays_substantial_through_thirty_seconds() {
+        let coverage = weather_coverage_through_thirty_seconds(100);
         for (seconds, fraction) in [10, 20, 30].into_iter().zip(coverage) {
             assert!(
                 fraction >= 0.18,
                 "100% humidity cloud coverage at {seconds}s should remain substantial, got {:.1}%",
                 fraction * 100.0
             );
+        }
+    }
+
+    #[test]
+    fn half_humidity_cloud_coverage_stays_visible_through_thirty_seconds() {
+        let coverage = weather_coverage_through_thirty_seconds(50);
+        for (seconds, fraction) in [10, 20, 30].into_iter().zip(coverage) {
+            assert!(
+                (0.03..=0.08).contains(&fraction),
+                "50% humidity cloud coverage at {seconds}s should be a visible band of 3% to 8%, got {:.1}%",
+                fraction * 100.0
+            );
+        }
+    }
+
+    #[test]
+    fn cloud_coverage_rises_smoothly_with_humidity() {
+        let mut previous = cloud_coverage(0.0);
+        assert_eq!(previous, 0.0, "zero humidity must render clear sky");
+        for step in 1..=200 {
+            let humidity = step as f32 * 0.5;
+            let coverage = cloud_coverage(humidity);
+            assert!(
+                coverage >= previous,
+                "coverage should not fall as humidity rises: {:.3} at {humidity}% after {:.3}",
+                coverage,
+                previous
+            );
+            assert!(
+                coverage - previous < 0.02,
+                "coverage should rise without steps: {:.3} at {humidity}%",
+                coverage - previous
+            );
+            previous = coverage;
         }
     }
 
