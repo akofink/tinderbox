@@ -63,8 +63,6 @@ pub struct Element {
 pub struct Cell {
     pub element: usize,
     pub(crate) age: u16,
-    /// Per-cell grace period before the first tree support check.
-    pub(crate) support_age: u8,
     /// Intrinsic moisture on a 0..=255 scale.
     pub moisture: u8,
     /// Burn progress on a 0..=255 scale.

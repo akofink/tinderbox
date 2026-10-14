@@ -387,6 +387,9 @@ impl Level {
                         let index = y * self.width + x;
                         world.cells[index].element = id;
                         world.cells[index].age = 0;
+                        if element.name == "tree" {
+                            world.tree_support_age[index] = (index % 64) as u8;
+                        }
                         if element.name == "tree" && element.lifetime > 0 {
                             // A four-column forest cohort gets one deterministic lifecycle phase.
                             // This keeps generated tree death staggered without runtime randomness.
@@ -753,7 +756,6 @@ fn shift_column(
             crate::Cell {
                 element: air,
                 age: 0,
-                support_age: 0,
                 moisture: 0,
                 burn_progress: 0,
                 body_id: 0,

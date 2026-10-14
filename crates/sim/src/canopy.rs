@@ -9,6 +9,16 @@ impl World {
         )
     }
 
+    /// Fast path for a tree chain: its lower neighbor is checked independently.
+    pub(super) fn tree_has_direct_support(&self, index: usize) -> bool {
+        let row = index / self.width;
+        if row + 1 >= self.height {
+            return true;
+        }
+        let below = self.cells[index + self.width].element;
+        self.rules.elements[below].name == "tree" || self.is_ground_element(below)
+    }
+
     /// Whether this tree cell has a living, downhill tree path to stable ground.
     pub(super) fn tree_has_ground_support(&self, index: usize) -> bool {
         let tree = self.rules.id("tree").unwrap_or(usize::MAX);
@@ -58,10 +68,8 @@ impl World {
                         if (-2..=2).contains(&offset) {
                             next[(offset + 2) as usize] = true;
                         }
-                    } else {
-                        if self.is_ground_element(element) {
-                            return true;
-                        }
+                    } else if self.is_ground_element(element) {
+                        return true;
                     }
                 }
             }
@@ -73,22 +81,7 @@ impl World {
         }
     }
 
-    /// Remove unsupported tree cells from a generated or resized world.
-    pub(super) fn drop_unsupported_canopy(&mut self) {
-        let Some(tree) = self.rules.id("tree") else {
-            return;
-        };
-        let Some(deadwood) = self.rules.id("deadwood") else {
-            return;
-        };
-        for index in 0..self.cells.len() {
-            if self.cells[index].element == tree && !self.tree_has_ground_support(index) {
-                self.set_element_inner(index, deadwood, false);
-            }
-        }
-    }
-
-    /// Drop tree cells disconnected by a trunk's removal, including their unsupported crown.
+    /// Drop unsupported canopy cells adjacent to a removed trunk.
     pub(super) fn drop_unsupported_canopy_near(&mut self, index: usize) {
         let Some(tree) = self.rules.id("tree") else {
             return;
@@ -98,7 +91,6 @@ impl World {
         };
         let x = index % self.width;
         let y = index / self.width;
-        let mut pending = Vec::with_capacity(8);
         for (dx, dy) in [(-1isize, 0isize), (1, 0), (0, -1), (0, 1)] {
             let Some(nx) = x.checked_add_signed(dx).filter(|x| *x < self.width) else {
                 continue;
@@ -106,23 +98,31 @@ impl World {
             let Some(ny) = y.checked_add_signed(dy).filter(|y| *y < self.height) else {
                 continue;
             };
-            pending.push(ny * self.width + nx);
-        }
-        while let Some(candidate) = pending.pop() {
-            if self.cells[candidate].element != tree || self.tree_has_ground_support(candidate) {
-                continue;
+            let neighbor = ny * self.width + nx;
+            if self.cells[neighbor].element == tree && !self.tree_has_ground_support(neighbor) {
+                self.set_element_inner(neighbor, deadwood, false);
+                self.schedule_canopy_check_near(neighbor);
             }
-            self.set_element_inner(candidate, deadwood, false);
-            let x = candidate % self.width;
-            let y = candidate / self.width;
-            for (dx, dy) in [(-1isize, 0isize), (1, 0), (0, -1), (0, 1)] {
-                let Some(nx) = x.checked_add_signed(dx).filter(|x| *x < self.width) else {
-                    continue;
-                };
-                let Some(ny) = y.checked_add_signed(dy).filter(|y| *y < self.height) else {
-                    continue;
-                };
-                pending.push(ny * self.width + nx);
+        }
+    }
+
+    /// Start a short support-check grace period for adjacent tree cells.
+    pub(super) fn schedule_canopy_check_near(&mut self, index: usize) {
+        let Some(tree) = self.rules.id("tree") else {
+            return;
+        };
+        let x = index % self.width;
+        let y = index / self.width;
+        for (dx, dy) in [(-1isize, 0isize), (1, 0), (0, -1), (0, 1)] {
+            let Some(nx) = x.checked_add_signed(dx).filter(|x| *x < self.width) else {
+                continue;
+            };
+            let Some(ny) = y.checked_add_signed(dy).filter(|y| *y < self.height) else {
+                continue;
+            };
+            let neighbor = ny * self.width + nx;
+            if self.cells[neighbor].element == tree {
+                self.tree_support_age[neighbor] = (neighbor % 64) as u8;
             }
         }
     }

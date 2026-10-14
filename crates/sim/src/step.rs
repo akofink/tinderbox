@@ -103,11 +103,17 @@ impl World {
         let emission = element.emission;
         let motion = element.motion;
         let wind_response = element.wind_response;
-        if element.name == "tree" && self.cells[i].support_age < 64 {
-            self.cells[i].support_age += 1;
-            if self.cells[i].support_age == 64 {
-                if self.tree_has_ground_support(i) {
-                    self.cells[i].support_age = u8::MAX;
+        let is_ash = element.name == "ash";
+        let is_tree = element.name == "tree";
+        if is_ash && self.cells[i].burn_progress == 2 && !self.has_nearby_fire(i, 8) {
+            self.release_tree_seed_near(i);
+            self.cells[i].burn_progress = 0;
+        }
+        if is_tree && self.tree_support_age[i] < 64 {
+            self.tree_support_age[i] += 1;
+            if self.tree_support_age[i] == 64 {
+                if self.tree_has_direct_support(i) || self.tree_has_ground_support(i) {
+                    self.tree_support_age[i] = u8::MAX;
                 } else if let Some(deadwood) = self.rules.id("deadwood") {
                     self.set_element(i, deadwood);
                     return;
@@ -853,25 +859,37 @@ impl World {
         let previous = self.cells[index].element;
         let previous_burn_progress = self.cells[index].burn_progress;
         let changed = previous != element;
-        let tree = self.rules.id("tree");
-        let fire = self.rules.id("fire");
-        let ash = self.rules.id("ash");
-        let tree_became_fire = changed && tree == Some(previous) && fire == Some(element);
-        let lost_tree_support = changed
-            && ((tree == Some(previous) && fire != Some(element))
-                || (fire == Some(previous) && ash == Some(element) && previous_burn_progress > 0)
-                || (self.is_ground_element(previous) && !self.is_ground_element(element)));
+        let previous_name = self.rules.elements[previous].name.as_str();
+        let element_name = self.rules.elements[element].name.as_str();
+        let previous_is_tree = previous_name == "tree";
+        let previous_is_fire = previous_name == "fire";
+        let element_is_tree = element_name == "tree";
+        let element_is_fire = element_name == "fire";
+        let tree_became_fire = changed && previous_is_tree && element_is_fire;
+        let lost_tree_support = changed && previous_is_tree && !element_is_fire;
+        let burned_tree_support_lost =
+            changed && previous_is_fire && element_name == "ash" && previous_burn_progress > 0;
+        let previous_is_ground = matches!(
+            previous_name,
+            "soil" | "wet_soil" | "fertile_soil" | "stone" | "sand"
+        );
+        let lost_ground_support = changed && previous_is_ground && !self.is_ground_element(element);
         let added_unsupported_tree =
-            changed && tree == Some(element) && !self.tree_has_ground_support(index);
+            changed && element_is_tree && !self.tree_has_ground_support(index);
         self.detach_body_member(index);
         self.cells[index] = crate::Cell {
             element,
             age: 0,
-            support_age: 0,
             moisture: 0,
             // Tag tree-born flames so canopy can drop after they finish burning,
             // rather than interrupting the fire front while it is still spreading.
-            burn_progress: u8::from(tree_became_fire),
+            burn_progress: if tree_became_fire {
+                1
+            } else if burned_tree_support_lost {
+                2
+            } else {
+                0
+            },
             body_id: 0,
         };
         if changed {
@@ -880,10 +898,55 @@ impl World {
         if lost_tree_support && check_canopy_support {
             self.drop_unsupported_canopy_near(index);
         }
+        if burned_tree_support_lost && check_canopy_support {
+            self.schedule_canopy_check_near(index);
+        }
+        if lost_ground_support && index >= self.width {
+            let above = index - self.width;
+            if self.rules.elements[self.cells[above].element].name == "tree" {
+                self.tree_support_age[above] = (above % 64) as u8;
+            }
+        }
         if added_unsupported_tree {
             if let Some(deadwood) = self.rules.id("deadwood") {
                 self.set_element_inner(index, deadwood, false);
                 self.drop_unsupported_canopy_near(index);
+            }
+        }
+    }
+
+    fn has_nearby_fire(&self, index: usize, radius: usize) -> bool {
+        let Some(fire) = self.rules.id("fire") else {
+            return false;
+        };
+        let x = index % self.width;
+        let y = index / self.width;
+        let min_x = x.saturating_sub(radius);
+        let max_x = (x + radius).min(self.width - 1);
+        let min_y = y.saturating_sub(radius);
+        let max_y = (y + radius).min(self.height - 1);
+        (min_y..=max_y)
+            .any(|ny| (min_x..=max_x).any(|nx| self.cells[ny * self.width + nx].element == fire))
+    }
+
+    fn release_tree_seed_near(&mut self, index: usize) {
+        let Some(seed) = self.rules.id("seed") else {
+            return;
+        };
+        let Some(air) = self.rules.id("air") else {
+            return;
+        };
+        let x = index % self.width;
+        let y = index / self.width;
+        let candidates = [
+            y.checked_sub(1).map(|ny| ny * self.width + x),
+            x.checked_sub(1).map(|nx| y * self.width + nx),
+            (x + 1 < self.width).then_some(y * self.width + x + 1),
+        ];
+        for candidate in candidates.into_iter().flatten() {
+            if self.cells[candidate].element == air {
+                self.set_element_inner(candidate, seed, false);
+                break;
             }
         }
     }

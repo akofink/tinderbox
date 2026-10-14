@@ -8,11 +8,11 @@ impl World {
         self.cells.fill(Cell {
             element: air,
             age: 0,
-            support_age: 0,
             moisture: 0,
             burn_progress: 0,
             body_id: 0,
         });
+        self.tree_support_age.fill(0);
         self.scheduler.reset();
         self.bodies.clear();
         self.gusts.fill(Default::default());
@@ -48,11 +48,11 @@ impl World {
         self.cells[index] = Cell {
             element,
             age: 0,
-            support_age: 0,
             moisture: 0,
             burn_progress: 0,
             body_id: 0,
         };
+        self.tree_support_age[index] = (index % 64) as u8;
         self.attach_cargo(index);
         self.scheduler.enqueue_focus(index);
         let x = index % self.width;

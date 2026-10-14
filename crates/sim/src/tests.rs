@@ -420,7 +420,6 @@ fn put(world: &mut World, x: usize, y: usize, element: &str) {
     world.cells[index] = crate::Cell {
         element: id,
         age: 0,
-        support_age: 0,
         moisture: 0,
         burn_progress: 0,
         body_id: 0,
@@ -840,6 +839,35 @@ fn trees_die_into_organic_matter_and_plants_mature_into_trees() {
 }
 
 #[test]
+fn burning_trees_release_a_seed_into_the_canopy_gap() {
+    let mut world = World::new(12, 12, 42, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    put(&mut world, 5, 10, "soil");
+    put(&mut world, 5, 9, "tree");
+    let tree = world.rules().id("tree").unwrap();
+    let fire = world.rules().id("fire").unwrap();
+    let ash = world.rules().id("ash").unwrap();
+    let trunk = 9 * world.width() + 5;
+
+    world.set_element(trunk, fire);
+    assert!(has(&world, 5, 9, "fire"));
+    assert_eq!(world.cells()[trunk].element, fire);
+    world.set_element(trunk, ash);
+    assert_ne!(world.cells()[trunk].element, tree);
+    assert_ne!(world.cells()[trunk].burn_progress, 0);
+    world.step(usize::MAX);
+
+    let seed = world.rules().id("seed").unwrap();
+    let plant = world.rules().id("plant").unwrap();
+    assert!(
+        (7..=9).any(|y| {
+            let element = world.cells()[y * world.width() + 5].element;
+            element == seed || element == plant
+        }),
+        "an extinguished tree should leave a viable seed above its burned trunk"
+    );
+}
+
+#[test]
 fn unsupported_tree_cells_wither_within_64_updates() {
     let mut world = World::new(12, 12, 43, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
     put(&mut world, 5, 3, "tree");
@@ -876,8 +904,8 @@ fn unsupported_canopy_falls_after_its_living_trunk_dies() {
     let trunk = 6 * world.width() + 5;
     world.cells[trunk].age = world.rules.elements[tree].lifetime - 1;
 
-    // Sixteen complete sweeps are under one second at the native simulation rate.
-    for _ in 0..16 {
+    // Support checks are phase-staggered across 64 updates to keep frame work bounded.
+    for _ in 0..64 {
         world.step(usize::MAX);
     }
     assert!(

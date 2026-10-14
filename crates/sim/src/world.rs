@@ -54,6 +54,7 @@ pub struct World {
     pub(super) width: usize,
     pub(super) height: usize,
     pub(super) cells: Vec<Cell>,
+    pub(super) tree_support_age: Vec<u8>,
     pub(super) bodies: Vec<Body>,
     pub(super) rules: Rules,
     pub(super) scheduler: Scheduler,
@@ -93,13 +94,13 @@ impl World {
                 Cell {
                     element: air,
                     age: 0,
-                    support_age: 0,
                     moisture: 0,
                     burn_progress: 0,
                     body_id: 0,
                 };
                 count
             ],
+            tree_support_age: vec![0; count],
             rules,
             bodies: Vec::new(),
             scheduler: Scheduler::new(count),
@@ -142,6 +143,9 @@ impl World {
                 let target = y * self.width + x;
                 self.cells[target] = source;
                 self.cells[target].body_id = 0;
+                if self.rules.id("tree") == Some(source.element) {
+                    self.tree_support_age[target] = (target % 64) as u8;
+                }
             }
         }
         for old_body in &previous.bodies {
@@ -191,7 +195,6 @@ impl World {
                 }
             }
         }
-        self.drop_unsupported_canopy();
         self.mark_all_dirty();
     }
 
