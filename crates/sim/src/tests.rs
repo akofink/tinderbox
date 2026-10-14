@@ -14,6 +14,7 @@ fn decomposers_persist_on_a_well_fed_forest_floor_and_decline_without_food() {
         version: 1,
         width: 20,
         height: 16,
+        fit_window: false,
         seed: 20_261_013,
         generator: Generator::Hills,
         wind: Default::default(),
