@@ -505,6 +505,210 @@ fn damp_organic_matter_wakes_decomposers_and_returns_fertile_soil() {
 }
 
 #[test]
+fn critters_walk_supported_surfaces_but_not_open_air() {
+    let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+    rules.ecology.critter_move_chance = 1.0;
+    rules.ecology.flee_chance = 0.0;
+    let mut world = World::new(8, 8, 91, rules).unwrap();
+    for x in 1..=4 {
+        put(&mut world, x, 5, "stone");
+    }
+    put(&mut world, 2, 4, "beetle");
+    world.scheduler.enqueue_focus(2 + 4 * world.width());
+    world.step(1);
+    assert_eq!(
+        world
+            .cells()
+            .iter()
+            .filter(|c| world.rules().elements[c.element].name == "beetle")
+            .count(),
+        1
+    );
+    assert_ne!(
+        world.cells()[2 + 4 * world.width()].element,
+        world.rules().id("beetle").unwrap()
+    );
+    for _ in 0..10 {
+        let position = world
+            .cells()
+            .iter()
+            .position(|cell| cell.element == world.rules().id("beetle").unwrap())
+            .unwrap();
+        world.scheduler.enqueue_focus(position);
+        world.step(1);
+    }
+    assert_eq!(
+        world
+            .cells()
+            .iter()
+            .filter(|cell| cell.element == world.rules().id("beetle").unwrap())
+            .count(),
+        1
+    );
+    assert_eq!(
+        world
+            .cells()
+            .iter()
+            .position(|cell| cell.element == world.rules().id("beetle").unwrap())
+            .unwrap()
+            / world.width(),
+        4
+    );
+
+    let mut open = World::new(8, 8, 91, {
+        let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+        rules.ecology.critter_move_chance = 1.0;
+        rules
+    })
+    .unwrap();
+    put(&mut open, 3, 2, "termite");
+    let index = 3 + 2 * open.width();
+    open.scheduler.enqueue_focus(index);
+    open.step(1);
+    assert_eq!(
+        open.cells()[index + open.width()].element,
+        open.rules().id("termite").unwrap()
+    );
+}
+
+#[test]
+fn fungus_colonizes_damp_habitat_and_heat_kills_it() {
+    let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+    rules.ecology.fungus_spread_chance = 1.0;
+    rules.ecology.fungus_starvation_chance = 0.0;
+    let mut world = World::new(8, 8, 92, rules).unwrap();
+    world.set_ambient(20, 90, 21);
+    put(&mut world, 1, 1, "fungus");
+    put(&mut world, 3, 1, "deadwood");
+    let deadwood = 3 + world.width();
+    world.cells[deadwood].moisture = 80;
+    put(&mut world, 2, 2, "stone");
+    let index = 1 + world.width();
+    world.scheduler.enqueue_focus(index);
+    world.step(1);
+    assert_eq!(
+        world.cells()[2 + world.width()].element,
+        world.rules().id("fungus").unwrap()
+    );
+
+    let mut hot = World::new(8, 8, 93, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    hot.set_ambient(60, 90, 21);
+    put(&mut hot, 2, 2, "fungus");
+    let index = 2 + 2 * hot.width();
+    hot.scheduler.enqueue_focus(index);
+    hot.step(1);
+    assert_eq!(hot.cells()[index].element, hot.rules().id("soil").unwrap());
+
+    let mut starving_rules = Rules::load(DEFAULT_RULES).unwrap();
+    starving_rules.ecology.fungus_starvation_chance = 1.0;
+    let mut starving = World::new(8, 8, 97, starving_rules).unwrap();
+    put(&mut starving, 2, 2, "fungus");
+    let index = 2 + 2 * starving.width();
+    starving.scheduler.enqueue_focus(index);
+    starving.step(1);
+    assert_eq!(
+        starving.cells()[index].element,
+        starving.rules().id("soil").unwrap()
+    );
+}
+
+#[test]
+fn critters_flee_fire_and_turn_meals_into_fertile_soil() {
+    let mut fleeing = World::new(8, 8, 94, {
+        let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+        rules.ecology.critter_move_chance = 1.0;
+        rules.ecology.flee_chance = 1.0;
+        rules
+    })
+    .unwrap();
+    for x in 1..=5 {
+        put(&mut fleeing, x, 5, "stone");
+    }
+    put(&mut fleeing, 3, 3, "fire");
+    put(&mut fleeing, 3, 4, "beetle");
+    let beetle = fleeing.rules().id("beetle").unwrap();
+    let stone = fleeing.rules().id("stone").unwrap();
+    let fire = 3 + 3 * fleeing.width();
+    let start = 3 + 4 * fleeing.width();
+    fleeing.scheduler.enqueue_focus(start);
+    fleeing.step(1);
+    let positions: Vec<_> = fleeing
+        .cells()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, cell)| (cell.element == beetle).then_some(index))
+        .collect();
+    assert_eq!(positions.len(), 1);
+    assert_ne!(positions[0], start);
+    let beetle_x = positions[0] % fleeing.width();
+    let beetle_y = positions[0] / fleeing.width();
+    let fire_x = fire % fleeing.width();
+    let fire_y = fire / fleeing.width();
+    assert!(beetle_x.abs_diff(fire_x) + beetle_y.abs_diff(fire_y) > 1);
+    assert_ne!(positions[0] / fleeing.width(), 5);
+    assert_eq!(fleeing.cells()[positions[0]].element, beetle);
+    assert_ne!(fleeing.cells()[positions[0]].element, stone);
+
+    let mut foraging = guaranteed_world(95, &[("beetle", "leaf_litter")]);
+    put(&mut foraging, 2, 4, "beetle");
+    put(&mut foraging, 3, 4, "leaf_litter");
+    foraging.scheduler.enqueue_focus(4 * foraging.width() + 2);
+    foraging.step(1);
+    assert!(has(&foraging, 2, 4, "fertile_soil"));
+    assert!(has(&foraging, 3, 4, "fertile_soil"));
+}
+
+#[test]
+fn fungus_spreads_in_humid_air_but_stays_out_of_dry_air_and_is_bounded() {
+    let make_world = |humidity| {
+        let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+        rules.ecology.fungus_spread_chance = 1.0;
+        rules.ecology.fungus_starvation_chance = 0.0;
+        for interaction in &mut rules.interactions {
+            if rules.elements[interaction.when].name == "fungus" {
+                interaction.enabled = false;
+            }
+        }
+        let mut world = World::new(12, 8, 96, rules).unwrap();
+        world.set_ambient(20, humidity, 21);
+        put(&mut world, 1, 4, "fungus");
+        for x in 1..=10 {
+            put(&mut world, x, 5, "stone");
+        }
+        for x in 2..=9 {
+            put(&mut world, x, 3, "deadwood");
+            let index = 3 * world.width() + x;
+            world.cells[index].moisture = 80;
+        }
+        world.scheduler.enqueue_focus(4 * world.width() + 1);
+        world
+    };
+    let mut humid = make_world(100);
+    let mut dry = make_world(0);
+    let budget = humid.cells().len() * 8;
+    for _ in 0..budget {
+        humid.step(1);
+        dry.step(1);
+    }
+    let fungus = humid.rules().id("fungus").unwrap();
+    let humid_count = humid
+        .cells()
+        .iter()
+        .filter(|cell| cell.element == fungus)
+        .count();
+    let dry_count = dry
+        .cells()
+        .iter()
+        .filter(|cell| cell.element == fungus)
+        .count();
+    assert!(humid_count > dry_count);
+    assert!(
+        humid_count <= 12,
+        "fungus growth stays bounded: {humid_count}"
+    );
+}
+
+#[test]
 fn dry_soil_does_not_sprout_seeds() {
     let mut world = world(42);
     let y = world.height() - 1;

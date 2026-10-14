@@ -109,6 +109,25 @@ fn export_roundtrip_keeps_disabled_probability() {
 }
 
 #[test]
+fn ecology_rules_are_live_validated_and_round_trip() {
+    let mut world = World::new(4, 4, 45, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    let mut ecology = world.rules().ecology.clone();
+    ecology.fungus_min_humidity = 22.0;
+    ecology.critter_move_chance = 0.75;
+    world.set_ecology_rules(ecology).unwrap();
+    let exported = world.rules().to_toml().unwrap();
+    let loaded = Rules::load(&exported).unwrap();
+    assert_eq!(loaded.ecology.fungus_min_humidity, 22.0);
+    assert_eq!(loaded.ecology.critter_move_chance, 0.75);
+
+    let original = world.rules().ecology.fungus_min_humidity;
+    let mut invalid = world.rules().ecology.clone();
+    invalid.fungus_slow_temperature = invalid.fungus_kill_temperature;
+    assert!(world.set_ecology_rules(invalid).is_err());
+    assert_eq!(world.rules().ecology.fungus_min_humidity, original);
+}
+
+#[test]
 fn defaults_restore_rules_not_world() {
     let mut world = World::new(2, 1, 42, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
     let tree = world.rules().id("tree").unwrap();

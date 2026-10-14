@@ -173,6 +173,9 @@ impl World {
                 return;
             }
         }
+        if self.update_ecology(i) {
+            return;
+        }
         if self.cells[i].body_id != 0 {
             self.update_body_at(i);
             return;
@@ -553,7 +556,7 @@ impl World {
         }
     }
 
-    fn swap_if_empty(&mut self, a: usize, b: usize) -> bool {
+    pub(super) fn swap_if_empty(&mut self, a: usize, b: usize) -> bool {
         self.cells
             .get(b)
             .is_some_and(|cell| Some(cell.element) == self.rules.id("air"))
@@ -621,7 +624,7 @@ impl World {
         }
     }
 
-    fn set_element(&mut self, index: usize, element: usize) {
+    pub(super) fn set_element(&mut self, index: usize, element: usize) {
         let changed = self.cells[index].element != element;
         self.detach_body_member(index);
         self.cells[index] = crate::Cell {
@@ -641,7 +644,7 @@ impl World {
             .mark_cell(index % self.width, index / self.width);
     }
 
-    fn random_u64(&mut self) -> u64 {
+    pub(super) fn random_u64(&mut self) -> u64 {
         let mut x = self.rng;
         x ^= x << 13;
         x ^= x >> 7;
@@ -650,7 +653,7 @@ impl World {
         x
     }
 
-    fn random_f32(&mut self) -> f32 {
+    pub(super) fn random_f32(&mut self) -> f32 {
         (self.random_u64() >> 40) as f32 / (1u32 << 24) as f32
     }
 
