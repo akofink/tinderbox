@@ -204,6 +204,14 @@ motion = "gas"
 density = 85
 wind_response = 0.25
 lifetime = 90
+decay_to = "rain"
+
+[[elements]]
+name = "rain"
+color = [101, 184, 240]
+motion = "fall"
+density = 100
+lifetime = 16
 decay_to = "water"
 
 [ecology]
@@ -286,6 +294,20 @@ chance = 0.8
 [[interactions]]
 when = "fire"
 with = "water"
+result = "steam"
+self_result = "air"
+chance = 1.0
+
+[[interactions]]
+when = "rain"
+with = "fire"
+result = "air"
+self_result = "water"
+chance = 1.0
+
+[[interactions]]
+when = "fire"
+with = "rain"
 result = "steam"
 self_result = "air"
 chance = 1.0

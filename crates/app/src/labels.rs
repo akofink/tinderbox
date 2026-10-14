@@ -12,7 +12,7 @@ pub fn display_name(name: &str) -> String {
 pub fn group(name: &str) -> &'static str {
     match name {
         "air" | "sand" | "soil" | "wet_soil" | "fertile_soil" | "stone" | "humus" => "Ground",
-        "water" | "ice" | "steam" | "cloud" | "lava" | "oil" => "Fluids",
+        "water" | "ice" | "steam" | "cloud" | "rain" | "lava" | "oil" => "Fluids",
         "tree" | "plant" | "seed" | "wood" | "deadwood" | "leaf_litter" | "fungus" | "beetle"
         | "termite" => "Life",
         "fire" | "oil_fire" | "ash" | "smoke" => "Fire",

@@ -1,5 +1,5 @@
 //! Human-readable, seeded world recipes. No clocks, filesystem, or graphics.
-use crate::{Motion, Rules, Wind, WindDirection, World};
+use crate::{Motion, Rules, Wind, WindDirection, World, world::MAX_EDGE_WATER_COLUMN};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fmt};
 
@@ -358,7 +358,12 @@ impl Level {
                                     || (column <= 2 && above > 1 && above <= canopy / 2))
                         }
                         "plant" | "grass" => !flooded && y < ground && y + 3 >= ground,
-                        "water" => y >= waterline && y < ground,
+                        "water" => {
+                            let edge = x == 0 || x + 1 == self.width;
+                            y >= waterline
+                                && y < ground
+                                && (!edge || y >= ground.saturating_sub(MAX_EDGE_WATER_COLUMN))
+                        }
                         "sand" | "ash" => y >= ground && y < ground + (self.height / 16).max(2),
                         "fire" => !flooded && y + (canopy / 2).max(1) == ground,
                         _ => match element.motion {
@@ -814,6 +819,35 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn generated_water_never_forms_a_tall_column_at_world_edges() {
+        let mut wet_hills = Preset::DryForest.level(&rules(), 400, 250);
+        wet_hills.amounts.insert("water".into(), 100);
+        let recipes = [Preset::Island.level(&rules(), 400, 250), wet_hills];
+        for level in recipes {
+            let world = level.generate(rules()).unwrap();
+            let water = world.rules.id("water").unwrap();
+            for x in [0, world.width - 1] {
+                let column = (0..world.height)
+                    .filter(|y| world.cells[y * world.width + x].element == water)
+                    .count();
+                assert!(
+                    column <= MAX_EDGE_WATER_COLUMN,
+                    "edge column x={x} contains {column} water cells"
+                );
+            }
+            assert!(
+                world
+                    .cells
+                    .iter()
+                    .filter(|cell| cell.element == water)
+                    .count()
+                    <= world.width * world.height / 2,
+                "water generation remains bounded"
+            );
+        }
+    }
+
     #[test]
     fn every_preset_file_round_trips_and_reset_restores_start() {
         for preset in Preset::ALL {

@@ -22,6 +22,7 @@ impl From<RulesError> for WorldError {
 
 pub(super) const ATMOSPHERE_CELL_SIZE: usize = 8;
 pub(super) const ATMOSPHERE_INTERVAL: usize = 16;
+pub(super) const MAX_EDGE_WATER_COLUMN: usize = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AtmosphereCell {

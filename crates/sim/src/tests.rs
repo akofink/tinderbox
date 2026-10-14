@@ -1079,7 +1079,8 @@ fn atmosphere_transfers_heat_and_phase_thresholds_are_data_driven() {
 fn humid_air_produces_cloud_and_rain_but_dry_air_stays_clear_and_water_is_bounded() {
     let mut humid = World::new(64, 48, 630, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
     humid.set_ambient(20, 100, 21);
-    let ids = ["ice", "cloud", "water", "steam"].map(|name| humid.rules().id(name).unwrap());
+    let ids =
+        ["ice", "cloud", "rain", "water", "steam"].map(|name| humid.rules().id(name).unwrap());
     let count = |world: &World, id| {
         world
             .cells()
@@ -1103,6 +1104,15 @@ fn humid_air_produces_cloud_and_rain_but_dry_air_stays_clear_and_water_is_bounde
             ids.iter().map(|id| count(&humid, *id)).sum::<usize>() <= humid.atmosphere.len() * 3,
             "water-bearing cells should stay bounded by the initial vapor reservoir"
         );
+        for x in [0, humid.width() - 1] {
+            let edge_water = (0..humid.height())
+                .filter(|y| humid.cells()[y * humid.width() + x].element == ids[3])
+                .count();
+            assert!(
+                edge_water <= crate::world::MAX_EDGE_WATER_COLUMN,
+                "water column at world edge x={x} grew to {edge_water} cells"
+            );
+        }
     }
     assert_eq!(
         count(&humid, ids[0]),
@@ -1146,6 +1156,31 @@ fn humid_cool_air_condenses_cloud_and_dew_and_pressure_drives_wind() {
     pressure.scheduler.enqueue_focus(8 + pressure.width);
     pressure.step(1);
     assert!(has(&pressure, 7, 1, "smoke"));
+}
+
+#[test]
+fn falling_rain_damps_fire_and_turns_into_water() {
+    let mut rain = guaranteed_world(66, &[("fire", "rain"), ("rain", "fire")]);
+    put(&mut rain, 4, 5, "rain");
+    put(&mut rain, 5, 5, "fire");
+    rain.step(usize::MAX);
+    assert!(
+        !rain
+            .cells()
+            .iter()
+            .any(|cell| cell.element == rain.rules().id("fire").unwrap()),
+        "rain should extinguish an adjacent fire"
+    );
+    assert!(
+        rain.cells()
+            .iter()
+            .any(|cell| cell.element == rain.rules().id("water").unwrap())
+            || rain
+                .cells()
+                .iter()
+                .any(|cell| cell.element == rain.rules().id("steam").unwrap()),
+        "rain should remain water or become steam when quenching fire"
+    );
 }
 
 #[test]

@@ -1,7 +1,7 @@
 //! Bounded scheduler updates, interactions, and material movement.
 use crate::{
     Motion, World,
-    world::{ATMOSPHERE_CELL_SIZE, ATMOSPHERE_INTERVAL},
+    world::{ATMOSPHERE_CELL_SIZE, ATMOSPHERE_INTERVAL, MAX_EDGE_WATER_COLUMN},
 };
 
 impl World {
@@ -49,6 +49,7 @@ impl World {
             return;
         }
         let element_settings = &self.rules.elements[e];
+        let is_water = element_settings.name == "water";
         if element_settings.carries_moisture {
             let humidity = self
                 .atmosphere_at(i % self.width, i / self.width)
@@ -230,6 +231,20 @@ impl World {
                 self.try_density_move(i, i - self.width, false);
             }
             Motion::Liquid => {
+                if is_water
+                    && (x == 0 || x + 1 == self.width)
+                    && (y..self.height)
+                        .take(MAX_EDGE_WATER_COLUMN)
+                        .take_while(|row| self.cells[row * self.width + x].element == e)
+                        .count()
+                        == MAX_EDGE_WATER_COLUMN
+                {
+                    let inward_x = if x == 0 { 1 } else { x - 1 };
+                    if self.width > 1 {
+                        self.swap_if_empty(i, y * self.width + inward_x);
+                    }
+                    return;
+                }
                 if y + 1 < self.height && self.try_density_move(i, i + self.width, true) {
                     return;
                 }
