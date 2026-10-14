@@ -379,7 +379,19 @@ impl Level {
                     if eligible
                         && sample(self.seed ^ salt, density_x, density_y) % 100 < u64::from(amount)
                     {
-                        world.cells[y * self.width + x].element = id;
+                        let index = y * self.width + x;
+                        world.cells[index].element = id;
+                        world.cells[index].age = 0;
+                        if element.name == "tree" && element.lifetime > 0 {
+                            // A four-column forest cohort gets one deterministic lifecycle phase.
+                            // This keeps generated tree death staggered without runtime randomness.
+                            let age_span = u64::from(element.lifetime) * 98 / 100;
+                            if age_span > 0 {
+                                world.cells[index].age =
+                                    (sample(self.seed ^ name_hash("tree_age_phase"), x / 4, 0)
+                                        % age_span) as u16;
+                            }
+                        }
                     }
                 }
             }
@@ -847,6 +859,36 @@ mod tests {
                 .all(|c| Some(c.element) == empty.rules.id("air"))
         );
     }
+    #[test]
+    fn later_generated_materials_do_not_inherit_tree_lifecycle_age() {
+        let mut level = Preset::DryForest.level(&rules(), 96, 64);
+        level.seed = 20_261_013;
+        level.amounts.insert("beetle".into(), 0);
+        let trees = level.generate(rules()).unwrap();
+        let tree = trees.rules.id("tree").unwrap();
+
+        level.amounts.insert("beetle".into(), 100);
+        let forest = level.generate(rules()).unwrap();
+        let beetle = forest.rules.id("beetle").unwrap();
+        let overlays: Vec<_> = forest
+            .cells
+            .iter()
+            .enumerate()
+            .filter_map(|(index, cell)| {
+                (cell.element == beetle && trees.cells[index].element == tree).then_some(index)
+            })
+            .collect();
+
+        assert!(
+            !overlays.is_empty(),
+            "beetles should overlay some tree cells"
+        );
+        assert!(
+            overlays.iter().all(|&index| forest.cells[index].age == 0),
+            "a generated critter must start with its own age, not the tree's lifecycle phase"
+        );
+    }
+
     #[test]
     fn empty_level_recipe_can_include_a_deterministic_wooden_boat() {
         let mut level = Preset::Island.level(&rules(), 96, 64);

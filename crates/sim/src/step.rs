@@ -214,8 +214,13 @@ impl World {
         }
         match motion {
             Motion::Fall => {
-                if y + 1 < self.height && self.try_density_move(i, i + self.width, true) {
-                    return;
+                if y + 1 < self.height {
+                    if self.try_density_move(i, i + self.width, true) {
+                        return;
+                    }
+                    if self.rules.elements[e].name == "ash" && self.try_roll_down(i, x, y) {
+                        return;
+                    }
                 }
                 if y > 0 {
                     self.try_density_move(i, i - self.width, false);
@@ -564,7 +569,7 @@ impl World {
         }
     }
 
-    /// Move vertically into empty air or probabilistically displace a less-dense movable neighbor.
+    /// Move into empty air or probabilistically displace a less-dense movable neighbor.
     fn try_density_move(&mut self, a: usize, b: usize, downward: bool) -> bool {
         let air = self.rules.id("air").unwrap_or(usize::MAX);
         let moving = self.cells[a].element;
@@ -592,6 +597,35 @@ impl World {
         } else {
             false
         }
+    }
+
+    /// Ash away from active flames can roll one cell down a side, forming an angle-of-repose pile.
+    fn try_roll_down(&mut self, index: usize, x: usize, y: usize) -> bool {
+        let fire = self.rules.id("fire").unwrap_or(usize::MAX);
+        let oil_fire = self.rules.id("oil_fire").unwrap_or(usize::MAX);
+        for (dx, dy) in [(-1isize, 0isize), (1, 0), (0, -1), (0, 1)] {
+            let Some(nx) = x.checked_add_signed(dx).filter(|x| *x < self.width) else {
+                continue;
+            };
+            let Some(ny) = y.checked_add_signed(dy).filter(|y| *y < self.height) else {
+                continue;
+            };
+            let neighbor = self.cells[ny * self.width + nx].element;
+            if neighbor == fire || neighbor == oil_fire {
+                return false;
+            }
+        }
+        let first_direction = if (x + y) % 2 == 0 { -1isize } else { 1 };
+        for direction in [first_direction, -first_direction] {
+            let Some(target_x) = x.checked_add_signed(direction).filter(|x| *x < self.width) else {
+                continue;
+            };
+            let target = (y + 1) * self.width + target_x;
+            if self.swap_if_empty(index, target) {
+                return true;
+            }
+        }
+        false
     }
 
     pub(super) fn swap_if_empty(&mut self, a: usize, b: usize) -> bool {
