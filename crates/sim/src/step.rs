@@ -528,7 +528,8 @@ impl World {
         let air = self.rules.id("air").unwrap_or(usize::MAX);
         let moving = self.cells[a].element;
         let other = self.cells[b].element;
-        let can_displace = self.rules.elements[other].motion != Motion::Static
+        let can_displace = self.cells[b].body_id == 0
+            && self.rules.elements[other].motion != Motion::Static
             && if downward {
                 self.rules.elements[moving].density > self.rules.elements[other].density
             } else {
