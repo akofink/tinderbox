@@ -120,6 +120,14 @@ impl World {
             };
             let j = ny * self.width + nx;
             let other = self.cells[j].element;
+            if other == self.rules.id("air").unwrap_or(usize::MAX)
+                && self.rules.elements[e].name == "fire"
+                && wind.strength > 0
+                && wind.direction.horizontal() == dx as i8
+                && self.try_firebrand_across_gap(x, y, dx, wind)
+            {
+                return;
+            }
             if self.rules.elements[e].name == "fire" && self.rules.elements[other].carries_moisture
             {
                 self.cells[j].burn_progress = self.cells[j].burn_progress.saturating_add(4);
@@ -226,6 +234,52 @@ impl World {
             }
             _ => {}
         }
+    }
+
+    /// Wind-borne brands can ignite a flammable cell across one empty cell.
+    fn try_firebrand_across_gap(
+        &mut self,
+        x: usize,
+        y: usize,
+        dx: isize,
+        wind: crate::Wind,
+    ) -> bool {
+        let Some(target_x) = x.checked_add_signed(dx * 2).filter(|x| *x < self.width) else {
+            return false;
+        };
+        let target = y * self.width + target_x;
+        let element = self.cells[target].element;
+        let fire = self.rules.id("fire").unwrap_or(usize::MAX);
+        let rule = self
+            .rules
+            .interactions
+            .iter()
+            .find(|rule| rule.enabled && rule.when == fire && rule.with == element)
+            .map(|rule| {
+                (
+                    rule.chance,
+                    rule.downwind_bonus,
+                    rule.result,
+                    rule.self_result,
+                )
+            });
+        let Some((base_chance, downwind_bonus, result, self_result)) = rule else {
+            return false;
+        };
+        let chance = ((base_chance + downwind_bonus * wind.strength as f32)
+            * self.flammability_factor(target, element))
+        .min(1.0);
+        if self.random_f32() >= chance {
+            return false;
+        }
+        let replaced = element;
+        self.set_element(target, result);
+        let source = y * self.width + x;
+        if let Some(result) = self_result {
+            self.set_element(source, result);
+        }
+        self.wake_decomposer(fire, replaced, target);
+        true
     }
 
     fn apply_temperature_phase(&mut self, index: usize, element: usize) {
