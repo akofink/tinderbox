@@ -910,7 +910,13 @@ mod tests {
         let water = lab.rules.id("water").unwrap();
         let oil_fire = lab.rules.id("oil_fire").unwrap();
         let steam = lab.rules.id("steam").unwrap();
-        assert!(lab.cells.iter().any(|cell| cell.element == oil_fire));
+        assert!(
+            lab.cells
+                .iter()
+                .filter(|cell| cell.element == oil_fire)
+                .count()
+                >= 4
+        );
         assert_eq!(lab.ambient_temperature, 1.0);
         let width = lab.width();
         let wall_x = width / 10;

@@ -1535,7 +1535,10 @@ fn wind_moves_the_hull_as_a_single_tagged_group() {
         .collect();
     assert_eq!(after.len(), before.len());
     let translation = after[0] as isize - before[0] as isize;
-    assert!(translation > 0, "east wind should drift the body east");
+    assert_eq!(
+        translation, 1,
+        "east wind nudges one cell over four body updates"
+    );
     assert!(
         before
             .iter()
