@@ -396,6 +396,11 @@ fn lava_water_ice_and_oil_interactions_are_data_driven() {
     put(&mut ignited, 1, 0, "oil");
     ignited.step(1);
     assert!(has(&ignited, 1, 0, "oil_fire"));
+    let mut burning_slick = guaranteed_world(102, &[("oil_fire", "oil")]);
+    put(&mut burning_slick, 0, 0, "oil_fire");
+    put(&mut burning_slick, 1, 0, "oil");
+    burning_slick.step(1);
+    assert!(has(&burning_slick, 1, 0, "oil_fire"));
     let mut hot = guaranteed_world(101, &[("oil_fire", "tree")]);
     put(&mut hot, 0, 0, "oil_fire");
     put(&mut hot, 1, 0, "tree");
@@ -1530,7 +1535,10 @@ fn wind_moves_the_hull_as_a_single_tagged_group() {
         .collect();
     assert_eq!(after.len(), before.len());
     let translation = after[0] as isize - before[0] as isize;
-    assert!(translation > 0, "east wind should drift the body east");
+    assert_eq!(
+        translation, 1,
+        "east wind nudges one cell over four body updates"
+    );
     assert!(
         before
             .iter()

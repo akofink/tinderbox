@@ -156,6 +156,7 @@ struct LevelReloadJob {
 struct CaptureOptions {
     output: Option<PathBuf>,
     after_frames: Option<usize>,
+    at_seconds: Option<u64>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -200,9 +201,11 @@ impl Tinderbox {
             app.set_level(level)
                 .expect("validated level recipe must generate");
             app.level_setup.open = false;
-            app.running = args.capture.after_frames != Some(0);
+            app.running =
+                args.capture.after_frames != Some(0) && args.capture.at_seconds != Some(0);
         }
-        app.capture = (args.capture.after_frames.is_some()).then_some(args.capture);
+        app.capture = (args.capture.after_frames.is_some() || args.capture.at_seconds.is_some())
+            .then_some(args.capture);
         app
     }
 
@@ -618,9 +621,10 @@ impl Tinderbox {
                     panic!("Cannot save screenshot {}: {error}", path.display())
                 });
                 println!(
-                    "SCREENSHOT_CAPTURED path={} frames={}",
+                    "SCREENSHOT_CAPTURED path={} frames={} sim_seconds={:.3}",
                     path.display(),
-                    self.capture_frames
+                    self.capture_frames,
+                    self.sim_seconds
                 );
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 return;
@@ -630,7 +634,13 @@ impl Tinderbox {
             return;
         };
         self.capture_frames += 1;
-        if self.capture_frames >= options.after_frames.expect("validated frame count") {
+        if options
+            .after_frames
+            .is_some_and(|frames| self.capture_frames >= frames)
+            || options
+                .at_seconds
+                .is_some_and(|seconds| self.sim_seconds >= seconds as f64)
+        {
             // Stop at the requested simulation frame and let the capped texture
             // uploader drain every dirty region before asking eframe for a screenshot.
             self.running = false;
@@ -854,6 +864,11 @@ fn native_args_from(args: impl IntoIterator<Item = String>) -> Result<NativeArgs
                 args.next()
                     .ok_or("--capture-after requires a frame count")?,
             )),
+            "--capture-at-seconds" => Some((
+                "seconds",
+                args.next()
+                    .ok_or("--capture-at-seconds requires a second count")?,
+            )),
             _ => None,
         };
         let Some((flag, value)) = value else {
@@ -868,11 +883,22 @@ fn native_args_from(args: impl IntoIterator<Item = String>) -> Result<NativeArgs
                     .map_err(|_| "--capture-after must be a non-negative integer")?;
                 parsed.capture.after_frames = Some(count);
             }
+            "seconds" => {
+                let count = value
+                    .parse::<u64>()
+                    .map_err(|_| "--capture-at-seconds must be a non-negative integer")?;
+                parsed.capture.at_seconds = Some(count);
+            }
             _ => unreachable!(),
         }
     }
-    if parsed.capture.output.is_some() != parsed.capture.after_frames.is_some() {
-        return Err("--screenshot and --capture-after must be supplied together".into());
+    if parsed.capture.after_frames.is_some() && parsed.capture.at_seconds.is_some() {
+        return Err("Choose either --capture-after or --capture-at-seconds".into());
+    }
+    if parsed.capture.output.is_some()
+        != (parsed.capture.after_frames.is_some() || parsed.capture.at_seconds.is_some())
+    {
+        return Err("--screenshot must be paired with a capture time".into());
     }
     if parsed
         .capture
@@ -882,8 +908,10 @@ fn native_args_from(args: impl IntoIterator<Item = String>) -> Result<NativeArgs
     {
         return Err("--screenshot path must end in .png".into());
     }
-    if parsed.capture.after_frames.is_some() && parsed.level_path.is_none() {
-        return Err("--capture-after requires a level recipe supplied with --level".into());
+    if (parsed.capture.after_frames.is_some() || parsed.capture.at_seconds.is_some())
+        && parsed.level_path.is_none()
+    {
+        return Err("A capture time requires a level recipe supplied with --level".into());
     }
     Ok(parsed)
 }
@@ -930,7 +958,6 @@ fn requested_world_size() -> (usize, usize) {
 fn background_window_requested(args: impl IntoIterator<Item = String>) -> bool {
     let args = args.into_iter().collect::<Vec<_>>();
     args.iter().any(|arg| arg == "--smooth-play")
-        || native_args_from(args).is_ok_and(|parsed| parsed.capture.after_frames.is_some())
 }
 
 #[cfg(not(target_arch = "wasm32"))]

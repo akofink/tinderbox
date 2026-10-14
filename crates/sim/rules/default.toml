@@ -267,6 +267,12 @@ downwind_bonus = 0.2
 
 [[interactions]]
 when = "oil_fire"
+with = "oil"
+result = "oil_fire"
+chance = 0.8
+
+[[interactions]]
+when = "oil_fire"
 with = "tree"
 result = "fire"
 chance = 0.8

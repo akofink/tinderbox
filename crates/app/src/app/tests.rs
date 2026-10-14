@@ -261,14 +261,14 @@ fn level_recipe_round_trip_and_reset_reproduce_per_cell_attributes() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn batch_native_windows_are_inactive_but_interactive_windows_are_active() {
+fn smooth_play_is_background_but_capture_windows_are_active() {
     assert!(!background_window_requested(Vec::<String>::new()));
     assert!(background_window_requested(["--smooth-play".into()]));
-    assert!(background_window_requested([
+    assert!(!background_window_requested([
         "--level".into(),
         "dry.toml".into(),
-        "--capture-after".into(),
-        "120".into(),
+        "--capture-at-seconds".into(),
+        "5".into(),
         "--screenshot".into(),
         "dry.png".into(),
     ]));
@@ -292,6 +292,7 @@ fn native_recipe_capture_arguments_validate_as_a_pair() {
     .unwrap();
     assert_eq!(args.level_path, Some(PathBuf::from("dry.toml")));
     assert_eq!(args.capture.after_frames, Some(120));
+    assert_eq!(args.capture.at_seconds, None);
     assert_eq!(args.capture.output, Some(PathBuf::from("dry.png")));
     let initial = native_args_from([
         "--level".into(),
@@ -303,7 +304,40 @@ fn native_recipe_capture_arguments_validate_as_a_pair() {
     ])
     .unwrap();
     assert_eq!(initial.capture.after_frames, Some(0));
+    let timed = native_args_from([
+        "--level".into(),
+        "lab.toml".into(),
+        "--capture-at-seconds".into(),
+        "60".into(),
+        "--screenshot".into(),
+        "lab.png".into(),
+    ])
+    .unwrap();
+    assert_eq!(timed.capture.at_seconds, Some(60));
     assert!(native_args_from(["--capture-after".into(), "-1".into()]).is_err());
+    assert!(native_args_from(["--capture-at-seconds".into(), "-1".into()]).is_err());
+    assert!(
+        native_args_from([
+            "--capture-at-seconds".into(),
+            "5".into(),
+            "--screenshot".into(),
+            "scene.png".into(),
+        ])
+        .is_err()
+    );
+    assert!(
+        native_args_from([
+            "--level".into(),
+            "lab.toml".into(),
+            "--capture-after".into(),
+            "60".into(),
+            "--capture-at-seconds".into(),
+            "5".into(),
+            "--screenshot".into(),
+            "lab.png".into(),
+        ])
+        .is_err()
+    );
     assert!(
         native_args_from([
             "--level".into(),
