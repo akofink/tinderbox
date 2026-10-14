@@ -21,7 +21,7 @@ fn describe_cell(world: &World, x: usize, y: usize) -> Option<CellDescription> {
     let index = y.checked_mul(world.width())?.checked_add(x)?;
     let cell = *world.cells().get(index)?;
     let element = world.rules().elements.get(cell.element)?;
-    let mut lines = vec![format!("Type: {}", motion_description(element.motion))];
+    let mut lines = vec![format!("Behavior: {}", behavior_description(cell, element))];
     if element.carries_moisture || cell.moisture > 0 {
         lines.push(match cell.moisture {
             0..=20 => format!("Moisture: dry ({}%)", cell.moisture * 100 / 255),
@@ -40,9 +40,6 @@ fn describe_cell(world: &World, x: usize, y: usize) -> Option<CellDescription> {
         ));
     } else if age > 0 {
         lines.push(format!("Age: {age} ticks"));
-    }
-    if element.motion != Motion::Static {
-        lines.push(format!("Motion: {}", motion_description(element.motion)));
     }
     let atmosphere = world.atmosphere_at(x, y).unwrap_or_default();
     lines.push(format!(
@@ -123,13 +120,6 @@ fn describe_cell(world: &World, x: usize, y: usize) -> Option<CellDescription> {
     events.sort();
     events.dedup();
     lines.extend(events.into_iter().map(|event| format!("May: {event}")));
-    if cell.is_in_body() {
-        lines.push(if element.name == "wood" {
-            "Boat hull: moves as one body with wind and currents".into()
-        } else {
-            "Boat cargo: moves with its hull as one body".into()
-        });
-    }
     Some(CellDescription {
         title: crate::labels::display_name(&element.name),
         category: crate::labels::group(&element.name),
@@ -137,13 +127,96 @@ fn describe_cell(world: &World, x: usize, y: usize) -> Option<CellDescription> {
     })
 }
 
-fn motion_description(motion: Motion) -> &'static str {
-    match motion {
-        Motion::Static => "stationary",
-        Motion::Fall => "falls under gravity",
-        Motion::Liquid => "flows and settles",
-        Motion::Gas => "rises and drifts with wind",
+fn behavior_description(
+    cell: tinderbox_sim::Cell,
+    element: &tinderbox_sim::Element,
+) -> &'static str {
+    if cell.is_in_body() {
+        if element.name == "wood" {
+            "boat hull moves with wind and currents"
+        } else {
+            "boat cargo moves with its hull"
+        }
+    } else if matches!(element.name.as_str(), "beetle" | "termite") {
+        "wanders over nearby ground"
+    } else {
+        match element.motion {
+            Motion::Static => "stays in place",
+            Motion::Fall => "falls under gravity",
+            Motion::Liquid => "flows and settles",
+            Motion::Gas => "rises and drifts with wind",
+        }
     }
+}
+
+fn place_overlays(canvas: Rect, pointer: Pos2, lens_size: Vec2, panel_size: Vec2) -> (Rect, Rect) {
+    let lens_size = Vec2::new(
+        lens_size.x.min(canvas.width() * 0.45),
+        lens_size.y.min(canvas.height() * 0.42),
+    );
+    let lens_x = if pointer.x + 20.0 + lens_size.x <= canvas.right() {
+        pointer.x + 20.0
+    } else if pointer.x - 20.0 - lens_size.x >= canvas.left() {
+        pointer.x - 20.0 - lens_size.x
+    } else {
+        (pointer.x + 20.0).clamp(canvas.left(), canvas.right() - lens_size.x)
+    };
+    let lens_y = if pointer.y + 20.0 + lens_size.y <= canvas.bottom() {
+        pointer.y + 20.0
+    } else if pointer.y - 20.0 - lens_size.y >= canvas.top() {
+        pointer.y - 20.0 - lens_size.y
+    } else {
+        (pointer.y + 20.0).clamp(canvas.top(), canvas.bottom() - lens_size.y)
+    };
+    let lens = Rect::from_min_size(Pos2::new(lens_x, lens_y), lens_size);
+    let panel_size = Vec2::new(
+        panel_size.x.min(canvas.width() * 0.4),
+        panel_size.y.min(canvas.height() * 0.5),
+    );
+    let panel_y = lens
+        .top()
+        .clamp(canvas.top(), canvas.bottom() - panel_size.y);
+    let left_x = lens.left() - panel_size.x - 8.0;
+    let right_x = lens.right() + 8.0;
+    let (panel_x, panel_y) = if left_x >= canvas.left() && right_x + panel_size.x > canvas.right() {
+        (left_x, panel_y)
+    } else if right_x + panel_size.x <= canvas.right() {
+        (right_x, panel_y)
+    } else if left_x >= canvas.left() {
+        (left_x, panel_y)
+    } else {
+        let above_y = lens.top() - panel_size.y - 8.0;
+        let below_y = lens.bottom() + 8.0;
+        let panel_x = lens
+            .left()
+            .clamp(canvas.left(), canvas.right() - panel_size.x);
+        if above_y >= canvas.top() {
+            (panel_x, above_y)
+        } else if below_y + panel_size.y <= canvas.bottom() {
+            (panel_x, below_y)
+        } else {
+            let panel = [
+                Rect::from_min_size(canvas.left_top(), panel_size),
+                Rect::from_min_size(
+                    canvas.right_top() - Vec2::new(panel_size.x, 0.0),
+                    panel_size,
+                ),
+                Rect::from_min_size(
+                    canvas.left_bottom() - Vec2::new(0.0, panel_size.y),
+                    panel_size,
+                ),
+                Rect::from_min_size(canvas.right_bottom() - panel_size, panel_size),
+            ]
+            .into_iter()
+            .find(|candidate| !candidate.intersects(lens))
+            .unwrap_or_else(|| Rect::from_min_size(Pos2::new(panel_x, panel_y), panel_size));
+            return (lens, panel);
+        }
+    };
+    (
+        lens,
+        Rect::from_min_size(Pos2::new(panel_x, panel_y), panel_size),
+    )
 }
 
 pub(super) fn show(app: &Tinderbox, painter: &egui::Painter, canvas: Rect, pointer: Pos2) {
@@ -162,14 +235,30 @@ pub(super) fn show(app: &Tinderbox, painter: &egui::Painter, canvas: Rect, point
         cell_w * LENS_WIDTH as f32 * MAGNIFICATION,
         cell_h * LENS_HEIGHT as f32 * MAGNIFICATION,
     );
-    let mut lens = Rect::from_min_size(pointer + Vec2::new(20.0, 20.0), lens_size);
-    if lens.right() > canvas.right() {
-        lens.set_left(pointer.x - lens.width() - 20.0);
-    }
-    if lens.bottom() > canvas.bottom() {
-        lens.set_top(pointer.y - lens.height() - 20.0);
-    }
-    lens = lens.intersect(canvas);
+    let panel_width = 250.0_f32.min(canvas.width() * 0.4);
+    let text_font = FontId::proportional(11.5);
+    let text_color = Color32::WHITE;
+    let line_galleys = description
+        .lines
+        .iter()
+        .map(|line| {
+            painter.layout(
+                line.clone(),
+                text_font.clone(),
+                text_color,
+                (panel_width - 16.0).max(1.0),
+            )
+        })
+        .collect::<Vec<_>>();
+    let content_height: f32 = line_galleys
+        .iter()
+        .map(|galley| galley.size().y + 2.0)
+        .sum();
+    let panel_size = Vec2::new(
+        panel_width,
+        (content_height + 30.0).min(canvas.height() * 0.5),
+    );
+    let (lens, panel) = place_overlays(canvas, pointer, lens_size, panel_size);
     let half_w = LENS_WIDTH as f32 / (2.0 * app.world.width() as f32);
     let half_h = LENS_HEIGHT as f32 / (2.0 * app.world.height() as f32);
     let uv = Rect::from_min_max(
@@ -198,19 +287,6 @@ pub(super) fn show(app: &Tinderbox, painter: &egui::Painter, canvas: Rect, point
         cell_w.max(cell_h) * 0.9,
         Stroke::new(1.5_f32, Color32::YELLOW),
     );
-    let panel_width = 250.0_f32.min(canvas.width());
-    let panel_height = (description.lines.len() as f32 * 16.0 + 34.0).min(canvas.height());
-    let mut panel = Rect::from_min_size(
-        Pos2::new(lens.right() + 8.0, lens.top()),
-        Vec2::new(panel_width, panel_height),
-    );
-    if panel.right() > canvas.right() {
-        panel.set_left(lens.left() - panel_width - 8.0);
-    }
-    if panel.bottom() > canvas.bottom() {
-        panel.set_top(canvas.bottom() - panel.height());
-    }
-    panel = panel.intersect(canvas);
     painter.rect_filled(panel, 4.0, Color32::from_black_alpha(230));
     painter.rect_stroke(
         panel,
@@ -225,18 +301,17 @@ pub(super) fn show(app: &Tinderbox, painter: &egui::Painter, canvas: Rect, point
         FontId::proportional(14.0),
         Color32::WHITE,
     );
-    for (line, text) in description.lines.iter().enumerate() {
-        let pos = Pos2::new(panel.left() + 8.0, panel.top() + 26.0 + line as f32 * 16.0);
-        if pos.y + 16.0 > panel.bottom() {
+    let mut text_y = panel.top() + 26.0;
+    for galley in line_galleys {
+        if text_y + galley.size().y > panel.bottom() {
             break;
         }
-        painter.text(
-            pos,
-            Align2::LEFT_TOP,
-            text,
-            FontId::proportional(11.5),
-            Color32::WHITE,
+        painter.galley(
+            Pos2::new(panel.left() + 8.0, text_y),
+            galley.clone(),
+            text_color,
         );
+        text_y += galley.size().y + 2.0;
     }
 }
 
@@ -293,7 +368,7 @@ mod tests {
             description
                 .lines
                 .iter()
-                .any(|line| line.contains("Boat hull: moves as one body"))
+                .any(|line| line.contains("boat hull moves with wind and currents"))
         );
     }
 
@@ -309,5 +384,28 @@ mod tests {
                 .iter()
                 .any(|line| line.contains("wanders, flees fire or water"))
         );
+        assert!(description.lines[0].contains("wanders over nearby ground"));
+        assert!(
+            description
+                .lines
+                .iter()
+                .all(|line| !line.contains("stationary"))
+        );
+    }
+
+    #[test]
+    fn lens_and_tooltip_stay_inside_canvas_without_overlapping_at_edges() {
+        let canvas = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 700.0));
+        for pointer in [Pos2::new(8.0, 8.0), Pos2::new(992.0, 692.0)] {
+            let (lens, panel) = place_overlays(
+                canvas,
+                pointer,
+                Vec2::new(320.0, 220.0),
+                Vec2::new(250.0, 200.0),
+            );
+            assert!(canvas.contains_rect(lens));
+            assert!(canvas.contains_rect(panel));
+            assert!(!lens.intersects(panel));
+        }
     }
 }
