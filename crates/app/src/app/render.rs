@@ -13,6 +13,7 @@ pub(super) fn fitted_size(world: &World, available: Vec2) -> Vec2 {
 /// Uploads only changed regions, preserving excess work for later frames.
 pub(super) fn upload_dirty(app: &mut Tinderbox) {
     let sky = sky_mask(&app.world);
+    let skyline = smoothed_skyline(&app.world);
     let mut uploaded = 0;
     for _ in 0..MAX_TEXTURE_REGIONS_PER_FRAME {
         let Some(region) = app.world.pop_dirty_region() else {
@@ -25,6 +26,7 @@ pub(super) fn upload_dirty(app: &mut Tinderbox) {
             app.level.ambient_humidity,
             app.sim_seconds,
             &sky,
+            &skyline,
         );
         app.world_texture
             .set_partial([region.x, region.y], image, TextureOptions::NEAREST);
@@ -40,6 +42,7 @@ fn region_image(
     ambient_humidity: u8,
     sim_seconds: f64,
     sky: &[bool],
+    skyline: &[f32],
 ) -> ColorImage {
     let rain = world.rules().id("rain").unwrap_or(usize::MAX);
     let cloud_fade = cloud_fade(sim_seconds);
@@ -54,36 +57,26 @@ fn region_image(
                         Color32::from_rgb(element.color[0], element.color[1], element.color[2]);
                     let world_x = region.x + x;
                     let world_y = region.y + y;
+                    let cloud_params = CloudRenderParams {
+                        ambient_humidity,
+                        cloud_fade,
+                        sim_seconds,
+                        altitude: cloud_altitude_weight(world_y, skyline[world_x]),
+                    };
                     *pixel = if element.name == "cloud" {
                         if !sky[index] {
                             let air = world.rules().id("air").unwrap();
                             let color = world.rules().elements[air].color;
                             Color32::from_rgb(color[0], color[1], color[2])
                         } else {
-                            cloud_color(
-                                world,
-                                world_x,
-                                world_y,
-                                base,
-                                ambient_humidity,
-                                cloud_fade,
-                                sim_seconds,
-                            )
+                            cloud_color(world, world_x, world_y, base, cloud_params)
                         }
                     } else if element.name == "air" {
                         if !sky[index] {
                             base
                         } else {
                             rain_streak(world, world_x, world_y, rain).unwrap_or_else(|| {
-                                cloud_layer(
-                                    world,
-                                    world_x,
-                                    world_y,
-                                    base,
-                                    ambient_humidity,
-                                    cloud_fade,
-                                    sim_seconds,
-                                )
+                                cloud_layer(world, world_x, world_y, base, cloud_params)
                             })
                         }
                     } else if element.name == "rain" {
@@ -111,14 +104,20 @@ fn region_image(
     image
 }
 
+#[derive(Clone, Copy)]
+struct CloudRenderParams {
+    ambient_humidity: u8,
+    cloud_fade: f32,
+    sim_seconds: f64,
+    altitude: f32,
+}
+
 fn cloud_color(
     world: &World,
     x: usize,
     y: usize,
     base: Color32,
-    ambient_humidity: u8,
-    cloud_fade: f32,
-    sim_seconds: f64,
+    params: CloudRenderParams,
 ) -> Color32 {
     let cloud = world.rules().id("cloud").unwrap_or(usize::MAX);
     let mut neighbors = 0u8;
@@ -134,6 +133,12 @@ fn cloud_color(
             }
         }
     }
+    let air = world.rules().id("air").unwrap_or(usize::MAX);
+    let air_color = world.rules().elements[air].color;
+    let clear = Color32::from_rgb(air_color[0], air_color[1], air_color[2]);
+    if params.altitude <= 0.0 {
+        return clear;
+    }
     // Hide isolated coarse cloud particles inside the interpolated, softer cloud layer.
     if neighbors < 2 {
         let air = world.rules().id("air").unwrap_or(usize::MAX);
@@ -143,22 +148,25 @@ fn cloud_color(
                 x,
                 y,
                 Color32::from_rgb(element.color[0], element.color[1], element.color[2]),
-                ambient_humidity,
-                cloud_fade,
-                sim_seconds,
+                params,
             );
         }
     }
     // Clouds darken as local vapor is depleted; clustered cells form softer edges.
     let humidity = world.atmosphere_at(x, y).map_or(45.0, |air| air.humidity);
     let maturity = ((100.0 - humidity) / 100.0).clamp(0.0, 1.0);
-    let heaviness = cloud_weather_profile(humidity, ambient_humidity, cloud_fade).1;
+    let heaviness = cloud_weather_profile(humidity, params.ambient_humidity, params.cloud_fade).1;
     let density = neighbors as f32 / 8.0;
-    let shade = 1.0 - maturity * 0.18 - heaviness * 0.20 + density * 0.05;
-    Color32::from_rgb(
-        (f32::from(base.r()) * shade).clamp(0.0, 255.0) as u8,
-        (f32::from(base.g()) * shade).clamp(0.0, 255.0) as u8,
-        (f32::from(base.b()) * shade).clamp(0.0, 255.0) as u8,
+    let core = ((density - 0.1) / 0.7).clamp(0.0, 1.0);
+    let shade = 1.0 - maturity * 0.12 - heaviness * 0.58 * core + density * 0.04;
+    mix_color(
+        clear,
+        Color32::from_rgb(
+            (f32::from(base.r()) * shade).clamp(0.0, 255.0) as u8,
+            (f32::from(base.g()) * shade).clamp(0.0, 255.0) as u8,
+            (f32::from(base.b()) * shade).clamp(0.0, 255.0) as u8,
+        ),
+        params.altitude,
     )
 }
 
@@ -167,34 +175,50 @@ fn cloud_layer(
     x: usize,
     y: usize,
     base: Color32,
-    ambient_humidity: u8,
-    cloud_fade: f32,
-    sim_seconds: f64,
+    params: CloudRenderParams,
 ) -> Color32 {
     let humidity = interpolated_humidity(world, x, y);
     if humidity < 45.0 {
         return base;
     }
-    let (coverage, heaviness) = cloud_weather_profile(humidity, ambient_humidity, cloud_fade);
-    let offset = cloud_drift_offset(world.wind(), sim_seconds);
+    let (coverage, heaviness) =
+        cloud_weather_profile(humidity, params.ambient_humidity, params.cloud_fade);
+    let offset = cloud_drift_offset(world.wind(), params.sim_seconds);
     let noise = cloud_noise(x as f32 - offset, y as f32);
-    let edge = (coverage * 0.24).max(0.018);
-    let mask = ((coverage + edge - noise) / edge).clamp(0.0, 1.0);
-    let amount = mask * 0.72;
+    let mask = cloud_mask(noise, coverage);
+    let amount = mask * 0.72 * params.altitude;
     if amount <= 0.0 {
         return base;
     }
 
     // High vapor loads create shaded cloud bodies; vapor depletion softens and clears them.
-    let cloud_color = [
-        221.0 - heaviness * 75.0,
-        229.0 - heaviness * 72.0,
-        239.0 - heaviness * 65.0,
-    ];
+    let cloud_color = heavy_cloud_color(Color32::from_rgb(224, 231, 240), heaviness, mask);
     Color32::from_rgb(
-        (f32::from(base.r()) * (1.0 - amount) + cloud_color[0] * amount) as u8,
-        (f32::from(base.g()) * (1.0 - amount) + cloud_color[1] * amount) as u8,
-        (f32::from(base.b()) * (1.0 - amount) + cloud_color[2] * amount) as u8,
+        (f32::from(base.r()) * (1.0 - amount) + f32::from(cloud_color.r()) * amount) as u8,
+        (f32::from(base.g()) * (1.0 - amount) + f32::from(cloud_color.g()) * amount) as u8,
+        (f32::from(base.b()) * (1.0 - amount) + f32::from(cloud_color.b()) * amount) as u8,
+    )
+}
+
+fn cloud_mask(noise: f32, coverage: f32) -> f32 {
+    let edge = (coverage * 0.65).max(0.045);
+    let transition = ((coverage + edge * 0.5 - noise) / edge).clamp(0.0, 1.0);
+    transition * transition * (3.0 - 2.0 * transition)
+}
+
+fn heavy_cloud_color(base: Color32, heaviness: f32, core: f32) -> Color32 {
+    let darkness = (heaviness * core * 1.8).clamp(0.0, 1.0);
+    let dark_slate = Color32::from_rgb(86, 99, 120);
+    mix_color(base, dark_slate, darkness)
+}
+
+fn mix_color(background: Color32, foreground: Color32, amount: f32) -> Color32 {
+    let amount = amount.clamp(0.0, 1.0);
+    let mix = |a: u8, b: u8| (f32::from(a) * (1.0 - amount) + f32::from(b) * amount).round() as u8;
+    Color32::from_rgb(
+        mix(background.r(), foreground.r()),
+        mix(background.g(), foreground.g()),
+        mix(background.b(), foreground.b()),
     )
 }
 
@@ -207,6 +231,49 @@ fn cloud_drift_offset(wind: tinderbox_sim::Wind, sim_seconds: f64) -> f32 {
     let wind_speed = horizontal * f32::from(wind.strength.min(4)) * 2.0;
     let calm_evolution = 0.15;
     (wind_speed + calm_evolution) * sim_seconds.max(0.0) as f32
+}
+
+fn smoothed_skyline(world: &World) -> Vec<f32> {
+    let air = world.rules().id("air").unwrap_or(usize::MAX);
+    let cloud = world.rules().id("cloud").unwrap_or(usize::MAX);
+    let rain = world.rules().id("rain").unwrap_or(usize::MAX);
+    let is_open = |element| element == air || element == cloud || element == rain;
+    let raw = (0..world.width())
+        .map(|x| {
+            (0..world.height())
+                .find(|&y| !is_open(world.cells()[y * world.width() + x].element))
+                .unwrap_or(world.height()) as f32
+        })
+        .collect::<Vec<_>>();
+    smooth_skyline(&raw)
+}
+
+fn smooth_skyline(raw: &[f32]) -> Vec<f32> {
+    let envelope_radius = 8usize;
+    let smoothing_radius = 4usize;
+    (0..raw.len())
+        .map(|x| {
+            let start = x.saturating_sub(smoothing_radius);
+            let end = (x + smoothing_radius + 1).min(raw.len());
+            (start..end)
+                .map(|neighbor| {
+                    let start = neighbor.saturating_sub(envelope_radius);
+                    let end = (neighbor + envelope_radius + 1).min(raw.len());
+                    raw[start..end]
+                        .iter()
+                        .copied()
+                        .fold(f32::INFINITY, f32::min)
+                })
+                .sum::<f32>()
+                / (end - start) as f32
+        })
+        .collect()
+}
+
+fn cloud_altitude_weight(y: usize, skyline_y: f32) -> f32 {
+    const CLEARANCE: f32 = 10.0;
+    const FADE_BAND: f32 = 24.0;
+    ((skyline_y - y as f32 - CLEARANCE) / FADE_BAND).clamp(0.0, 1.0)
 }
 
 fn sky_mask(world: &World) -> Vec<bool> {
@@ -314,29 +381,34 @@ fn interpolated_humidity(world: &World, x: usize, y: usize) -> f32 {
 }
 
 fn cloud_noise(x: f32, y: f32) -> f32 {
-    // Smooth interpolated value noise on a broad scale, independent of the atmosphere grid.
-    let x = x / 18.0;
-    let y = y / 11.0;
+    // Domain-warped isotropic value noise forms soft, irregular cloud lobes instead of streaks.
+    let warp_x = (value_noise(x / 48.0, y / 48.0) - 0.5) * 14.0;
+    let warp_y = (value_noise((x + 23.0) / 48.0, (y - 37.0) / 48.0) - 0.5) * 14.0;
+    let broad = value_noise((x + warp_x) / 18.0, (y + warp_y) / 18.0);
+    let detail = value_noise((x - 31.0) / 9.0, (y + 17.0) / 9.0);
+    (broad * 0.82 + detail * 0.18).clamp(0.0, 1.0)
+}
+
+fn value_noise(x: f32, y: f32) -> f32 {
     let ix = x.floor() as i32;
     let iy = y.floor() as i32;
-    let smooth = |v: f32| v * v * (3.0 - 2.0 * v);
+    let smooth = |value: f32| value * value * (3.0 - 2.0 * value);
     let tx = smooth(x - ix as f32);
     let ty = smooth(y - iy as f32);
-    let value = |px: i32, py: i32| {
-        let mut hash = (px as u32).wrapping_mul(0x9e37_79b9)
-            ^ (py as u32).wrapping_mul(0x85eb_ca6b)
-            ^ 0x6a09_e667;
-        hash ^= hash >> 16;
-        hash = hash.wrapping_mul(0x7feb_352d);
-        hash ^= hash >> 15;
-        hash = hash.wrapping_mul(0x846c_a68b);
-        hash ^= hash >> 16;
-        hash as f32 / u32::MAX as f32
-    };
-    let top = value(ix, iy) * (1.0 - tx) + value(ix + 1, iy) * tx;
-    let bottom = value(ix, iy + 1) * (1.0 - tx) + value(ix + 1, iy + 1) * tx;
-    let broad = top * (1.0 - ty) + bottom * ty;
-    broad.clamp(0.0, 1.0)
+    let top = cloud_hash(ix, iy) * (1.0 - tx) + cloud_hash(ix + 1, iy) * tx;
+    let bottom = cloud_hash(ix, iy + 1) * (1.0 - tx) + cloud_hash(ix + 1, iy + 1) * tx;
+    top * (1.0 - ty) + bottom * ty
+}
+
+fn cloud_hash(x: i32, y: i32) -> f32 {
+    let mut hash =
+        (x as u32).wrapping_mul(0x9e37_79b9) ^ (y as u32).wrapping_mul(0x85eb_ca6b) ^ 0x6a09_e667;
+    hash ^= hash >> 16;
+    hash = hash.wrapping_mul(0x7feb_352d);
+    hash ^= hash >> 15;
+    hash = hash.wrapping_mul(0x846c_a68b);
+    hash ^= hash >> 16;
+    hash as f32 / u32::MAX as f32
 }
 
 fn rain_streak(world: &World, x: usize, y: usize, rain: usize) -> Option<Color32> {
@@ -403,6 +475,7 @@ mod tests {
             humidity,
             sim_seconds,
             &sky_mask(&world),
+            &smoothed_skyline(&world),
         );
         image.pixels.iter().filter(|pixel| **pixel != base).count() as f32
             / image.pixels.len() as f32
@@ -434,19 +507,53 @@ mod tests {
     }
 
     #[test]
+    fn skyline_smoothing_and_altitude_fade_keep_clouds_above_obstacles() {
+        let smoothed = smooth_skyline(&[40.0, 40.0, 10.0, 40.0, 40.0]);
+        assert!(smoothed.iter().all(|height| *height == 10.0));
+        assert_eq!(cloud_altitude_weight(30, 40.0), 0.0);
+        assert_eq!(cloud_altitude_weight(0, 40.0), 1.0);
+        assert!(cloud_altitude_weight(20, 40.0) > 0.0);
+    }
+
+    #[test]
+    fn cloud_mask_has_a_soft_transition_at_both_edges() {
+        let coverage = 0.1;
+        let edge = (coverage * 0.65f32).max(0.045);
+        assert_eq!(cloud_mask(coverage - edge * 0.5, coverage), 1.0);
+        assert_eq!(cloud_mask(coverage + edge * 0.5, coverage), 0.0);
+        assert!((cloud_mask(coverage, coverage) - 0.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn heavy_cloud_cores_are_darker_than_edges_and_light_clouds() {
+        let light = Color32::from_rgb(224, 231, 240);
+        let light_core = heavy_cloud_color(light, 0.0, 1.0);
+        let heavy_edge = heavy_cloud_color(light, 0.7, 0.25);
+        let heavy_core = heavy_cloud_color(light, 0.7, 1.0);
+        let luminance = |color: Color32| {
+            0.2126 * f32::from(color.r())
+                + 0.7152 * f32::from(color.g())
+                + 0.0722 * f32::from(color.b())
+        };
+        assert!(luminance(heavy_core) < luminance(heavy_edge));
+        assert!(luminance(heavy_edge) < luminance(light_core));
+    }
+
+    #[test]
     fn cloud_layer_changes_over_simulation_time() {
         let mut world = World::new(128, 96, 2026, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
         world.set_ambient(20, 50, 21);
         world.set_wind(WindDirection::East, 1);
         let sky = sky_mask(&world);
+        let skyline = smoothed_skyline(&world);
         let region = DirtyRegion {
             x: 0,
             y: 0,
             width: world.width(),
             height: world.height(),
         };
-        let before = region_image(&world, region, Overlay::None, 50, 0.0, &sky);
-        let after = region_image(&world, region, Overlay::None, 50, 10.0, &sky);
+        let before = region_image(&world, region, Overlay::None, 50, 0.0, &sky, &skyline);
+        let after = region_image(&world, region, Overlay::None, 50, 10.0, &sky, &skyline);
         assert!(
             before
                 .pixels
