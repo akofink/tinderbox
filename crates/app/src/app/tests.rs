@@ -1,13 +1,26 @@
 //! Headless tests for setup transitions; no native window or GPU required.
 use super::*;
 
+fn play_level(app: &mut Tinderbox, level: Level) {
+    if app.level_setup.draft != level {
+        app.level_setup.draft = level.clone();
+        app.level_setup.revision = app.level_setup.revision.wrapping_add(1);
+    }
+    app.setup_action(SetupAction::Play(level.clone()));
+    if app.play_when_preview_ready {
+        let preview = level.generate(app.world.rules().clone()).unwrap();
+        app.apply_setup_preview(preview, app.level_setup.revision);
+    }
+}
+
 #[test]
 fn startup_waits_for_setup_and_cancel_preserves_a_running_game() {
     let mut app = Tinderbox::new_state(false);
     assert!(app.level_setup.open);
     assert!(!app.running);
     assert!(app.world.pending_dirty_regions() > 0);
-    app.setup_action(SetupAction::Play(app.level.clone()));
+    let level = app.level.clone();
+    play_level(&mut app, level);
     app.world.step(500);
     let cells = app.world.cells().to_vec();
     app.open_level_setup();
@@ -21,10 +34,72 @@ fn startup_waits_for_setup_and_cancel_preserves_a_running_game() {
 }
 
 #[test]
+fn live_setup_preview_regenerates_without_play_and_cancel_restores_the_running_world() {
+    let mut app = Tinderbox::new_state(false);
+    let level = app.level.clone();
+    play_level(&mut app, level);
+    app.world.step(500);
+    let cells = app.world.cells().to_vec();
+    let original_size = (app.world.width(), app.world.height());
+    let original_level = app.level.clone();
+    app.open_level_setup();
+
+    let level = Preset::Island.level(app.world.rules(), 80, 48);
+    app.level_setup.draft = level.clone();
+    app.level_setup.revision = app.level_setup.revision.wrapping_add(1);
+    let revision = app.level_setup.revision;
+    app.last_setup_revision = revision;
+    app.last_setup_change = Instant::now() - std::time::Duration::from_millis(201);
+    app.update_setup_preview();
+    #[cfg(not(target_arch = "wasm32"))]
+    for _ in 0..500 {
+        if app.preview_revision == Some(revision) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        app.update_setup_preview();
+    }
+    #[cfg(target_arch = "wasm32")]
+    app.update_setup_preview();
+    assert_eq!(app.preview_revision, Some(revision));
+
+    assert_eq!((app.world.width(), app.world.height()), (80, 48));
+    assert_ne!(app.world.cells(), cells);
+    assert_eq!(app.level, original_level);
+    app.setup_action(SetupAction::Cancel);
+    assert_eq!((app.world.width(), app.world.height()), original_size);
+    assert_eq!(app.world.cells(), cells);
+    assert_eq!(app.level, original_level);
+    assert!(app.running);
+}
+
+#[test]
+fn play_waits_for_the_debounced_preview_then_keeps_that_world() {
+    let mut app = Tinderbox::new_state(false);
+    let level = Preset::Island.level(app.world.rules(), 80, 48);
+    app.level_setup.draft = level.clone();
+    app.level_setup.revision = app.level_setup.revision.wrapping_add(1);
+    let revision = app.level_setup.revision;
+    app.setup_action(SetupAction::Play(level.clone()));
+    assert!(app.level_setup.open);
+    assert!(!app.running);
+    assert!(app.play_when_preview_ready);
+
+    let preview = level.generate(app.world.rules().clone()).unwrap();
+    app.apply_setup_preview(preview, revision);
+    assert!(!app.level_setup.open);
+    assert!(app.running);
+    assert_eq!(app.level, level);
+    assert_eq!((app.world.width(), app.world.height()), (80, 48));
+    #[cfg(not(target_arch = "wasm32"))]
+    assert!(app.setup_backup.is_none());
+}
+
+#[test]
 fn play_applies_size_and_reset_restores_cells_and_seeded_evolution() {
     let mut app = Tinderbox::new_state(false);
     let level = Preset::Island.level(app.world.rules(), 80, 48);
-    app.setup_action(SetupAction::Play(level.clone()));
+    play_level(&mut app, level.clone());
     assert_eq!((app.world.width(), app.world.height()), (80, 48));
     let start = app.world.cells().to_vec();
     app.world.paint(5, 5, app.world.rules().id("fire").unwrap());
@@ -106,7 +181,8 @@ fn setup_blocks_keyboard_play_and_step() {
 fn shortcuts_work_with_button_focus_but_not_in_text_fields() {
     for text_focus in [false, true] {
         let mut app = Tinderbox::new_state(false);
-        app.setup_action(SetupAction::Play(app.level.clone()));
+        let level = app.level.clone();
+        play_level(&mut app, level);
         let ctx = egui::Context::default();
         let id = egui::Id::new("focused_control");
         let _ = ctx.run(
@@ -141,7 +217,7 @@ fn level_recipe_round_trip_and_reset_reproduce_per_cell_attributes() {
     let encoded = level.to_toml().unwrap();
     let loaded = Level::load(&encoded).unwrap();
     assert_eq!(loaded, level);
-    app.setup_action(SetupAction::Play(loaded.clone()));
+    play_level(&mut app, loaded.clone());
     let initial = app.world.cells().to_vec();
     app.world.set_ambient(20, 100, 21);
     for _ in 0..20 {
@@ -152,7 +228,7 @@ fn level_recipe_round_trip_and_reset_reproduce_per_cell_attributes() {
     assert_ne!(app.world.cells(), initial);
     app.reset();
     assert_eq!(app.world.cells(), initial);
-    app.setup_action(SetupAction::Play(Level::load(&encoded).unwrap()));
+    play_level(&mut app, Level::load(&encoded).unwrap());
     assert_eq!(app.world.cells(), initial);
     assert_eq!(app.world.atmosphere_at(0, 0).unwrap().oxygen, 0.0);
 }

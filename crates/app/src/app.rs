@@ -14,7 +14,11 @@ use crate::rules_panel::RulesPanel;
 use eframe::egui;
 use level_setup::{LevelSetup, SetupAction};
 #[cfg(not(target_arch = "wasm32"))]
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    sync::mpsc::{self, Receiver},
+    time::SystemTime,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use tinderbox_sim::level::{MAX_LEVEL_CELLS, MAX_LEVEL_DIMENSION};
 use tinderbox_sim::{
@@ -96,6 +100,35 @@ pub(super) struct Tinderbox {
     capture_frames: usize,
     #[cfg(not(target_arch = "wasm32"))]
     capture_requested: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    level_file: Option<PathBuf>,
+    #[cfg(not(target_arch = "wasm32"))]
+    level_file_modified: Option<SystemTime>,
+    #[cfg(not(target_arch = "wasm32"))]
+    next_level_file_check: Instant,
+    #[cfg(not(target_arch = "wasm32"))]
+    preview_job: Option<PreviewJob>,
+    #[cfg(not(target_arch = "wasm32"))]
+    level_reload_job: Option<LevelReloadJob>,
+    setup_backup: Option<World>,
+    preview_revision: Option<u64>,
+    last_setup_revision: u64,
+    last_setup_change: Instant,
+    play_when_preview_ready: bool,
+    failed_preview_revision: Option<u64>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct PreviewJob {
+    revision: u64,
+    receiver: Receiver<Result<World, LevelError>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct LevelReloadJob {
+    level: Level,
+    modified: SystemTime,
+    receiver: Receiver<Result<World, LevelError>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -127,6 +160,8 @@ impl Tinderbox {
             .map_or_else(requested_world_size, |level| (level.width, level.height));
         let mut app =
             Self::new_with_context(cc.egui_ctx.clone(), width, height, smooth_play_requested());
+        app.level_file = args.level_path.clone();
+        app.level_file_modified = app.level_file.as_ref().and_then(|path| file_modified(path));
         if let Some(level) = level {
             app.set_level(level)
                 .expect("validated level recipe must generate");
@@ -172,6 +207,7 @@ impl Tinderbox {
         );
         let mut level_setup = LevelSetup::new(level.clone());
         level_setup.open = !stress_play;
+        let setup_revision = level_setup.revision;
         Self {
             world,
             world_texture,
@@ -203,27 +239,60 @@ impl Tinderbox {
             capture_frames: 0,
             #[cfg(not(target_arch = "wasm32"))]
             capture_requested: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            level_file: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            level_file_modified: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            next_level_file_check: Instant::now(),
+            #[cfg(not(target_arch = "wasm32"))]
+            preview_job: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            level_reload_job: None,
+            setup_backup: None,
+            preview_revision: None,
+            last_setup_revision: setup_revision,
+            last_setup_change: Instant::now(),
+            play_when_preview_ready: false,
+            failed_preview_revision: None,
         }
     }
 
-    fn set_level(&mut self, level: Level) -> Result<(), LevelError> {
-        let world = level.generate(self.world.rules().clone())?;
-        let air = world.rules().id("air").unwrap_or(0);
-        let air_color = world.rules().elements[air].color;
+    fn resize_world_texture(&mut self) {
+        let air = self.world.rules().id("air").unwrap_or(0);
+        let color = self.world.rules().elements[air].color;
         self.world_texture.set(
             egui::ColorImage::new(
-                [world.width(), world.height()],
-                egui::Color32::from_rgb(air_color[0], air_color[1], air_color[2]),
+                [self.world.width(), self.world.height()],
+                egui::Color32::from_rgb(color[0], color[1], color[2]),
             ),
             egui::TextureOptions::NEAREST,
         );
+    }
+
+    fn install_world(&mut self, world: World) {
+        let size_changed =
+            (world.width(), world.height()) != (self.world.width(), self.world.height());
         self.world = world;
+        if size_changed {
+            self.resize_world_texture();
+        }
         self.world.mark_all_dirty();
-        self.level = level;
+    }
+
+    fn reset_simulation_clock(&mut self) {
         self.sim_seconds = 0.0;
         self.work = WorkAccumulator::default();
         self.peak_carry_work = 0;
         self.max_dirty_regions_uploaded = 0;
+    }
+
+    fn set_level(&mut self, level: Level) -> Result<(), LevelError> {
+        let world = level.generate(self.world.rules().clone())?;
+        self.install_world(world);
+        self.level = level;
+        self.reset_simulation_clock();
+        self.preview_revision = None;
         Ok(())
     }
 
@@ -242,22 +311,206 @@ impl Tinderbox {
         self.return_running = self.running;
         self.running = false;
         self.level_setup.begin(&self.level, self.world.rules());
+        self.last_setup_revision = self.level_setup.revision;
+        self.preview_revision = None;
+        self.last_setup_change = Instant::now();
+        self.play_when_preview_ready = false;
+        self.failed_preview_revision = None;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.level_reload_job = None;
+        }
+        self.setup_backup = None;
     }
 
     fn setup_action(&mut self, action: SetupAction) {
         match action {
-            SetupAction::Play(level) => match self.set_level(level) {
-                Ok(()) => {
-                    self.level_setup.open = false;
-                    self.running = true;
+            SetupAction::Play(level) => {
+                if let Err(error) = level.validate() {
+                    self.level_setup.error = Some(error.to_string());
+                    return;
                 }
-                Err(error) => self.level_setup.error = Some(error.to_string()),
-            },
+                if self.failed_preview_revision == Some(self.level_setup.revision) {
+                    return;
+                }
+                if self.preview_revision == Some(self.level_setup.revision) {
+                    self.finish_setup_play(level);
+                } else {
+                    self.play_when_preview_ready = true;
+                    self.level_setup.set_message(
+                        "Preparing this level. Play will start when its preview is ready.",
+                    );
+                    self.last_setup_change = Instant::now() - std::time::Duration::from_millis(200);
+                }
+            }
             SetupAction::Cancel => {
+                if let Some(world) = self.setup_backup.take() {
+                    self.install_world(world);
+                }
+                self.preview_revision = None;
+                self.play_when_preview_ready = false;
                 self.level_setup.open = false;
                 self.running = self.return_running;
             }
         }
+    }
+
+    fn finish_setup_play(&mut self, level: Level) {
+        self.level = level;
+        self.reset_simulation_clock();
+        self.preview_revision = None;
+        self.play_when_preview_ready = false;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.preview_job = None;
+            self.level_reload_job = None;
+        }
+        self.setup_backup = None;
+        self.level_setup.open = false;
+        self.level_setup.set_message("");
+        self.running = true;
+    }
+
+    fn apply_setup_preview(&mut self, world: World, revision: u64) {
+        if self.setup_backup.is_none() {
+            let size_changed =
+                (world.width(), world.height()) != (self.world.width(), self.world.height());
+            self.setup_backup = Some(std::mem::replace(&mut self.world, world));
+            if size_changed {
+                self.resize_world_texture();
+            }
+            self.world.mark_all_dirty();
+        } else {
+            self.install_world(world);
+        }
+        self.preview_revision = Some(revision);
+        self.level_setup.error = None;
+        if self.play_when_preview_ready {
+            self.finish_setup_play(self.level_setup.draft.clone());
+        }
+    }
+
+    fn update_setup_preview(&mut self) {
+        if !self.level_setup.open {
+            #[cfg(not(target_arch = "wasm32"))]
+            if self
+                .preview_job
+                .as_ref()
+                .is_some_and(|job| job.receiver.try_recv().is_ok())
+            {
+                self.preview_job = None;
+            }
+            return;
+        }
+        let revision = self.level_setup.revision;
+        if revision != self.last_setup_revision {
+            self.last_setup_revision = revision;
+            self.failed_preview_revision = None;
+            self.last_setup_change = Instant::now();
+        }
+        if self.preview_revision == Some(revision)
+            || self.failed_preview_revision == Some(revision)
+            || self.last_setup_change.elapsed() < std::time::Duration::from_millis(200)
+        {
+            return;
+        }
+        let level = self.level_setup.draft.clone();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(job) = &self.preview_job {
+                if let Ok(result) = job.receiver.try_recv() {
+                    let job = self.preview_job.take().expect("preview job exists");
+                    if job.revision == self.level_setup.revision && self.level_setup.open {
+                        match result {
+                            Ok(world) => self.apply_setup_preview(world, job.revision),
+                            Err(error) => {
+                                self.failed_preview_revision = Some(job.revision);
+                                self.play_when_preview_ready = false;
+                                self.level_setup.error = Some(error.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            if self.level_setup.open
+                && self.preview_job.is_none()
+                && self.preview_revision != Some(revision)
+            {
+                let rules = self.world.rules().clone();
+                let (sender, receiver) = mpsc::channel();
+                let worker_level = level.clone();
+                std::thread::spawn(move || {
+                    let _ = sender.send(worker_level.generate(rules));
+                });
+                self.preview_job = Some(PreviewJob { revision, receiver });
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        if self.preview_revision != Some(revision) {
+            match level.generate(self.world.rules().clone()) {
+                Ok(world) => self.apply_setup_preview(world, revision),
+                Err(error) => {
+                    self.failed_preview_revision = Some(revision);
+                    self.play_when_preview_ready = false;
+                    self.level_setup.error = Some(error.to_string());
+                }
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn poll_level_file(&mut self) {
+        if let Some(job) = &self.level_reload_job {
+            if let Ok(result) = job.receiver.try_recv() {
+                let job = self.level_reload_job.take().expect("reload job exists");
+                match result {
+                    Ok(world) => {
+                        self.install_world(world);
+                        self.level = job.level;
+                        self.level_file_modified = Some(job.modified);
+                        self.reset_simulation_clock();
+                        self.running = true;
+                    }
+                    Err(_) => self.level_file_modified = Some(job.modified),
+                }
+            }
+        }
+        if self.next_level_file_check > Instant::now() {
+            return;
+        }
+        self.next_level_file_check = Instant::now() + std::time::Duration::from_millis(500);
+        let Some(path) = &self.level_file else { return };
+        let Some(modified) = file_modified(path) else {
+            return;
+        };
+        if self.level_file_modified == Some(modified) {
+            return;
+        }
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let Ok(level) = Level::load(&text) else {
+            return;
+        };
+        if self.level_setup.open {
+            self.level_file_modified = Some(modified);
+            self.level_setup.import_text(text, self.world.rules());
+            return;
+        }
+        if self.level_reload_job.is_some() {
+            return;
+        }
+        let rules = self.world.rules().clone();
+        let worker_level = level.clone();
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(worker_level.generate(rules));
+        });
+        self.level_reload_job = Some(LevelReloadJob {
+            level,
+            modified,
+            receiver,
+        });
     }
 
     fn wildfire(&mut self) {
@@ -367,6 +620,11 @@ impl Tinderbox {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn file_modified(path: &std::path::Path) -> Option<SystemTime> {
+    std::fs::metadata(path).ok()?.modified().ok()
+}
+
 fn seed_smooth_play_boats(world: &mut World) {
     let water = world.rules().id("water").unwrap_or(0);
     let stone = world.rules().id("stone").unwrap_or(0);
@@ -433,8 +691,16 @@ impl eframe::App for Tinderbox {
         if let Some(action) = self.level_setup.show(ctx, self.world.rules()) {
             self.setup_action(action);
         }
+        self.update_setup_preview();
         #[cfg(not(target_arch = "wasm32"))]
-        self.capture_frame(ctx);
+        {
+            if let Some(path) = self.level_setup.take_loaded_path() {
+                self.level_file_modified = file_modified(&path);
+                self.level_file = Some(path);
+            }
+            self.poll_level_file();
+            self.capture_frame(ctx);
+        }
         #[cfg(target_arch = "wasm32")]
         poll_browser_files(ctx, frame, self);
     }

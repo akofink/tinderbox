@@ -1,6 +1,6 @@
 # Level recipes
 
-**Level setup** appears at startup and is available from the game toolbar. Choose a preset, dimensions, seed, terrain, starting wind and element amounts, then **Play level**. Ambient oxygen defaults to 21%; set it to 0% to make an airless level. Opening setup pauses the game. **Cancel / return to game** preserves the previous world; loading settings does not replace it until you press Play.
+**Level setup** appears at startup and is available from the game toolbar. Choose a preset, dimensions, seed, terrain, starting wind and element amounts; the world behind the panel regenerates after edits settle. Ambient oxygen defaults to 21%; set it to 0% to make an airless level. Opening setup pauses the game. **Play level** keeps the current preview, while **Cancel / return to game** restores the previous world and run state. On native desktop, a recipe loaded from a file also reloads when that file changes on disk.
 
 - **Dry forest, east wind**: dense trees on rolling stone hills with a few sparks and a gentle east wind. Try pouring water across the fire front.
 - **Island**: a wooded island and sandy shore surrounded by water. Try damming the shoreline with stone.
@@ -13,7 +13,7 @@ Dimensions range from 16 to 2048 cells per side, with a maximum of 1,048,576 cel
 
 ## Save, load and share
 
-Expand **Save / load level (TOML)**. On desktop, enter a file path and use **Save file** or **Load file**. Relative paths are relative to the app's launch directory. Saving replaces an existing file at that path. Errors are shown in setup and leave the game untouched.
+Expand **Save / load level (TOML)**. On desktop, enter a file path and use **Save file** or **Load file**. Relative paths are relative to the app's launch directory. Saving replaces an existing file at that path. Errors are shown in setup and leave the current preview unchanged; valid loaded recipes update the preview after the edit debounce.
 
 In a browser, **Download level** saves the recipe as a file and remembers it locally. **Upload level** or dropping a valid recipe on the canvas opens its settings without changing the running world; **Stored level** loads the last saved or uploaded recipe from this browser.
 
