@@ -30,38 +30,90 @@ impl World {
                 continue;
             };
             let target = ny * self.width + nx;
-            if self.cells[target].element != air || self.cells[target].body_id != 0 {
+            if self.cells[target].body_id != 0 {
                 continue;
             }
-            // Walk on a solid floor only; critters do not float through open air or stone.
-            let Some(floor_y) = ny.checked_add(1).filter(|v| *v < self.height) else {
+            let target_element = self.cells[target].element;
+            let meal = self
+                .rules
+                .interactions
+                .iter()
+                .enumerate()
+                .find(|(_, rule)| {
+                    rule.enabled
+                        && rule.chance > 0.0
+                        && rule.when == species
+                        && rule.with == target_element
+                })
+                .map(|(rank, rule)| (rank, rule.result));
+            let food_result = if target_element == air {
+                // Walk on supported ground or climb a stable tree/deadwood side.
+                let supported_below = ny
+                    .checked_add(1)
+                    .filter(|floor_y| *floor_y < self.height)
+                    .is_some_and(|floor_y| {
+                        let floor_index = floor_y * self.width + nx;
+                        floor_index != index && self.is_surface(floor_index)
+                    });
+                let supported_side = [nx.checked_sub(1), (nx + 1 < self.width).then_some(nx + 1)]
+                    .into_iter()
+                    .flatten()
+                    .any(|side_x| {
+                        let side = ny * self.width + side_x;
+                        let name = self.rules.elements[self.cells[side].element].name.as_str();
+                        side != index
+                            && matches!(
+                                name,
+                                "tree"
+                                    | "wood"
+                                    | "deadwood"
+                                    | "stone"
+                                    | "soil"
+                                    | "wet_soil"
+                                    | "fertile_soil"
+                            )
+                            && self.is_surface(side)
+                    });
+                if !supported_below && !supported_side {
+                    continue;
+                }
+                None
+            } else if let Some((_, result)) = meal {
+                // Critters can tunnel through edible matter instead of remaining embedded in it.
+                Some(result)
+            } else if matches!(
+                self.rules.elements[target_element].name.as_str(),
+                "wet_soil" | "fertile_soil"
+            ) {
+                // Decomposers burrow through soft soil when food-rich material packs them in.
+                self.rules.id("fertile_soil")
+            } else {
                 continue;
             };
-            let floor_index = floor_y * self.width + nx;
-            if floor_index == index || !self.is_surface(floor_index) {
-                continue;
-            }
             let danger = self.nearby_hazard_distance(nx, ny, fire, water);
-            let food_distance = self
-                .neighbors(target)
-                .into_iter()
-                .flatten()
-                .filter_map(|neighbor| {
-                    self.rules
-                        .interactions
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, rule)| {
-                            rule.enabled
-                                && rule.when == species
-                                && rule.with == self.cells[neighbor].element
+            let food_distance = meal
+                .map(|(rank, _)| rank)
+                .or_else(|| {
+                    self.neighbors(target)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|neighbor| {
+                            self.rules
+                                .interactions
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, rule)| {
+                                    rule.enabled
+                                        && rule.when == species
+                                        && rule.with == self.cells[neighbor].element
+                                })
+                                .map(|(rank, _)| rank)
+                                .min()
                         })
-                        .map(|(rank, _)| rank)
                         .min()
                 })
-                .min()
                 .unwrap_or(usize::MAX);
-            candidates[candidate_count] = Some((target, danger, food_distance));
+            candidates[candidate_count] = Some((target, danger, food_distance, food_result));
             candidate_count += 1;
         }
         let danger_here = self.nearby_hazard_distance(x, y, fire, water);
@@ -73,7 +125,7 @@ impl World {
             let Some(safest) = candidates[..candidate_count]
                 .iter()
                 .flatten()
-                .map(|(_, distance, _)| *distance)
+                .map(|(_, distance, _, _)| *distance)
                 .max()
             else {
                 return false;
@@ -82,7 +134,7 @@ impl World {
                 return false;
             }
             for candidate in &mut candidates[..candidate_count] {
-                if candidate.is_some_and(|(_, distance, _)| distance != safest) {
+                if candidate.is_some_and(|(_, distance, _, _)| distance != safest) {
                     *candidate = None;
                 }
             }
@@ -90,12 +142,13 @@ impl World {
             let best_food = candidates[..candidate_count]
                 .iter()
                 .flatten()
-                .map(|(_, _, food_distance)| *food_distance)
+                .map(|(_, _, food_distance, _)| *food_distance)
                 .min()
                 .unwrap_or(usize::MAX);
             if best_food != usize::MAX {
                 for candidate in &mut candidates[..candidate_count] {
-                    if candidate.is_some_and(|(_, _, food_distance)| food_distance != best_food) {
+                    if candidate.is_some_and(|(_, _, food_distance, _)| food_distance != best_food)
+                    {
                         *candidate = None;
                     }
                 }
@@ -119,6 +172,17 @@ impl World {
                 .nth(choice)
                 .expect("choice is bounded by available moves")
                 .0;
+            let food_result = candidates[..candidate_count]
+                .iter()
+                .flatten()
+                .nth(choice)
+                .expect("choice is bounded by available moves")
+                .3;
+            if let Some(result) = food_result {
+                self.set_element(index, result);
+                self.set_element(target, species);
+                return true;
+            }
             if self.swap_if_empty(index, target) {
                 return true;
             }

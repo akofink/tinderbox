@@ -108,6 +108,117 @@ fn decomposers_persist_on_a_well_fed_forest_floor_and_decline_without_food() {
 }
 
 #[test]
+fn forest_floor_critters_move_each_five_second_window() {
+    let recipe = Level {
+        version: 1,
+        width: 120,
+        height: 75,
+        fit_window: false,
+        seed: 20_261_013,
+        generator: Generator::Hills,
+        wind: Default::default(),
+        ambient_temperature: 20,
+        ambient_humidity: 100,
+        ambient_oxygen: 21,
+        amounts: [
+            ("stone", 100),
+            ("soil", 100),
+            ("tree", 12),
+            ("wet_soil", 45),
+            ("fertile_soil", 10),
+            ("deadwood", 45),
+            ("leaf_litter", 45),
+            ("humus", 45),
+            ("fungus", 75),
+            ("beetle", 55),
+            ("termite", 45),
+        ]
+        .into_iter()
+        .map(|(name, amount)| (name.to_owned(), amount))
+        .collect(),
+        spark: false,
+        boat: false,
+        boat_sand: 0,
+        boat_burning: false,
+    };
+    let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+    rules.ecology.breeding_chance = 0.0;
+    let mut world = recipe.generate(rules).unwrap();
+    let species = ["beetle", "termite"].map(|name| world.rules().id(name).unwrap());
+    let positions = |world: &World, species| {
+        world
+            .cells()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, cell)| (cell.element == species).then_some(index))
+            .collect::<Vec<_>>()
+    };
+    let mut previous = species.map(|species| positions(&world, species));
+    let fertile_soil = world.rules().id("fertile_soil").unwrap();
+    let initial_fertile_soil = world
+        .cells()
+        .iter()
+        .filter(|cell| cell.element == fertile_soil)
+        .count();
+    for window in 1..=3 {
+        for _ in 0..5 * 80 {
+            world.step(usize::MAX);
+        }
+        for (kind, species) in species.iter().enumerate() {
+            let current = positions(&world, *species);
+            assert!(
+                !current.is_empty(),
+                "living {} should remain",
+                world.rules().elements[*species].name
+            );
+            for position in &current {
+                let x = position % world.width();
+                let y = position / world.width();
+                let has_support = [
+                    (x > 0).then_some(position - 1),
+                    (x + 1 < world.width()).then_some(position + 1),
+                    (y > 0).then_some(position - world.width()),
+                    (y + 1 < world.height()).then_some(position + world.width()),
+                ]
+                .into_iter()
+                .flatten()
+                .any(|neighbor| {
+                    world.cells()[neighbor].element != world.rules().id("air").unwrap()
+                });
+                assert!(
+                    has_support,
+                    "{} at ({x}, {y}) cannot be stranded in open air",
+                    world.rules().elements[*species].name
+                );
+            }
+            let moved = previous[kind]
+                .iter()
+                .filter(|position| !current.contains(position))
+                .count();
+            let fraction = moved as f64 / previous[kind].len() as f64;
+            assert!(
+                fraction > 0.5,
+                "species {} moved only {:.1}% in five-second window {window} ({}/{})",
+                world.rules().elements[*species].name,
+                fraction * 100.0,
+                moved,
+                previous[kind].len()
+            );
+            previous[kind] = current;
+        }
+    }
+    assert!(
+        world
+            .cells()
+            .iter()
+            .filter(|cell| cell.element == fertile_soil)
+            .count()
+            > initial_fertile_soil,
+        "moving critters should eat organic matter and leave fertile soil"
+    );
+}
+
+#[test]
 fn rules_load_and_missing_reference_has_clear_error() {
     let rules = Rules::load(DEFAULT_RULES).unwrap();
     for name in [
@@ -604,6 +715,7 @@ fn damp_organic_matter_wakes_decomposers_and_returns_fertile_soil() {
     ];
     for (index, (decomposer, matter)) in meals.into_iter().enumerate() {
         let mut world = guaranteed_world(30 + index as u64, &[(decomposer, matter)]);
+        world.rules.ecology.critter_move_chance = 0.0;
         put(&mut world, 0, 0, decomposer);
         put(&mut world, 1, 0, matter);
         world.step(1);
@@ -677,6 +789,29 @@ fn critters_walk_supported_surfaces_but_not_open_air() {
         open.cells()[index + open.width()].element,
         open.rules().id("termite").unwrap()
     );
+}
+
+#[test]
+fn critters_climb_tree_and_deadwood_surfaces() {
+    for (offset, surface) in ["tree", "deadwood"].into_iter().enumerate() {
+        let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+        rules.ecology.critter_move_chance = 1.0;
+        rules.ecology.flee_chance = 0.0;
+        let mut world = World::new(8, 8, 200 + offset as u64, rules).unwrap();
+        put(&mut world, 3, 4, "beetle");
+        put(&mut world, 3, 5, "stone");
+        put(&mut world, 2, 4, "stone");
+        put(&mut world, 4, 4, "stone");
+        put(&mut world, 4, 3, surface);
+        let start = 3 + 4 * world.width();
+        world.scheduler.enqueue_focus(start);
+        world.step(1);
+        assert_eq!(
+            world.cells()[3 + 3 * world.width()].element,
+            world.rules().id("beetle").unwrap(),
+            "beetle should climb beside {surface}"
+        );
+    }
 }
 
 #[test]
