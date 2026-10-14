@@ -184,6 +184,7 @@ pub(super) struct Tinderbox {
     resize_target: Option<(usize, usize)>,
     resize_target_since: Instant,
     camera_x: f32,
+    camera_view_width: f32,
     camera_initialized: bool,
     world_start_chunk: i64,
     stress_play: bool,
@@ -388,6 +389,7 @@ impl Tinderbox {
             resize_target: None,
             resize_target_since: Instant::now(),
             camera_x: 0.0,
+            camera_view_width: width as f32,
             camera_initialized: false,
             world_start_chunk: 0,
             stress_play,
@@ -487,6 +489,7 @@ impl Tinderbox {
     }
 
     pub(super) fn center_camera_on_origin(&mut self, view_width: f32) {
+        self.camera_view_width = view_width.max(1.0);
         if self.level.mode != LevelMode::Endless || self.camera_initialized {
             return;
         }
@@ -505,10 +508,9 @@ impl Tinderbox {
         self.camera_x = (self.camera_x + delta).clamp(0.0, max_camera_x);
         let chunk = ENDLESS_CHUNK_WIDTH as f32;
         if self.camera_x < chunk * 2.0 {
-            if !self.prepend_endless_chunk() {
-                return;
+            if self.prepend_endless_chunk() {
+                self.camera_x += chunk;
             }
-            self.camera_x += chunk;
         } else if self.camera_x + view_width > self.world.width() as f32 - chunk * 2.0 {
             self.append_endless_chunk();
         }
@@ -549,7 +551,10 @@ impl Tinderbox {
 
     fn resize_world_texture_for_mode(&mut self, mode: LevelMode) -> bool {
         let texture_width = if mode == LevelMode::Endless {
-            self.world.width().next_power_of_two()
+            self.world
+                .width()
+                .next_power_of_two()
+                .max(self.world_texture.size()[0].max(8192))
         } else {
             self.world.width()
         };
@@ -667,6 +672,15 @@ impl Tinderbox {
 
     fn finish_setup_play(&mut self, level: Level) {
         self.level = level;
+        if self.level.mode == LevelMode::Endless {
+            match self.level.generate(self.world.rules().clone()) {
+                Ok(world) => self.install_world(world),
+                Err(error) => {
+                    self.level_setup.error = Some(error.to_string());
+                    return;
+                }
+            }
+        }
         self.reset_camera();
         self.reset_simulation_clock();
         self.preview_revision = None;
@@ -1126,10 +1140,14 @@ impl eframe::App for Tinderbox {
                 .and_then(|name| self.world.rules().id(name))
                 .unwrap_or_else(|| self.world.rules().id("air").unwrap_or(0));
         }
+        let setup_was_open = self.level_setup.open;
         if let Some(action) = self.level_setup.show(ctx, self.world.rules()) {
             self.setup_action(action);
         }
         self.update_setup_preview();
+        if setup_was_open && !self.level_setup.open {
+            input::clear_level_setup_text_focus(ctx);
+        }
         #[cfg(not(target_arch = "wasm32"))]
         {
             if let Some(path) = self.level_setup.take_loaded_path() {

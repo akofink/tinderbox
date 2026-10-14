@@ -279,6 +279,13 @@ impl Level {
                     .copy_from_slice(&chunk.cells[source..source + ENDLESS_CHUNK_WIDTH]);
             }
         }
+        if let Some(tree) = world.rules.id("tree") {
+            for (index, cell) in world.cells.iter().enumerate() {
+                if cell.element == tree {
+                    world.tree_support_age[index] = (index % 64) as u8;
+                }
+            }
+        }
         world.mark_all_dirty();
         Ok(world)
     }
@@ -320,6 +327,23 @@ impl Level {
             });
         }
         let waterline = height * 3 / 4;
+        let columns: Vec<_> = (0..width)
+            .map(|local_x| {
+                let world_x = index
+                    .wrapping_mul(width as i64)
+                    .wrapping_add(local_x as i64);
+                let ground = endless_surface(self.seed, world_x, height, self.generator);
+                let column = world_x.rem_euclid(4) as usize;
+                let canopy = (height / 12
+                    + (sample_signed(self.seed ^ name_hash("tree"), world_x.div_euclid(4), 1)
+                        % (height / 8).max(1) as u64) as usize)
+                    .saturating_sub(column.abs_diff(1))
+                    .max(2);
+                let flooded =
+                    ground > waterline && self.amounts.get("water").copied().unwrap_or(0) > 0;
+                (world_x, ground, canopy, flooded)
+            })
+            .collect();
         let mut materials: Vec<_> = rules
             .elements
             .iter()
@@ -332,23 +356,33 @@ impl Level {
         materials.sort_by(|a, b| (a.0, &a.2.name).cmp(&(b.0, &b.2.name)));
         for (_, id, element, amount) in materials {
             let salt = name_hash(&element.name);
-            for local_x in 0..width {
-                let world_x = index
-                    .wrapping_mul(width as i64)
-                    .wrapping_add(local_x as i64);
-                let ground = endless_surface(self.seed, world_x, height, self.generator);
-                let canopy = (height / 12
-                    + (sample_signed(self.seed ^ name_hash("tree"), world_x / 4, 1)
-                        % (height / 8).max(1) as u64) as usize)
-                    .max(2);
-                let flooded =
-                    ground > waterline && self.amounts.get("water").copied().unwrap_or(0) > 0;
+            let coherent_density = matches!(element.name.as_str(), "tree" | "sand" | "ash");
+            for (local_x, &(world_x, ground, canopy, flooded)) in columns.iter().enumerate() {
+                let column = world_x.rem_euclid(4) as usize;
+                if coherent_density {
+                    let group_width = if element.name == "tree" { 4 } else { 8 };
+                    let group_x = world_x.div_euclid(group_width);
+                    if sample_signed(self.seed ^ salt, group_x, 0) % 100 >= u64::from(amount) {
+                        continue;
+                    }
+                }
+                let tree_age = (element.name == "tree" && element.lifetime > 0)
+                    .then(|| {
+                        let age_span = u64::from(element.lifetime) * 98 / 100;
+                        (age_span > 0).then(|| {
+                            (sample_signed(
+                                self.seed ^ name_hash("tree_age_phase"),
+                                world_x.div_euclid(4),
+                                0,
+                            ) % age_span) as u16
+                        })
+                    })
+                    .flatten();
                 for y in 0..height {
                     let eligible = match element.name.as_str() {
                         "stone" => y >= ground,
                         "soil" => y >= ground && y < ground + (height / 32).max(2),
                         "tree" => {
-                            let column = world_x.rem_euclid(4) as usize;
                             let above = ground.saturating_sub(y);
                             !flooded
                                 && y < ground
@@ -366,26 +400,15 @@ impl Level {
                             Motion::Gas => y < ground && y >= height / 3 && y < height / 2,
                         },
                     };
-                    let density_x = if element.name == "tree" {
-                        world_x.div_euclid(4) as u64
-                    } else {
-                        world_x as u64
-                    };
                     if eligible
-                        && sample_signed(self.seed ^ salt, density_x as i64, y as u64 as i64) % 100
-                            < u64::from(amount)
+                        && (coherent_density
+                            || sample_signed(self.seed ^ salt, world_x, y as i64) % 100
+                                < u64::from(amount))
                     {
                         let cell = &mut cells[y * width + local_x];
                         cell.element = id;
-                        if element.name == "tree" && element.lifetime > 0 {
-                            let age_span = u64::from(element.lifetime) * 98 / 100;
-                            if age_span > 0 {
-                                cell.age = (sample_signed(
-                                    self.seed ^ name_hash("tree_age_phase"),
-                                    world_x / 4,
-                                    0,
-                                ) % age_span) as u16;
-                            }
+                        if let Some(tree_age) = tree_age {
+                            cell.age = tree_age;
                         }
                     }
                 }
@@ -997,11 +1020,20 @@ fn endless_surface(seed: u64, x: i64, height: usize, generator: Generator) -> us
     let noise = (a as usize * (span as usize - offset) + b as usize * offset) / span as usize;
     let phase = x.rem_euclid(1024) as usize;
     let distance = phase.abs_diff(512);
+    let hill_span = 256i64;
+    let hill_section = x.div_euclid(hill_span);
+    let hill_offset = x.rem_euclid(hill_span) as usize;
+    let hill_a = sample_signed(seed ^ 23, hill_section, 0) % 1024;
+    let hill_b = sample_signed(seed ^ 23, hill_section.wrapping_add(1), 0) % 1024;
+    let hills = (hill_a as usize * (hill_span as usize - hill_offset)
+        + hill_b as usize * hill_offset)
+        / hill_span as usize;
     let base = match generator {
+        Generator::Hills => height * 2 / 3 + hills * height / 1024 / 6,
         Generator::Island => height / 3 + distance * height / 1024,
         Generator::Valley => height / 2 - distance * height / 3072,
         Generator::Empty => height,
-        _ => height * 2 / 3,
+        Generator::BoatLake | Generator::DensityLab => height * 4 / 5,
     };
     (base + noise * height / 1024 / 12).min(height - 1)
 }
@@ -1024,6 +1056,82 @@ mod tests {
     use crate::DEFAULT_RULES;
     fn rules() -> Rules {
         Rules::load(DEFAULT_RULES).unwrap()
+    }
+
+    #[test]
+    fn endless_sand_forms_contiguous_layers_instead_of_cell_speckles() {
+        let rules = rules();
+        let mut level = Preset::DryForest.level(&rules, 128, 96);
+        level.amounts.clear();
+        level.amounts.insert("stone".into(), 100);
+        level.amounts.insert("soil".into(), 100);
+        level.amounts.insert("sand".into(), 50);
+        let chunk = level.generate_chunk(-1, &rules).unwrap();
+        let sand = rules.id("sand").unwrap();
+        let mut sand_columns = 0;
+        for x in 0..chunk.width {
+            let mut in_layer = false;
+            let mut layer_ended = false;
+            for y in 0..chunk.height {
+                if chunk.cell(x, y).unwrap().element == sand {
+                    assert!(!layer_ended, "sand layer at column {x} contains a gap");
+                    in_layer = true;
+                } else if in_layer {
+                    layer_ended = true;
+                }
+            }
+            sand_columns += usize::from(in_layer);
+        }
+        assert!(sand_columns > 0, "the seeded chunk should contain sand");
+    }
+
+    #[test]
+    fn endless_trees_have_solid_trunks_and_reach_stable_support() {
+        let mut rules = rules();
+        let tree = rules.id("tree").unwrap();
+        rules.elements[tree].lifetime = 0;
+        let mut level = Preset::DryForest.level(&rules, 128, 96);
+        level.amounts.clear();
+        level.amounts.insert("stone".into(), 100);
+        level.amounts.insert("soil".into(), 100);
+        level.amounts.insert("tree".into(), 100);
+        let mut world = level.generate_endless_region_at(0, 1, &rules).unwrap();
+        let initial_trees = world
+            .cells()
+            .iter()
+            .filter(|cell| cell.element == tree)
+            .count();
+        assert!(initial_trees > 0);
+        for x in (0..world.width()).filter(|x| x % 4 == 1) {
+            let ground = endless_surface(level.seed, x as i64, world.height(), level.generator);
+            let canopy = (world.height() / 12
+                + (sample_signed(level.seed ^ name_hash("tree"), x as i64 / 4, 1)
+                    % (world.height() / 8).max(1) as u64) as usize)
+                .max(2);
+            for y in ground.saturating_sub(canopy)..ground {
+                assert_eq!(world.cells()[y * world.width() + x].element, tree);
+            }
+        }
+        for _ in 0..64 {
+            world.step(100_000);
+        }
+        assert_eq!(
+            world
+                .cells()
+                .iter()
+                .filter(|cell| cell.element == tree)
+                .count(),
+            initial_trees,
+            "generated trees should not collapse or become deadwood"
+        );
+        assert!(
+            world
+                .tree_support_age
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| world.cells()[*index].element == tree)
+                .all(|(_, age)| *age == u8::MAX)
+        );
     }
 
     #[test]
