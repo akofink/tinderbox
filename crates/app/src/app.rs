@@ -17,7 +17,7 @@ use level_setup::{LevelSetup, SetupAction};
 use std::{
     path::PathBuf,
     sync::mpsc::{self, Receiver},
-    time::{Duration, SystemTime},
+    time::SystemTime,
 };
 use tinderbox_sim::level::{MAX_LEVEL_CELLS, MAX_LEVEL_DIMENSION};
 use tinderbox_sim::{
@@ -35,7 +35,8 @@ const MAX_WORK_PER_FRAME: usize = WORK_PER_FRAME;
 const MAX_CARRY_FRAMES: usize = 8;
 pub(super) const MAX_TEXTURE_REGIONS_PER_FRAME: usize = 32;
 const FIXED_FRAME_DT: f32 = 1.0 / 60.0;
-const MIN_SMOOTH_PLAY_FRAME_INTERVAL: Duration = Duration::from_millis(15);
+#[cfg(not(target_arch = "wasm32"))]
+const MIN_SMOOTH_PLAY_FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_millis(15);
 const MAX_INTERACTIVE_FRAME_DT: f32 = 0.25;
 
 fn fitted_world_dimensions(available: egui::Vec2, cell_size: f32) -> (usize, usize) {
@@ -734,7 +735,10 @@ impl eframe::App for Tinderbox {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         #[cfg(not(target_arch = "wasm32"))]
         let _ = frame;
+        #[cfg(not(target_arch = "wasm32"))]
         let mut now = Instant::now();
+        #[cfg(target_arch = "wasm32")]
+        let now = Instant::now();
         #[cfg(not(target_arch = "wasm32"))]
         if self.stress_play
             && let Some(wait) =
