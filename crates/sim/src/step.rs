@@ -85,7 +85,7 @@ impl World {
                 (steam, self.atmosphere_at(i % self.width, i / self.width))
             && air.temperature > self.rules.atmosphere.freezing_point
             && self.ambient_humidity >= self.rules.atmosphere.condensation_humidity
-            && self.random_f32() < self.rules.atmosphere.evaporation_rate * 0.015
+            && self.random_weather_f32() < self.rules.atmosphere.evaporation_rate * 0.015
         {
             let ax = (i % self.width) / ATMOSPHERE_CELL_SIZE;
             let ay = (i / self.width) / ATMOSPHERE_CELL_SIZE;
@@ -425,7 +425,8 @@ impl World {
             && temperature <= settings.melting_point + 3.0
         {
             let ground_y = (y0 + ATMOSPHERE_CELL_SIZE).min(self.height - 1);
-            let x = x0 + self.random_u64() as usize % (self.width - x0).min(ATMOSPHERE_CELL_SIZE);
+            let x = x0
+                + self.random_weather_u64() as usize % (self.width - x0).min(ATMOSPHERE_CELL_SIZE);
             let ground = ground_y * self.width + x;
             let above = ground.saturating_sub(self.width);
             if self.rules.elements[self.cells[ground].element]
@@ -444,10 +445,12 @@ impl World {
             if let Some(cloud) = self.rules.id("cloud") {
                 // Condensation samples within the atmospheric cell so visible clouds
                 // do not expose the coarse simulation grid as a block pattern.
-                let x =
-                    x0 + self.random_u64() as usize % (self.width - x0).min(ATMOSPHERE_CELL_SIZE);
-                let y =
-                    y0 + self.random_u64() as usize % (self.height - y0).min(ATMOSPHERE_CELL_SIZE);
+                let x = x0
+                    + self.random_weather_u64() as usize
+                        % (self.width - x0).min(ATMOSPHERE_CELL_SIZE);
+                let y = y0
+                    + self.random_weather_u64() as usize
+                        % (self.height - y0).min(ATMOSPHERE_CELL_SIZE);
                 let cell = y * self.width + x;
                 if self.cells[cell].element == self.rules.id("air").unwrap_or(usize::MAX) {
                     self.set_element(cell, cloud);
@@ -468,7 +471,7 @@ impl World {
                     + (temperature - self.ambient_temperature) / settings.boiling_point.max(1.0))
                 .clamp(0.0, 1.0);
                 if temperature > settings.freezing_point
-                    && self.random_f32() < settings.evaporation_rate * warmth
+                    && self.random_weather_f32() < settings.evaporation_rate * warmth
                 {
                     self.set_element(y * self.width + x, steam);
                     self.atmosphere[index].humidity =
@@ -693,5 +696,18 @@ impl World {
         x ^= x << 17;
         self.density_rng = x;
         (x >> 40) as f32 / (1u32 << 24) as f32
+    }
+
+    fn random_weather_u64(&mut self) -> u64 {
+        let mut x = self.weather_rng;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.weather_rng = x;
+        x
+    }
+
+    fn random_weather_f32(&mut self) -> f32 {
+        (self.random_weather_u64() >> 40) as f32 / (1u32 << 24) as f32
     }
 }
