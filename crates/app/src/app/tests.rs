@@ -94,13 +94,21 @@ fn camera_pan_dirties_only_newly_visible_columns() {
     app.camera_initialized = true;
     app.camera_x = 320.0;
     app.camera_view_width = 32.0;
+    app.pan_camera(0.0, 32.0);
     while app.world.pop_dirty_region().is_some() {}
+    let settled = app.camera_x;
 
     app.pan_camera(3.0, 32.0);
 
+    let old_right = (settled + 32.0).ceil() as usize;
+    let new_right = (app.camera_x + 32.0).ceil() as usize;
     let regions: Vec<_> = std::iter::from_fn(|| app.world.pop_dirty_region()).collect();
-    assert_eq!(regions.len(), 4);
-    assert!(regions.iter().all(|region| region.x == 352));
+    assert!(!regions.is_empty());
+    assert!(
+        regions
+            .iter()
+            .all(|region| { region.x + region.width > old_right && region.x < new_right })
+    );
 }
 
 #[test]
@@ -213,7 +221,7 @@ fn endless_texture_capacity_avoids_growth_during_normal_scrolling() {
     app.set_level(level).unwrap();
     assert_eq!(app.world_texture.size()[0], 8192);
     app.set_camera_x(1200);
-    assert!(app.world.width() > 1280);
+    assert!(app.world.width() <= 8 * ENDLESS_CHUNK_WIDTH);
     assert_eq!(app.world_texture.size()[0], 8192);
 }
 
@@ -239,10 +247,15 @@ fn endless_capture_offset_generates_chunks_until_the_camera_is_in_bounds() {
     level.width = 128;
     level.height = 64;
     app.set_level(level).unwrap();
+    let global = app.world_start_chunk * ENDLESS_CHUNK_WIDTH as i64 + 900;
     app.set_camera_x(900);
-    assert_eq!(app.camera_x, 900.0);
-    assert!(app.world.width() >= 900 + 128 + 2 * ENDLESS_CHUNK_WIDTH);
-    assert_eq!(app.world_start_chunk, -2);
+    assert_eq!(
+        app.world_start_chunk * ENDLESS_CHUNK_WIDTH as i64 + app.camera_x as i64,
+        global
+    );
+    assert!(app.camera_x >= 0.0);
+    assert!(app.world.width() <= 8 * ENDLESS_CHUNK_WIDTH);
+    assert!(app.world.width() > app.level.width);
 }
 
 #[test]
@@ -258,24 +271,29 @@ fn endless_camera_expands_deterministic_chunks_in_both_directions() {
     let stone = app.world.rules().id("stone").unwrap();
     let original_global_x = app.world_start_chunk * ENDLESS_CHUNK_WIDTH as i64 + 260;
     app.world.paint(260, 3, stone);
+    let before = app.world_start_chunk * ENDLESS_CHUNK_WIDTH as i64 + app.camera_x as i64;
     app.pan_camera(-320.0, 128.0);
-    assert_eq!(app.world_start_chunk, -3);
-    assert_eq!(app.camera_x, 128.0);
+    assert_eq!(
+        app.world_start_chunk * ENDLESS_CHUNK_WIDTH as i64 + app.camera_x as i64,
+        before - 320
+    );
     for _ in 0..48 {
         app.pan_camera(32.0, 128.0);
     }
-    let east_width = app.world.width();
-    assert!(east_width > 5 * ENDLESS_CHUNK_WIDTH);
+    assert!(app.world.width() <= 8 * ENDLESS_CHUNK_WIDTH);
     for _ in 0..96 {
         app.pan_camera(-32.0, 128.0);
     }
+    assert!(app.world_start_chunk < -3);
+    assert!(app.camera_x >= 0.0);
+    let away = app.world_start_chunk * ENDLESS_CHUNK_WIDTH as i64 + app.camera_x as i64;
+    app.pan_camera((original_global_x - away) as f32, 128.0);
     let local_x = (original_global_x - app.world_start_chunk * ENDLESS_CHUNK_WIDTH as i64) as usize;
     assert_eq!(
         app.world.cells()[3 * app.world.width() + local_x].element,
         stone
     );
-    assert!(app.world_start_chunk < -3);
-    assert!(app.camera_x >= 0.0);
+    assert!(app.world.width() <= 8 * ENDLESS_CHUNK_WIDTH);
 }
 
 #[test]
@@ -562,6 +580,10 @@ fn smooth_play_is_vsynced_while_capture_windows_are_background() {
     assert!(!background_window_requested([
         "--level".into(),
         "dry.toml".into(),
+    ]));
+    assert!(background_window_requested([
+        "--span-evidence".into(),
+        "captures".into(),
     ]));
 }
 

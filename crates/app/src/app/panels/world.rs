@@ -36,6 +36,11 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) -> egui::Rect
         app.world.width() as f32
     };
     app.center_camera_on_origin(view_width);
+    if app.level.mode == tinderbox_sim::level::LevelMode::Endless && app.camera_initialized {
+        let global =
+            app.world_start_chunk as f32 * tinderbox_sim::ENDLESS_CHUNK_WIDTH as f32 + app.camera_x;
+        app.sync_active_span(global, view_width);
+    }
     let pan_drag = if app.level.mode == tinderbox_sim::level::LevelMode::Endless {
         let (delta_x, shift_down, primary_down, middle_down, scroll) = ui.input(|input| {
             (

@@ -286,6 +286,9 @@ impl Level {
                 }
             }
         }
+        world
+            .enable_chunk_span(start_chunk, ENDLESS_CHUNK_WIDTH)
+            .map_err(|error| LevelError(error.to_string()))?;
         world.mark_all_dirty();
         Ok(world)
     }

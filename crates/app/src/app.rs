@@ -210,6 +210,16 @@ pub(super) struct Tinderbox {
     #[cfg(not(target_arch = "wasm32"))]
     capture_requested: bool,
     #[cfg(not(target_arch = "wasm32"))]
+    span_evidence_dir: Option<PathBuf>,
+    #[cfg(not(target_arch = "wasm32"))]
+    span_shot_path: Option<PathBuf>,
+    #[cfg(not(target_arch = "wasm32"))]
+    span_shots: u8,
+    #[cfg(not(target_arch = "wasm32"))]
+    span_scroll_frames: usize,
+    #[cfg(not(target_arch = "wasm32"))]
+    span_home: f32,
+    #[cfg(not(target_arch = "wasm32"))]
     level_file: Option<PathBuf>,
     #[cfg(not(target_arch = "wasm32"))]
     level_file_modified: Option<SystemTime>,
@@ -257,6 +267,7 @@ struct NativeArgs {
     camera_x: Option<usize>,
     capture: CaptureOptions,
     drop_boat_at: Option<(usize, usize)>,
+    span_evidence: Option<PathBuf>,
     speed: f32,
 }
 impl Tinderbox {
@@ -312,6 +323,17 @@ impl Tinderbox {
                 app.world.place_boat(x, y),
                 "--drop-boat-at must fit in empty air or water"
             );
+        }
+        if let Some(dir) = args.span_evidence.clone() {
+            app.level.mode = LevelMode::Endless;
+            app.level.fit_window = false;
+            app.level_setup.draft.mode = LevelMode::Endless;
+            app.level_setup.draft.fit_window = false;
+            app.set_level(app.level.clone())
+                .expect("endless span evidence level must generate");
+            app.level_setup.open = false;
+            app.running = true;
+            app.span_evidence_dir = Some(dir);
         }
         app.inspect_mode = args.capture.inspect_at.is_some();
         app.inspect_cell = args.capture.inspect_at;
@@ -425,6 +447,16 @@ impl Tinderbox {
             #[cfg(not(target_arch = "wasm32"))]
             capture_requested: false,
             #[cfg(not(target_arch = "wasm32"))]
+            span_evidence_dir: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            span_shot_path: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            span_shots: 0,
+            #[cfg(not(target_arch = "wasm32"))]
+            span_scroll_frames: 0,
+            #[cfg(not(target_arch = "wasm32"))]
+            span_home: 0.0,
+            #[cfg(not(target_arch = "wasm32"))]
             level_file: None,
             #[cfg(not(target_arch = "wasm32"))]
             level_file_modified: None,
@@ -483,7 +515,11 @@ impl Tinderbox {
     fn reset_camera_mode(&mut self, mode: LevelMode) {
         if mode == LevelMode::Endless {
             let chunks = self.world.width() / ENDLESS_CHUNK_WIDTH;
-            self.world_start_chunk = -(chunks as i64 / 2);
+            self.world_start_chunk = if self.world.chunk_span_enabled() {
+                self.world.chunk_origin()
+            } else {
+                -(chunks as i64 / 2)
+            };
             self.camera_x = (self.world.width().saturating_sub(self.level.width) as f32) / 2.0;
             self.camera_initialized = false;
         } else {
@@ -498,15 +534,8 @@ impl Tinderbox {
         if self.level.mode != LevelMode::Endless {
             return;
         }
-        let camera_x = camera_x as f32;
-        let buffer = (ENDLESS_CHUNK_WIDTH * 2) as f32;
-        while camera_x + self.level.width as f32 > self.world.width() as f32 - buffer {
-            if !self.append_endless_chunk() {
-                break;
-            }
-        }
-        self.camera_x =
-            camera_x.min((self.world.width() as f32 - self.level.width as f32).max(0.0));
+        let global = self.world_start_chunk as f32 * ENDLESS_CHUNK_WIDTH as f32 + camera_x as f32;
+        self.sync_active_span(global, self.level.width.max(1) as f32);
         self.camera_initialized = true;
     }
 
@@ -531,16 +560,9 @@ impl Tinderbox {
         let previous_world_width = self.world.width();
         let previous_world_start = self.world_start_chunk;
         self.center_camera_on_origin(view_width);
-        let max_camera_x = (self.world.width() as f32 - view_width.max(1.0)).max(0.0);
-        self.camera_x = (self.camera_x + delta).clamp(0.0, max_camera_x);
-        let chunk = ENDLESS_CHUNK_WIDTH as f32;
-        if self.camera_x < chunk * 2.0 {
-            if self.prepend_endless_chunk() {
-                self.camera_x += chunk;
-            }
-        } else if self.camera_x + view_width > self.world.width() as f32 - chunk * 2.0 {
-            self.append_endless_chunk();
-        }
+        let global =
+            self.world_start_chunk as f32 * ENDLESS_CHUNK_WIDTH as f32 + self.camera_x + delta;
+        self.sync_active_span(global, view_width);
         if self.camera_x != previous_camera_x
             || self.world.width() != previous_world_width
             || self.world_start_chunk != previous_world_start
@@ -578,21 +600,53 @@ impl Tinderbox {
             .mark_dirty_rect(left, 0, right.saturating_sub(left), self.world.height());
     }
 
-    fn append_endless_chunk(&mut self) -> bool {
-        let chunk_index =
-            self.world_start_chunk + (self.world.width() / ENDLESS_CHUNK_WIDTH) as i64;
-        let Ok(generated) = self.level.generate_chunk(chunk_index, self.world.rules()) else {
-            return false;
-        };
+    /// Keeps the resident grid to the visible chunks plus the configured margin.
+    ///
+    /// An unchanged chunk range returns before generating terrain. When the left edge moves,
+    /// resident indices shift, so the visible texture rect is invalidated. Dormant chunks are
+    /// not uploaded.
+    fn sync_active_span(&mut self, global_camera: f32, view_width: f32) {
+        if self.level.mode != LevelMode::Endless || !self.world.chunk_span_enabled() {
+            return;
+        }
+        let view_width = view_width.max(1.0);
+        self.camera_view_width = view_width;
+        let global_i = global_camera.floor() as i64;
+        let right = (global_camera + view_width).ceil() as i64;
+        let view_cells = usize::try_from(right.saturating_sub(global_i).max(1)).unwrap_or(1);
+        if let Some((first, last)) = self.world.active_chunk_range(global_i, view_cells) {
+            let count = self.world.width() / ENDLESS_CHUNK_WIDTH;
+            let current_last = self.world.chunk_origin() + count as i64 - 1;
+            if first == self.world.chunk_origin() && last == current_last {
+                self.world_start_chunk = self.world.chunk_origin();
+                self.camera_x =
+                    global_camera - self.world_start_chunk as f32 * ENDLESS_CHUNK_WIDTH as f32;
+                return;
+            }
+        }
+        let rules = self.world.rules().clone();
+        let level = self.level.clone();
         let extend_started = Instant::now();
-        let extended = self.world.extend_horizontal(&generated, false);
+        let adjusted = self
+            .world
+            .retain_active_span(global_i, view_cells, |index| {
+                level
+                    .generate_chunk(index, &rules)
+                    .map_err(|error| tinderbox_sim::WorldError(error.to_string()))
+            });
         if self.stress_play {
             self.stress_max_extend_ms = self
                 .stress_max_extend_ms
                 .max(extend_started.elapsed().as_secs_f32() * 1000.0);
         }
-        if extended.is_err() {
-            return false;
+        let Ok(adjustment) = adjusted else {
+            return;
+        };
+        let origin_shifted = adjustment.added_left > 0 || adjustment.removed_left > 0;
+        self.world_start_chunk = adjustment.origin;
+        self.camera_x = global_camera - adjustment.origin as f32 * ENDLESS_CHUNK_WIDTH as f32;
+        if origin_shifted {
+            self.mark_visible_world_dirty();
         }
         let texture_started = Instant::now();
         if self.resize_world_texture() {
@@ -603,34 +657,79 @@ impl Tinderbox {
                 .stress_max_texture_ms
                 .max(texture_started.elapsed().as_secs_f32() * 1000.0);
         }
-        true
     }
 
-    fn prepend_endless_chunk(&mut self) -> bool {
-        let chunk_index = self.world_start_chunk - 1;
-        let Ok(generated) = self.level.generate_chunk(chunk_index, self.world.rules()) else {
-            return false;
+    #[cfg(not(target_arch = "wasm32"))]
+    fn drive_span_evidence(&mut self, ctx: &egui::Context) {
+        if self.span_evidence_dir.is_none() || self.level_setup.open || !self.camera_initialized {
+            return;
+        }
+        if self.span_shot_path.is_some() {
+            return;
+        }
+        let dir = self.span_evidence_dir.clone().unwrap();
+        let view = self.camera_view_width.max(1.0);
+        match self.span_shots {
+            0 => {
+                if self.span_scroll_frames == 0 {
+                    self.ignite_span_marker();
+                }
+                self.span_scroll_frames += 1;
+                if self.span_scroll_frames > 45 && self.world.pending_dirty_regions() == 0 {
+                    self.request_span_shot(ctx, dir.join("before-span.png"));
+                }
+            }
+            1 => {
+                if self.span_scroll_frames > 220 {
+                    if self.world.pending_dirty_regions() == 0 {
+                        self.request_span_shot(ctx, dir.join("away-span.png"));
+                    }
+                } else {
+                    self.pan_camera(16.0, view);
+                    self.span_scroll_frames += 1;
+                }
+            }
+            2 => {
+                let global =
+                    self.world_start_chunk as f32 * ENDLESS_CHUNK_WIDTH as f32 + self.camera_x;
+                let delta = self.span_home - global;
+                if delta.abs() > 1.0 {
+                    self.pan_camera(delta.clamp(-32.0, 32.0), view);
+                } else if self.span_scroll_frames > 30 && self.world.pending_dirty_regions() == 0 {
+                    self.request_span_shot(ctx, dir.join("after-span.png"));
+                } else {
+                    self.span_scroll_frames += 1;
+                }
+            }
+            _ => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn ignite_span_marker(&mut self) {
+        let Some(fire) = self.world.rules().id("fire") else {
+            return;
         };
-        let extend_started = Instant::now();
-        let extended = self.world.extend_horizontal(&generated, true);
-        if self.stress_play {
-            self.stress_max_extend_ms = self
-                .stress_max_extend_ms
-                .max(extend_started.elapsed().as_secs_f32() * 1000.0);
+        let x = (self.camera_x as usize + 64).min(self.world.width().saturating_sub(10));
+        let y = self.world.height() / 2;
+        for dy in 0..8 {
+            for dx in 0..10 {
+                self.world.paint(x + dx, y + dy, fire);
+            }
         }
-        if extended.is_err() {
-            return false;
-        }
-        self.world_start_chunk = chunk_index;
-        let texture_started = Instant::now();
-        self.resize_world_texture();
-        self.world.mark_all_dirty();
-        if self.stress_play {
-            self.stress_max_texture_ms = self
-                .stress_max_texture_ms
-                .max(texture_started.elapsed().as_secs_f32() * 1000.0);
-        }
-        true
+        self.span_home = self.world_start_chunk as f32 * ENDLESS_CHUNK_WIDTH as f32 + self.camera_x;
+        println!(
+            "SPAN_EVIDENCE ignited x={x} y={y} home={:.1} world={}x{}",
+            self.span_home,
+            self.world.width(),
+            self.world.height()
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn request_span_shot(&mut self, ctx: &egui::Context, path: PathBuf) {
+        self.span_shot_path = Some(path);
+        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
     }
 
     fn resize_world_texture(&mut self) -> bool {
@@ -968,10 +1067,15 @@ impl Tinderbox {
                 self.capture_requested = false;
                 return;
             }
-            if let Some(options) = &self.capture {
-                let path = options
-                    .output
-                    .as_ref()
+            if self.span_shot_path.is_some() || self.capture.is_some() {
+                let path = self
+                    .span_shot_path
+                    .clone()
+                    .or_else(|| {
+                        self.capture
+                            .as_ref()
+                            .and_then(|options| options.output.clone())
+                    })
                     .expect("capture output was validated");
                 let rgba: Vec<u8> = image
                     .pixels
@@ -979,7 +1083,7 @@ impl Tinderbox {
                     .flat_map(|pixel| pixel.to_array())
                     .collect();
                 image::save_buffer(
-                    path,
+                    &path,
                     &rgba,
                     image.size[0] as u32,
                     image.size[1] as u32,
@@ -989,11 +1093,21 @@ impl Tinderbox {
                     panic!("Cannot save screenshot {}: {error}", path.display())
                 });
                 println!(
-                    "SCREENSHOT_CAPTURED path={} frames={} sim_seconds={:.3}",
+                    "SCREENSHOT_CAPTURED path={} frames={} sim_seconds={:.3} world={}x{} chunk_origin={} camera_x={:.1} dormant_chunks={}",
                     path.display(),
                     self.capture_frames,
-                    self.sim_seconds
+                    self.sim_seconds,
+                    self.world.width(),
+                    self.world.height(),
+                    self.world.chunk_origin(),
+                    self.camera_x,
+                    self.world.dormant_chunk_count()
                 );
+                if self.span_shot_path.take().is_some() {
+                    self.span_shots = self.span_shots.saturating_add(1);
+                    self.span_scroll_frames = 0;
+                    return;
+                }
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 return;
             }
@@ -1307,6 +1421,7 @@ impl eframe::App for Tinderbox {
             }
             self.poll_level_file();
             self.capture_frame(ctx);
+            self.drive_span_evidence(ctx);
         }
         #[cfg(target_arch = "wasm32")]
         poll_browser_files(ctx, frame, self);
@@ -1428,6 +1543,11 @@ fn native_args_from(args: impl IntoIterator<Item = String>) -> Result<NativeArgs
                     .ok_or("--drop-boat-at requires X,Y cell coordinates")?,
             )),
             "--speed" => Some(("speed", args.next().ok_or("--speed requires a value")?)),
+            "--span-evidence" => Some((
+                "span_evidence",
+                args.next()
+                    .ok_or("--span-evidence requires an output directory")?,
+            )),
             _ => None,
         };
         let Some((flag, value)) = value else {
@@ -1487,6 +1607,7 @@ fn native_args_from(args: impl IntoIterator<Item = String>) -> Result<NativeArgs
                 }
                 parsed.speed = speed;
             }
+            "span_evidence" => parsed.span_evidence = Some(PathBuf::from(value)),
             _ => unreachable!(),
         }
     }
@@ -1561,7 +1682,9 @@ fn requested_world_size() -> (usize, usize) {
 fn background_window_requested(args: impl IntoIterator<Item = String>) -> bool {
     let args = args.into_iter().collect::<Vec<_>>();
     native_args_from(args).is_ok_and(|parsed| {
-        parsed.capture.after_frames.is_some() || parsed.capture.at_seconds.is_some()
+        parsed.capture.after_frames.is_some()
+            || parsed.capture.at_seconds.is_some()
+            || parsed.span_evidence.is_some()
     })
 }
 
