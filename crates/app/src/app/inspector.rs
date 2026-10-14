@@ -389,6 +389,37 @@ mod tests {
     }
 
     #[test]
+    fn motion_description_is_shown_once_for_each_motion_type() {
+        let mut world = world();
+        for (name, expected) in [
+            ("water", "flows and settles"),
+            ("sand", "falls under gravity"),
+            ("smoke", "rises and drifts with wind"),
+            ("stone", "stays in place"),
+        ] {
+            let element = world.rules().id(name).unwrap();
+            world.paint(3, 3, element);
+            let description = describe_cell(&world, 3, 3).unwrap();
+            assert_eq!(
+                description
+                    .lines
+                    .iter()
+                    .filter(|line| line.contains(expected))
+                    .count(),
+                1,
+                "{name} should describe its motion once"
+            );
+            assert!(
+                description
+                    .lines
+                    .iter()
+                    .all(|line| !line.starts_with("Type:") && !line.starts_with("Motion:"))
+            );
+            world.paint(3, 3, world.rules().id("air").unwrap());
+        }
+    }
+
+    #[test]
     fn describes_critter_behavior() {
         let mut world = world();
         let beetle = world.rules().id("beetle").unwrap();

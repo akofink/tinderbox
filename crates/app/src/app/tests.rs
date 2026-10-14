@@ -392,6 +392,10 @@ fn native_recipe_capture_arguments_validate_as_a_pair() {
         "dry.png".into(),
         "--inspect-at".into(),
         "24,18".into(),
+        "--drop-boat-at".into(),
+        "200,80".into(),
+        "--speed".into(),
+        "10".into(),
     ])
     .unwrap();
     assert_eq!(args.level_path, Some(PathBuf::from("dry.toml")));
@@ -400,7 +404,36 @@ fn native_recipe_capture_arguments_validate_as_a_pair() {
     assert_eq!(args.capture.at_seconds, None);
     assert_eq!(args.capture.output, Some(PathBuf::from("dry.png")));
     assert_eq!(args.capture.inspect_at, Some((24, 18)));
+    assert_eq!(args.drop_boat_at, Some((200, 80)));
+    assert_eq!(args.speed, 10.0);
     assert!(native_args_from(["--inspect-at".into(), "bad".into()]).is_err());
+    assert!(native_args_from(["--speed".into(), "10.1".into()]).is_err());
+    assert!(native_args_from(["--speed".into(), "NaN".into()]).is_err());
+    let measured = native_args_from([
+        "--world-size".into(),
+        "400x250".into(),
+        "--speed".into(),
+        "4".into(),
+        "--measure-real-seconds".into(),
+        "10".into(),
+    ])
+    .unwrap();
+    assert_eq!(measured.speed, 4.0);
+    assert_eq!(measured.capture.measure_real_seconds, Some(10.0));
+    assert!(measured.capture.output.is_none());
+    assert!(!background_window_requested([
+        "--measure-real-seconds".into(),
+        "10".into(),
+    ]));
+    assert!(
+        native_args_from([
+            "--capture-after".into(),
+            "60".into(),
+            "--measure-real-seconds".into(),
+            "10".into(),
+        ])
+        .is_err()
+    );
     let initial = native_args_from([
         "--level".into(),
         "sealed.toml".into(),
@@ -484,42 +517,96 @@ fn deterministic_native_step_targets_sixty_hertz() {
 }
 
 #[test]
-fn work_accumulator_issues_default_budget_and_preserves_fractional_work() {
+fn work_accumulator_preserves_fractional_work_at_one_times_speed() {
     let mut work = WorkAccumulator::default();
     work.accrue(1.0 / 60.0, 1.0);
-    assert_eq!(work.take(), WORK_PER_FRAME);
+    assert_eq!(work.take(WORK_PER_FRAME), WORK_PER_FRAME);
     assert!(work.pending < 0.01);
     work.accrue(1.0 / 120.0, 1.0);
-    assert_eq!(work.take(), WORK_PER_FRAME / 2);
+    assert_eq!(work.take(WORK_PER_FRAME), WORK_PER_FRAME / 2);
     assert!(work.pending < 0.01);
 }
 
 #[test]
-fn frame_cap_carries_backlog_but_bounds_long_hitches() {
+fn carry_is_bounded_by_requested_speed_and_overflow_is_dropped() {
     let mut work = WorkAccumulator::default();
-    work.accrue(0.1, 1.0);
-    assert_eq!(work.take(), MAX_WORK_PER_FRAME);
-    assert!(work.pending > 0.0);
-    work.accrue(1.0 / 60.0, 1.0);
-    let next = work.take();
-    assert_eq!(next, MAX_WORK_PER_FRAME);
-    assert!(work.pending > 0.0);
-    let carry_cap = (MAX_WORK_PER_FRAME * MAX_CARRY_FRAMES) as f64;
-    work.accrue(10.0, 4.0);
-    assert_eq!(work.take(), MAX_WORK_PER_FRAME);
-    assert!(work.pending <= carry_cap - MAX_WORK_PER_FRAME as f64);
-    assert!(work.pending > 0.0);
+    work.accrue(0.1, 10.0);
+    let ten_x_cap = (MAX_WORK_PER_FRAME * MAX_CARRY_FRAMES * 10) as f64;
+    assert_eq!(work.pending, ten_x_cap);
+    assert!(work.dropped > 0.0);
+
+    work.trim_to_speed(1.0);
+    let one_x_cap = (MAX_WORK_PER_FRAME * MAX_CARRY_FRAMES) as f64;
+    assert_eq!(work.pending, one_x_cap);
+    assert!(work.dropped > ten_x_cap);
+}
+
+#[test]
+fn ten_times_speed_accrues_requested_work_without_unbounded_carry() {
+    let mut work = WorkAccumulator::default();
+    work.accrue(1.0 / 60.0, 10.0);
+    assert!((work.pending - MAX_WORK_PER_FRAME as f64 * 10.0).abs() < 0.1);
+    assert_eq!(work.dropped, 0.0);
+}
+
+#[test]
+fn adaptive_budget_scales_from_measured_step_cost_but_capture_stays_fixed() {
+    let mut budget = AdaptiveWorkBudget::default();
+    budget.observe(WORK_PER_FRAME, 4.0);
+    assert!(budget.limit(false) > WORK_PER_FRAME);
+    assert!(budget.limit(false) <= MAX_ADAPTIVE_WORK_PER_FRAME);
+    assert_eq!(budget.limit(true), MAX_WORK_PER_FRAME);
+}
+
+#[test]
+fn light_world_advances_at_requested_two_and_four_times_speed() {
+    let rules = Rules::load(DEFAULT_RULES).unwrap();
+    let simulated_seconds = |speed: f32| {
+        let mut world = World::new(400, 250, 7, rules.clone()).unwrap();
+        let mut work = WorkAccumulator::default();
+        let mut simulated = 0.0;
+        for _ in 0..30 {
+            work.accrue(FIXED_FRAME_DT, speed);
+            let budget_limit = (MAX_WORK_PER_FRAME as f32 * speed).ceil() as usize;
+            let completed = world.step(work.take(budget_limit));
+            simulated += completed as f64 / WORK_UNITS_PER_SECOND;
+        }
+        simulated
+    };
+    let one_x = simulated_seconds(1.0);
+    let two_x = simulated_seconds(2.0);
+    let four_x = simulated_seconds(4.0);
+    assert!((two_x / one_x - 2.0).abs() < 0.01);
+    assert!((four_x / one_x - 4.0).abs() < 0.01);
+}
+
+#[test]
+fn ten_times_speed_steps_through_multiple_passes_of_a_small_world() {
+    let mut app = Tinderbox::new_state(false);
+    let mut level = Preset::DryForest.level(app.world.rules(), 192, 120);
+    level.generator = tinderbox_sim::level::Generator::Empty;
+    level.amounts.clear();
+    level.spark = false;
+    app.set_level(level).unwrap();
+    app.running = true;
+    app.speed = 10.0;
+    app.adaptive_budget.work_per_ms =
+        MAX_ADAPTIVE_WORK_PER_FRAME as f64 / TARGET_SIMULATION_MS_PER_FRAME;
+
+    app.simulate_frame(&egui::Context::default(), FIXED_FRAME_DT, FIXED_FRAME_DT);
+    assert!((app.sim_seconds - 1.0 / 6.0).abs() < 0.001);
+    assert!(app.work.pending < 0.1);
 }
 
 #[test]
 fn manual_steps_share_the_frame_cap_and_can_run_while_paused() {
     let mut work = WorkAccumulator::default();
     work.add(WORK_PER_FRAME as f64);
-    assert_eq!(work.take(), WORK_PER_FRAME);
-    assert_eq!(work.take(), 0);
+    assert_eq!(work.take(WORK_PER_FRAME), WORK_PER_FRAME);
+    assert_eq!(work.take(WORK_PER_FRAME), 0);
 
     work.add((MAX_WORK_PER_FRAME * 2) as f64);
-    assert_eq!(work.take(), MAX_WORK_PER_FRAME);
-    assert_eq!(work.take(), MAX_WORK_PER_FRAME);
+    assert_eq!(work.take(MAX_WORK_PER_FRAME), MAX_WORK_PER_FRAME);
+    assert_eq!(work.take(MAX_WORK_PER_FRAME), MAX_WORK_PER_FRAME);
     assert_eq!(work.pending, 0.0);
 }

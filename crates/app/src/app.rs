@@ -33,7 +33,10 @@ const DEFAULT_CELL_SIZE: f32 = 3.5;
 const WORK_PER_FRAME: usize = 12_000;
 const WORK_UNITS_PER_SECOND: f64 = (WORK_PER_FRAME * 60) as f64;
 const MAX_WORK_PER_FRAME: usize = WORK_PER_FRAME;
-const MAX_CARRY_FRAMES: usize = 8;
+const MAX_CARRY_FRAMES: usize = 3;
+const MAX_SPEED: f32 = 10.0;
+const TARGET_SIMULATION_MS_PER_FRAME: f64 = 10.0;
+const MAX_ADAPTIVE_WORK_PER_FRAME: usize = WORK_PER_FRAME * MAX_SPEED as usize;
 pub(super) const MAX_TEXTURE_REGIONS_PER_FRAME: usize = 32;
 const FIXED_FRAME_DT: f32 = 1.0 / 60.0;
 #[cfg(not(target_arch = "wasm32"))]
@@ -72,22 +75,70 @@ pub(crate) enum Overlay {
 #[derive(Default)]
 struct WorkAccumulator {
     pending: f64,
+    dropped: f64,
 }
 impl WorkAccumulator {
     fn accrue(&mut self, dt: f32, speed: f32) {
-        let due = dt.max(0.0) as f64 * WORK_UNITS_PER_SECOND * speed.clamp(0.0, 4.0) as f64;
-        self.add(due);
+        let speed = speed.clamp(0.25, MAX_SPEED);
+        let due = dt.max(0.0) as f64 * WORK_UNITS_PER_SECOND * speed as f64;
+        self.add_with_cap(
+            due,
+            (MAX_WORK_PER_FRAME * MAX_CARRY_FRAMES) as f64 * speed as f64,
+        );
     }
 
     fn add(&mut self, units: f64) {
-        let carry_cap = (MAX_WORK_PER_FRAME * MAX_CARRY_FRAMES) as f64;
-        self.pending = (self.pending + units).min(carry_cap);
+        self.add_with_cap(units, (MAX_WORK_PER_FRAME * MAX_CARRY_FRAMES) as f64);
     }
 
-    fn take(&mut self) -> usize {
-        let budget = (self.pending.floor() as usize).min(MAX_WORK_PER_FRAME);
+    fn add_with_cap(&mut self, units: f64, cap: f64) {
+        let total = self.pending + units.max(0.0);
+        self.pending = total.min(cap);
+        self.dropped += (total - cap).max(0.0);
+    }
+
+    fn take(&mut self, budget_limit: usize) -> usize {
+        let budget = (self.pending.floor() as usize).min(budget_limit);
         self.pending -= budget as f64;
         budget
+    }
+
+    fn trim_to_speed(&mut self, speed: f32) {
+        let speed = speed.clamp(0.25, MAX_SPEED);
+        let cap = (MAX_WORK_PER_FRAME * MAX_CARRY_FRAMES) as f64 * speed as f64;
+        self.dropped += (self.pending - cap).max(0.0);
+        self.pending = self.pending.min(cap);
+    }
+}
+
+#[derive(Clone, Copy)]
+struct AdaptiveWorkBudget {
+    work_per_ms: f64,
+}
+impl Default for AdaptiveWorkBudget {
+    fn default() -> Self {
+        Self {
+            work_per_ms: MAX_WORK_PER_FRAME as f64 / TARGET_SIMULATION_MS_PER_FRAME,
+        }
+    }
+}
+impl AdaptiveWorkBudget {
+    fn limit(self, fixed: bool) -> usize {
+        if fixed {
+            MAX_WORK_PER_FRAME
+        } else {
+            (self.work_per_ms * TARGET_SIMULATION_MS_PER_FRAME)
+                .round()
+                .clamp(1.0, MAX_ADAPTIVE_WORK_PER_FRAME as f64) as usize
+        }
+    }
+
+    fn observe(&mut self, completed: usize, elapsed_ms: f64) {
+        if completed == 0 || elapsed_ms <= 0.0 {
+            return;
+        }
+        let sample = completed as f64 / elapsed_ms;
+        self.work_per_ms = self.work_per_ms * 0.8 + sample * 0.2;
     }
 }
 
@@ -111,7 +162,21 @@ pub(super) struct Tinderbox {
     level_setup: LevelSetup,
     return_running: bool,
     sim_seconds: f64,
+    sim_rate: f64,
     work: WorkAccumulator,
+    adaptive_budget: AdaptiveWorkBudget,
+    #[cfg(not(target_arch = "wasm32"))]
+    measure_elapsed: f64,
+    #[cfg(not(target_arch = "wasm32"))]
+    measure_frame_total_ms: f64,
+    #[cfg(not(target_arch = "wasm32"))]
+    measure_frame_max_ms: f32,
+    #[cfg(not(target_arch = "wasm32"))]
+    measure_frames: usize,
+    #[cfg(not(target_arch = "wasm32"))]
+    measure_reported: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    measure_requested_speed: f32,
     peak_carry_work: usize,
     max_dirty_regions_uploaded: usize,
     last_frame: Instant,
@@ -163,20 +228,23 @@ struct LevelReloadJob {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct CaptureOptions {
     output: Option<PathBuf>,
     after_frames: Option<usize>,
     at_seconds: Option<u64>,
+    measure_real_seconds: Option<f64>,
     inspect_at: Option<(usize, usize)>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct NativeArgs {
     level_path: Option<PathBuf>,
     camera_x: Option<usize>,
     capture: CaptureOptions,
+    drop_boat_at: Option<(usize, usize)>,
+    speed: f32,
 }
 impl Tinderbox {
     #[cfg(not(target_arch = "wasm32"))]
@@ -204,6 +272,8 @@ impl Tinderbox {
             app.level.fit_window = false;
             app.level_setup.draft.fit_window = false;
         }
+        app.speed = args.speed;
+        app.measure_requested_speed = args.speed;
         app.level_file = args.level_path.clone();
         app.level_file_modified = app.level_file.as_ref().and_then(|path| file_modified(path));
         if let Some(mut level) = level {
@@ -220,10 +290,22 @@ impl Tinderbox {
             app.running =
                 args.capture.after_frames != Some(0) && args.capture.at_seconds != Some(0);
         }
+        if args.capture.measure_real_seconds.is_some() {
+            app.level_setup.open = false;
+            app.running = true;
+        }
+        if let Some((x, y)) = args.drop_boat_at {
+            assert!(
+                app.world.place_boat(x, y),
+                "--drop-boat-at must fit in empty air or water"
+            );
+        }
         app.inspect_mode = args.capture.inspect_at.is_some();
         app.inspect_cell = args.capture.inspect_at;
-        app.capture = (args.capture.after_frames.is_some() || args.capture.at_seconds.is_some())
-            .then_some(args.capture);
+        app.capture = (args.capture.after_frames.is_some()
+            || args.capture.at_seconds.is_some()
+            || args.capture.measure_real_seconds.is_some())
+        .then_some(args.capture);
         app
     }
 
@@ -284,7 +366,21 @@ impl Tinderbox {
             level_setup,
             return_running: false,
             sim_seconds: 0.0,
+            sim_rate: 0.0,
             work: WorkAccumulator::default(),
+            adaptive_budget: AdaptiveWorkBudget::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            measure_elapsed: 0.0,
+            #[cfg(not(target_arch = "wasm32"))]
+            measure_frame_total_ms: 0.0,
+            #[cfg(not(target_arch = "wasm32"))]
+            measure_frame_max_ms: 0.0,
+            #[cfg(not(target_arch = "wasm32"))]
+            measure_frames: 0,
+            #[cfg(not(target_arch = "wasm32"))]
+            measure_reported: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            measure_requested_speed: 1.0,
             peak_carry_work: 0,
             max_dirty_regions_uploaded: 0,
             last_frame: Instant::now(),
@@ -484,7 +580,17 @@ impl Tinderbox {
 
     fn reset_simulation_clock(&mut self) {
         self.sim_seconds = 0.0;
+        self.sim_rate = 0.0;
         self.work = WorkAccumulator::default();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.measure_elapsed = 0.0;
+            self.measure_frame_total_ms = 0.0;
+            self.measure_frame_max_ms = 0.0;
+            self.measure_frames = 0;
+            self.measure_reported = false;
+        }
+        self.adaptive_budget = AdaptiveWorkBudget::default();
         self.peak_carry_work = 0;
         self.max_dirty_regions_uploaded = 0;
     }
@@ -729,6 +835,25 @@ impl Tinderbox {
         self.setup_action(SetupAction::Play(level));
     }
 
+    fn step_world_with_budget(&mut self, budget: usize) -> usize {
+        let pass_limit = self
+            .world
+            .width()
+            .saturating_mul(self.world.height())
+            .max(1);
+        let mut remaining = budget;
+        let mut completed = 0;
+        while remaining > 0 {
+            let used = self.world.step(remaining.min(pass_limit));
+            if used == 0 {
+                break;
+            }
+            remaining -= used;
+            completed += used;
+        }
+        completed
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     fn capture_frame(&mut self, ctx: &egui::Context) {
         if let Some(image) = ctx.input(|input| {
@@ -775,19 +900,52 @@ impl Tinderbox {
             return;
         };
         self.capture_frames += 1;
-        if options
-            .after_frames
-            .is_some_and(|frames| self.capture_frames >= frames)
+        let measured = options
+            .measure_real_seconds
+            .is_some_and(|seconds| self.measure_elapsed >= seconds);
+        if measured {
+            self.running = false;
+            if !self.measure_reported {
+                let elapsed = self.measure_elapsed.max(f64::EPSILON);
+                println!(
+                    "NATIVE_SPEED_MEASUREMENT requested={:.1}x elapsed_real_s={:.3} sim_seconds={:.3} achieved={:.3} frame_avg_ms={:.2} frame_worst_ms={:.2} frames={} pending_work={} dropped_work={:.0}",
+                    self.measure_requested_speed,
+                    self.measure_elapsed,
+                    self.sim_seconds,
+                    self.sim_seconds / elapsed,
+                    self.measure_frame_total_ms / self.measure_frames.max(1) as f64,
+                    self.measure_frame_max_ms,
+                    self.measure_frames,
+                    self.work.pending.ceil() as usize,
+                    self.work.dropped
+                );
+                self.measure_reported = true;
+            }
+            if options.output.is_none() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                return;
+            }
+        }
+        if measured
+            || options
+                .after_frames
+                .is_some_and(|frames| self.capture_frames >= frames)
             || options
                 .at_seconds
                 .is_some_and(|seconds| self.sim_seconds >= seconds as f64)
         {
-            // Stop at the requested simulation frame and let the capped texture
-            // uploader drain every dirty region before asking eframe for a screenshot.
+            // Stop at the requested measurement or simulation frame and let the
+            // bounded texture uploader drain before asking eframe for a screenshot.
             self.running = false;
             if !self.capture_requested && self.world.pending_dirty_regions() == 0 {
-                self.capture_requested = true;
-                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+                if options.output.is_some() {
+                    self.capture_requested = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(
+                        egui::UserData::default(),
+                    ));
+                } else {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
             }
         }
     }
@@ -828,15 +986,45 @@ impl Tinderbox {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
         }
+        self.work.trim_to_speed(self.speed);
         if self.running {
             self.work.accrue(dt, self.speed);
+            #[cfg(not(target_arch = "wasm32"))]
+            if self
+                .capture
+                .as_ref()
+                .is_some_and(|capture| capture.measure_real_seconds.is_some())
+            {
+                let frame_ms = wall_dt.max(0.0) * 1000.0;
+                self.measure_elapsed += wall_dt.max(0.0) as f64;
+                self.measure_frame_total_ms += frame_ms as f64;
+                self.measure_frame_max_ms = self.measure_frame_max_ms.max(frame_ms);
+                self.measure_frames += 1;
+            }
         }
         self.peak_carry_work = self.peak_carry_work.max(self.work.pending.ceil() as usize);
-        let budget = self.work.take();
+        #[cfg(not(target_arch = "wasm32"))]
+        let fixed_budget = self.stress_play
+            || self.capture.as_ref().is_some_and(|capture| {
+                capture.after_frames.is_some() || capture.at_seconds.is_some()
+            });
+        #[cfg(target_arch = "wasm32")]
+        let fixed_budget = self.stress_play;
+        let budget = self.work.take(self.adaptive_budget.limit(fixed_budget));
         if budget > 0 {
             let previous_cloud_second = self.sim_seconds.floor();
-            let completed = self.world.step(budget);
-            self.sim_seconds += completed as f64 / WORK_UNITS_PER_SECOND;
+            let step_started = Instant::now();
+            let completed = self.step_world_with_budget(budget);
+            if !fixed_budget {
+                self.adaptive_budget
+                    .observe(completed, step_started.elapsed().as_secs_f64() * 1000.0);
+            }
+            let completed_seconds = completed as f64 / WORK_UNITS_PER_SECOND;
+            self.sim_seconds += completed_seconds;
+            if wall_dt > 0.0 {
+                let frame_rate = completed_seconds / wall_dt as f64;
+                self.sim_rate = self.sim_rate * 0.8 + frame_rate * 0.2;
+            }
             if self.sim_seconds.floor() > previous_cloud_second {
                 // Cloud noise and weather fade depend on simulation time, not cell changes.
                 self.world.mark_all_dirty();
@@ -895,7 +1083,10 @@ impl eframe::App for Tinderbox {
         self.last_frame = now;
         self.frame_ms = self.frame_ms * 0.9 + wall_dt * 100.0;
         #[cfg(not(target_arch = "wasm32"))]
-        let fixed_step = self.stress_play || self.capture.is_some();
+        let fixed_step = self.stress_play
+            || self.capture.as_ref().is_some_and(|capture| {
+                capture.after_frames.is_some() || capture.at_seconds.is_some()
+            });
         #[cfg(target_arch = "wasm32")]
         let fixed_step = false;
         let dt = if fixed_step {
@@ -1019,7 +1210,10 @@ pub(super) fn start_web() {
 #[cfg(not(target_arch = "wasm32"))]
 fn native_args_from(args: impl IntoIterator<Item = String>) -> Result<NativeArgs, String> {
     let mut args = args.into_iter();
-    let mut parsed = NativeArgs::default();
+    let mut parsed = NativeArgs {
+        speed: 1.0,
+        ..NativeArgs::default()
+    };
     while let Some(arg) = args.next() {
         let value = match arg.as_str() {
             "--level" => Some((
@@ -1044,11 +1238,22 @@ fn native_args_from(args: impl IntoIterator<Item = String>) -> Result<NativeArgs
                 args.next()
                     .ok_or("--capture-at-seconds requires a second count")?,
             )),
+            "--measure-real-seconds" => Some((
+                "measure_seconds",
+                args.next()
+                    .ok_or("--measure-real-seconds requires a duration")?,
+            )),
             "--inspect-at" => Some((
                 "inspect_at",
                 args.next()
                     .ok_or("--inspect-at requires X,Y cell coordinates")?,
             )),
+            "--drop-boat-at" => Some((
+                "drop_boat_at",
+                args.next()
+                    .ok_or("--drop-boat-at requires X,Y cell coordinates")?,
+            )),
+            "--speed" => Some(("speed", args.next().ok_or("--speed requires a value")?)),
             _ => None,
         };
         let Some((flag, value)) = value else {
@@ -1076,6 +1281,15 @@ fn native_args_from(args: impl IntoIterator<Item = String>) -> Result<NativeArgs
                     .map_err(|_| "--capture-at-seconds must be a non-negative integer")?;
                 parsed.capture.at_seconds = Some(count);
             }
+            "measure_seconds" => {
+                let seconds = value
+                    .parse::<f64>()
+                    .map_err(|_| "--measure-real-seconds must be between 0 and 3600")?;
+                if !seconds.is_finite() || !(0.0..=3600.0).contains(&seconds) || seconds == 0.0 {
+                    return Err("--measure-real-seconds must be between 0 and 3600".into());
+                }
+                parsed.capture.measure_real_seconds = Some(seconds);
+            }
             "inspect_at" => {
                 let (x, y) = value
                     .split_once(',')
@@ -1083,16 +1297,39 @@ fn native_args_from(args: impl IntoIterator<Item = String>) -> Result<NativeArgs
                     .ok_or("--inspect-at must use non-negative X,Y cell coordinates")?;
                 parsed.capture.inspect_at = Some((x, y));
             }
+            "drop_boat_at" => {
+                let (x, y) = value
+                    .split_once(',')
+                    .and_then(|(x, y)| Some((x.parse::<usize>().ok()?, y.parse::<usize>().ok()?)))
+                    .ok_or("--drop-boat-at must use non-negative X,Y cell coordinates")?;
+                parsed.drop_boat_at = Some((x, y));
+            }
+            "speed" => {
+                let speed = value
+                    .parse::<f32>()
+                    .map_err(|_| "--speed must be between 0.25 and 10")?;
+                if !speed.is_finite() || !(0.25..=10.0).contains(&speed) {
+                    return Err("--speed must be between 0.25 and 10".into());
+                }
+                parsed.speed = speed;
+            }
             _ => unreachable!(),
         }
     }
+    let fixed_capture =
+        parsed.capture.after_frames.is_some() || parsed.capture.at_seconds.is_some();
     if parsed.capture.after_frames.is_some() && parsed.capture.at_seconds.is_some() {
         return Err("Choose either --capture-after or --capture-at-seconds".into());
     }
+    if fixed_capture && parsed.capture.measure_real_seconds.is_some() {
+        return Err("Choose either fixed-step capture or --measure-real-seconds".into());
+    }
     if parsed.capture.output.is_some()
-        != (parsed.capture.after_frames.is_some() || parsed.capture.at_seconds.is_some())
+        && !fixed_capture
+        && parsed.capture.measure_real_seconds.is_none()
+        || parsed.capture.output.is_none() && fixed_capture
     {
-        return Err("--screenshot must be paired with a capture time".into());
+        return Err("--screenshot must be paired with a capture or measurement time".into());
     }
     if parsed
         .capture
@@ -1102,10 +1339,8 @@ fn native_args_from(args: impl IntoIterator<Item = String>) -> Result<NativeArgs
     {
         return Err("--screenshot path must end in .png".into());
     }
-    if (parsed.capture.after_frames.is_some() || parsed.capture.at_seconds.is_some())
-        && parsed.level_path.is_none()
-    {
-        return Err("A capture time requires a level recipe supplied with --level".into());
+    if fixed_capture && parsed.level_path.is_none() {
+        return Err("A fixed-step capture requires a level recipe supplied with --level".into());
     }
     Ok(parsed)
 }
