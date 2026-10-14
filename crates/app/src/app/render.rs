@@ -33,8 +33,15 @@ fn region_image(world: &World, region: DirtyRegion, overlay: Overlay) -> ColorIm
             let cell = world.cells()[index];
             if overlay == Overlay::None {
                 if let Some(element) = world.rules().elements.get(cell.element) {
-                    *pixel =
+                    let base =
                         Color32::from_rgb(element.color[0], element.color[1], element.color[2]);
+                    *pixel = if element.name == "cloud" {
+                        cloud_color(world, region.x + x, region.y + y, base)
+                    } else if element.name == "air" {
+                        cloud_haze(world, region.x + x, region.y + y, base)
+                    } else {
+                        base
+                    };
                 }
             } else if let Some(atmosphere) = world.atmosphere_at(region.x + x, region.y + y) {
                 let (value, low, high) = match overlay {
@@ -53,6 +60,68 @@ fn region_image(world: &World, region: DirtyRegion, overlay: Overlay) -> ColorIm
         }
     }
     image
+}
+
+fn cloud_color(world: &World, x: usize, y: usize, base: Color32) -> Color32 {
+    let cloud = world.rules().id("cloud").unwrap_or(usize::MAX);
+    let mut neighbors = 0u8;
+    for dy in -1isize..=1 {
+        for dx in -1isize..=1 {
+            if (dx != 0 || dy != 0)
+                && let (Some(nx), Some(ny)) = (x.checked_add_signed(dx), y.checked_add_signed(dy))
+                && nx < world.width()
+                && ny < world.height()
+                && world.cells()[ny * world.width() + nx].element == cloud
+            {
+                neighbors += 1;
+            }
+        }
+    }
+    // Clouds darken as local vapor is depleted; clustered cells form softer edges.
+    let humidity = world.atmosphere_at(x, y).map_or(45.0, |air| air.humidity);
+    let maturity = ((100.0 - humidity) / 100.0).clamp(0.0, 1.0);
+    let density = neighbors as f32 / 8.0;
+    let shade = 1.0 - maturity * 0.24 + density * 0.08;
+    Color32::from_rgb(
+        (f32::from(base.r()) * shade).clamp(0.0, 255.0) as u8,
+        (f32::from(base.g()) * shade).clamp(0.0, 255.0) as u8,
+        (f32::from(base.b()) * shade).clamp(0.0, 255.0) as u8,
+    )
+}
+
+fn cloud_haze(world: &World, x: usize, y: usize, base: Color32) -> Color32 {
+    if world
+        .atmosphere_at(x, y)
+        .is_none_or(|atmosphere| atmosphere.humidity < 60.0)
+    {
+        return base;
+    }
+    let cloud = world.rules().id("cloud").unwrap_or(usize::MAX);
+    let mut cloud_density = 0.0;
+    for dy in -5isize..=5 {
+        for dx in -5isize..=5 {
+            let distance_squared = (dx * dx + dy * dy) as f32;
+            if distance_squared == 0.0 || distance_squared > 32.0 {
+                continue;
+            }
+            if let (Some(nx), Some(ny)) = (x.checked_add_signed(dx), y.checked_add_signed(dy))
+                && nx < world.width()
+                && ny < world.height()
+                && world.cells()[ny * world.width() + nx].element == cloud
+            {
+                cloud_density += 1.0 / (1.0 + distance_squared);
+            }
+        }
+    }
+    if cloud_density == 0.0 {
+        return base;
+    }
+    let amount = (cloud_density * 0.5).clamp(0.0, 0.55);
+    Color32::from_rgb(
+        (f32::from(base.r()) * (1.0 - amount) + 190.0 * amount) as u8,
+        (f32::from(base.g()) * (1.0 - amount) + 204.0 * amount) as u8,
+        (f32::from(base.b()) * (1.0 - amount) + 220.0 * amount) as u8,
+    )
 }
 
 fn heatmap(value: f32, low: f32, high: f32) -> Color32 {
