@@ -420,6 +420,7 @@ fn put(world: &mut World, x: usize, y: usize, element: &str) {
     world.cells[index] = crate::Cell {
         element: id,
         age: 0,
+        support_age: 0,
         moisture: 0,
         burn_progress: 0,
         body_id: 0,
@@ -836,6 +837,27 @@ fn trees_die_into_organic_matter_and_plants_mature_into_trees() {
     assert!(has(&world, 0, 0, "deadwood"));
     assert!(has(&world, 2, 1, "tree"));
     assert!(has(&world, 2, 0, "tree"));
+}
+
+#[test]
+fn unsupported_tree_cells_wither_within_64_updates() {
+    let mut world = World::new(12, 12, 43, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    put(&mut world, 5, 3, "tree");
+    for _ in 0..64 {
+        world.step(usize::MAX);
+    }
+    assert!(
+        !world
+            .cells()
+            .iter()
+            .any(|cell| cell.element == world.rules().id("tree").unwrap())
+    );
+    assert!(
+        world
+            .cells()
+            .iter()
+            .any(|cell| cell.element == world.rules().id("deadwood").unwrap())
+    );
 }
 
 #[test]

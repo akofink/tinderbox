@@ -2,6 +2,13 @@
 use crate::World;
 
 impl World {
+    pub(super) fn is_ground_element(&self, element: usize) -> bool {
+        matches!(
+            self.rules.elements[element].name.as_str(),
+            "soil" | "wet_soil" | "fertile_soil" | "stone" | "sand"
+        )
+    }
+
     /// Whether this tree cell has a living, downhill tree path to stable ground.
     pub(super) fn tree_has_ground_support(&self, index: usize) -> bool {
         let tree = self.rules.id("tree").unwrap_or(usize::MAX);
@@ -52,11 +59,7 @@ impl World {
                             next[(offset + 2) as usize] = true;
                         }
                     } else {
-                        let name = self.rules.elements[element].name.as_str();
-                        if matches!(
-                            name,
-                            "soil" | "wet_soil" | "fertile_soil" | "stone" | "sand"
-                        ) {
+                        if self.is_ground_element(element) {
                             return true;
                         }
                     }
@@ -67,6 +70,21 @@ impl World {
             }
             current = next;
             row = below;
+        }
+    }
+
+    /// Remove unsupported tree cells from a generated or resized world.
+    pub(super) fn drop_unsupported_canopy(&mut self) {
+        let Some(tree) = self.rules.id("tree") else {
+            return;
+        };
+        let Some(deadwood) = self.rules.id("deadwood") else {
+            return;
+        };
+        for index in 0..self.cells.len() {
+            if self.cells[index].element == tree && !self.tree_has_ground_support(index) {
+                self.set_element_inner(index, deadwood, false);
+            }
         }
     }
 

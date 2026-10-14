@@ -75,7 +75,7 @@ density = 90
 carries_moisture = true
 moisture_rate = 0.04
 wet_flammability = 0.2
-lifetime = 180
+lifetime = 120
 decay_to = "tree"
 
 [[elements]]
@@ -423,14 +423,14 @@ when = "seed"
 with = "ash"
 result = "fertile_soil"
 self_result = "plant"
-chance = 0.65
+chance = 0.9
 
 [[interactions]]
 when = "ash"
 with = "seed"
 result = "plant"
 self_result = "fertile_soil"
-chance = 0.65
+chance = 0.9
 
 [[interactions]]
 when = "seed"

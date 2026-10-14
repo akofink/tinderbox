@@ -753,6 +753,7 @@ fn shift_column(
             crate::Cell {
                 element: air,
                 age: 0,
+                support_age: 0,
                 moisture: 0,
                 burn_progress: 0,
                 body_id: 0,

@@ -103,6 +103,17 @@ impl World {
         let emission = element.emission;
         let motion = element.motion;
         let wind_response = element.wind_response;
+        if element.name == "tree" && self.cells[i].support_age < 64 {
+            self.cells[i].support_age += 1;
+            if self.cells[i].support_age == 64 {
+                if self.tree_has_ground_support(i) {
+                    self.cells[i].support_age = u8::MAX;
+                } else if let Some(deadwood) = self.rules.id("deadwood") {
+                    self.set_element(i, deadwood);
+                    return;
+                }
+            }
+        }
         if lifetime > 0 {
             self.cells[i].age = self.cells[i].age.saturating_add(1);
             if self.cells[i].age >= lifetime {
@@ -848,11 +859,15 @@ impl World {
         let tree_became_fire = changed && tree == Some(previous) && fire == Some(element);
         let lost_tree_support = changed
             && ((tree == Some(previous) && fire != Some(element))
-                || (fire == Some(previous) && ash == Some(element) && previous_burn_progress > 0));
+                || (fire == Some(previous) && ash == Some(element) && previous_burn_progress > 0)
+                || (self.is_ground_element(previous) && !self.is_ground_element(element)));
+        let added_unsupported_tree =
+            changed && tree == Some(element) && !self.tree_has_ground_support(index);
         self.detach_body_member(index);
         self.cells[index] = crate::Cell {
             element,
             age: 0,
+            support_age: 0,
             moisture: 0,
             // Tag tree-born flames so canopy can drop after they finish burning,
             // rather than interrupting the fire front while it is still spreading.
@@ -864,6 +879,12 @@ impl World {
         }
         if lost_tree_support && check_canopy_support {
             self.drop_unsupported_canopy_near(index);
+        }
+        if added_unsupported_tree {
+            if let Some(deadwood) = self.rules.id("deadwood") {
+                self.set_element_inner(index, deadwood, false);
+                self.drop_unsupported_canopy_near(index);
+            }
         }
     }
 
