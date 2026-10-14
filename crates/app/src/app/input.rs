@@ -17,6 +17,7 @@ pub(super) fn handle_keyboard(app: &mut Tinderbox, ctx: &egui::Context) {
             input.key_pressed(egui::Key::H),
             input.key_pressed(egui::Key::E),
             input.key_pressed(egui::Key::I),
+            input.key_pressed(egui::Key::M),
         )
     });
     if keys.0 {
@@ -37,10 +38,13 @@ pub(super) fn handle_keyboard(app: &mut Tinderbox, ctx: &egui::Context) {
     if keys.5 {
         app.selected = app.world.rules().id("fire").unwrap_or(app.selected);
     }
+    if keys.6 {
+        app.inspect_mode = !app.inspect_mode;
+    }
 }
 
 pub(super) fn handle_canvas_pointer(app: &mut Tinderbox, response: &Response, rect: Rect) {
-    if app.level_setup.open || !response.hovered() {
+    if app.level_setup.open || app.inspect_mode || !response.hovered() {
         return;
     }
     let Some(pos) = response.interact_pointer_pos() else {

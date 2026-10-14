@@ -30,6 +30,7 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
         ui.label("Speed");
         ui.add(egui::Slider::new(&mut app.speed, 0.25..=4.0).suffix("×"));
         ui.checkbox(&mut app.show_hud, "HUD");
+        ui.toggle_value(&mut app.inspect_mode, "Inspect (M)");
         let previous_overlay = app.overlay;
         egui::ComboBox::from_label("Overlay")
             .selected_text(match app.overlay {

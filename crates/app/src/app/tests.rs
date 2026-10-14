@@ -298,12 +298,16 @@ fn native_recipe_capture_arguments_validate_as_a_pair() {
         "120".into(),
         "--screenshot".into(),
         "dry.png".into(),
+        "--inspect-at".into(),
+        "24,18".into(),
     ])
     .unwrap();
     assert_eq!(args.level_path, Some(PathBuf::from("dry.toml")));
     assert_eq!(args.capture.after_frames, Some(120));
     assert_eq!(args.capture.at_seconds, None);
     assert_eq!(args.capture.output, Some(PathBuf::from("dry.png")));
+    assert_eq!(args.capture.inspect_at, Some((24, 18)));
+    assert!(native_args_from(["--inspect-at".into(), "bad".into()]).is_err());
     let initial = native_args_from([
         "--level".into(),
         "sealed.toml".into(),

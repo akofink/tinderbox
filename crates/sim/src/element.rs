@@ -69,3 +69,15 @@ pub struct Cell {
     pub burn_progress: u8,
     pub(crate) body_id: u32,
 }
+
+impl Cell {
+    /// Number of simulation updates this cell has spent as its current element.
+    pub const fn age(self) -> u16 {
+        self.age
+    }
+
+    /// Whether the cell belongs to a moving cohesive body, such as a boat.
+    pub const fn is_in_body(self) -> bool {
+        self.body_id != 0
+    }
+}

@@ -269,6 +269,14 @@ impl World {
         self.wind
     }
 
+    /// Effective horizontal wind at a cell, including local pressure gradients and active gusts.
+    pub fn local_wind_at(&self, x: usize, y: usize) -> Option<Wind> {
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        Some(self.wind_at(y * self.width + x))
+    }
+
     /// Sets global wind. Strength is clamped to 0..=4.
     pub fn set_wind(&mut self, direction: WindDirection, strength: u8) {
         self.wind = Wind {
