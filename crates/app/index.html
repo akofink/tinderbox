@@ -5,6 +5,55 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Tinderbox</title>
   <base data-trunk-public-url />
+  <script>
+    (() => {
+      const retryKey = "_tinderbox_reload";
+      let pendingMessage;
+      const loadingMessage = (message) => {
+        const loading = document.getElementById("loading_text");
+        if (loading) loading.textContent = message;
+        else pendingMessage = message;
+      };
+      document.addEventListener("DOMContentLoaded", () => {
+        if (pendingMessage) loadingMessage(pendingMessage);
+      });
+      const recoverFromAssetFailure = () => {
+        const url = new URL(window.location.href);
+        if (url.searchParams.has(retryKey)) {
+          loadingMessage("Tinderbox couldn't load after updating. Please reload this page.");
+          return;
+        }
+        loadingMessage("A new version is available. Reloading…");
+        url.searchParams.set(retryKey, Date.now().toString());
+        window.location.replace(url.href);
+      };
+      window.addEventListener("error", (event) => {
+        const target = event.target;
+        if (target instanceof HTMLScriptElement || target instanceof HTMLLinkElement) {
+          recoverFromAssetFailure();
+        }
+      }, true);
+      window.addEventListener("unhandledrejection", (event) => {
+        const reason = String(event.reason ?? "");
+        if (/wasm|webassembly|fetch|module|integrity|network/i.test(reason)) {
+          recoverFromAssetFailure();
+        }
+      });
+      const observer = new MutationObserver(() => {
+        const loading = document.getElementById("loading_text");
+        if (!loading) {
+          observer.disconnect();
+          const url = new URL(window.location.href);
+          if (url.searchParams.delete(retryKey)) {
+            window.history.replaceState(null, "", url.href);
+          }
+        } else if (loading.textContent?.startsWith("Tinderbox failed to start:")) {
+          recoverFromAssetFailure();
+        }
+      });
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+    })();
+  </script>
   <link data-trunk rel="rust" data-wasm-opt="2" />
   <style>
     html, body {
