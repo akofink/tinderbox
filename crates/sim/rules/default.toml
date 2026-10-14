@@ -110,7 +110,7 @@ wind_response = 0.5
 
 [[elements]]
 name = "fungus"
-color = [235, 146, 198]
+color = [196, 184, 157]
 motion = "static"
 density = 90
 lifetime = 12000
@@ -118,7 +118,7 @@ decay_to = "soil"
 
 [[elements]]
 name = "beetle"
-color = [27, 205, 184]
+color = [117, 83, 56]
 motion = "static"
 density = 80
 lifetime = 12000
@@ -126,7 +126,7 @@ decay_to = "wet_soil"
 
 [[elements]]
 name = "termite"
-color = [255, 241, 116]
+color = [151, 124, 78]
 motion = "static"
 density = 80
 lifetime = 12000

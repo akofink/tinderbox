@@ -452,38 +452,21 @@ fn default_rules_include_the_remaining_starting_elements() {
 }
 
 #[test]
-fn critter_and_fungus_colors_stand_out_from_forest_floor_materials() {
+fn default_forest_floor_life_colors_are_muted_and_distinct() {
     let rules = Rules::load(DEFAULT_RULES).unwrap();
     let color = |name: &str| rules.elements[rules.id(name).unwrap()].color;
 
-    assert_eq!(color("beetle"), [27, 205, 184]);
-    assert_eq!(color("termite"), [255, 241, 116]);
-    assert_eq!(color("fungus"), [235, 146, 198]);
-
-    let visible_life = [color("beetle"), color("termite"), color("fungus")];
-    let surroundings = [
-        color("soil"),
-        color("wet_soil"),
-        color("deadwood"),
-        color("leaf_litter"),
-        color("humus"),
-        color("water"),
-        color("fire"),
-        color("ash"),
-    ];
-    for life in visible_life {
-        for ground in surroundings {
-            let distance = life
-                .into_iter()
-                .zip(ground)
-                .map(|(a, b)| i16::from(a).abs_diff(i16::from(b)))
-                .sum::<u16>();
-            assert!(distance > 140, "{life:?} is too close to {ground:?}");
-        }
-    }
-    assert_ne!(visible_life[0], visible_life[1]);
-    assert_ne!(visible_life[0], visible_life[2]);
-    assert_ne!(visible_life[1], visible_life[2]);
+    let beetle = color("beetle");
+    let termite = color("termite");
+    let fungus = color("fungus");
+    assert_eq!(beetle, [117, 83, 56]);
+    assert_eq!(termite, [151, 124, 78]);
+    assert_eq!(fungus, [196, 184, 157]);
+    assert!(fungus[0] > fungus[1] && fungus[1] > fungus[2]);
+    assert!(fungus[0] - fungus[2] < 50, "fungus should be quiet cream");
+    assert_ne!(beetle, termite);
+    assert_ne!(beetle, fungus);
+    assert_ne!(termite, fungus);
 }
 
 #[test]

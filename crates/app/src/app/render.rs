@@ -1,6 +1,9 @@
 //! Incremental cell texture uploads and canvas geometry.
 use crate::app::{MAX_TEXTURE_REGIONS_PER_FRAME, Overlay, Tinderbox};
-use eframe::egui::{Color32, ColorImage, Painter, Rect, TextureHandle, TextureOptions, Vec2};
+use eframe::egui::{
+    Color32, ColorImage, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, TextureHandle,
+    TextureOptions, Vec2,
+};
 use tinderbox_sim::{DirtyRegion, World};
 
 pub(super) fn fitted_size(world: &World, available: Vec2) -> Vec2 {
@@ -11,7 +14,7 @@ pub(super) fn fitted_size(world: &World, available: Vec2) -> Vec2 {
 }
 
 /// Uploads only changed regions, preserving excess work for later frames.
-pub(super) fn upload_dirty(app: &mut Tinderbox) {
+pub(super) fn upload_dirty(app: &mut Tinderbox) -> Vec<bool> {
     let sky = sky_mask(&app.world);
     let skyline = smoothed_skyline(&app.world);
     let mut uploaded = 0;
@@ -33,6 +36,7 @@ pub(super) fn upload_dirty(app: &mut Tinderbox) {
         uploaded += 1;
     }
     app.max_dirty_regions_uploaded = app.max_dirty_regions_uploaded.max(uploaded);
+    sky
 }
 
 fn region_image(
@@ -63,7 +67,16 @@ fn region_image(
                         sim_seconds,
                         altitude: cloud_altitude_weight(world_y, skyline[world_x]),
                     };
-                    *pixel = if element.name == "cloud" {
+                    let life = life_sprite(&element.name);
+                    *pixel = if life.is_some()
+                        && !has_sky_neighbor(world_x, world_y, world.width(), world.height(), sky)
+                    {
+                        buried_life_color(&element.name)
+                    } else if life == Some(LifeSprite::Fungus)
+                        && !fungus_cap_anchor(world, world_x, world_y, sky)
+                    {
+                        Color32::from_rgb(157, 148, 127)
+                    } else if element.name == "cloud" {
                         if !sky[index] {
                             let air = world.rules().id("air").unwrap();
                             let color = world.rules().elements[air].color;
@@ -444,9 +457,224 @@ pub(super) fn draw_world(texture: &TextureHandle, painter: &Painter, rect: Rect)
     painter.image(
         texture.id(),
         rect,
-        Rect::from_min_max(eframe::egui::Pos2::ZERO, eframe::egui::pos2(1.0, 1.0)),
+        Rect::from_min_max(Pos2::ZERO, eframe::egui::pos2(1.0, 1.0)),
         Color32::WHITE,
     );
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LifeSprite {
+    Beetle,
+    Termite,
+    Fungus,
+}
+
+fn life_sprite(name: &str) -> Option<LifeSprite> {
+    match name {
+        "beetle" => Some(LifeSprite::Beetle),
+        "termite" => Some(LifeSprite::Termite),
+        "fungus" => Some(LifeSprite::Fungus),
+        _ => None,
+    }
+}
+
+fn buried_life_color(name: &str) -> Color32 {
+    match life_sprite(name) {
+        Some(LifeSprite::Beetle) => Color32::from_rgb(88, 68, 49),
+        Some(LifeSprite::Termite) => Color32::from_rgb(105, 88, 61),
+        Some(LifeSprite::Fungus) => Color32::from_rgb(139, 129, 108),
+        None => Color32::TRANSPARENT,
+    }
+}
+
+fn fungus_cap_anchor(world: &World, x: usize, y: usize, sky: &[bool]) -> bool {
+    if y == 0 || !sky[(y - 1) * world.width() + x] {
+        return false;
+    }
+    let fungus = world.rules().id("fungus").unwrap_or(usize::MAX);
+    x == 0
+        || world.cells()[y * world.width() + x - 1].element != fungus
+        || !sky[(y - 1) * world.width() + x - 1]
+}
+
+fn has_sky_neighbor(x: usize, y: usize, width: usize, height: usize, sky: &[bool]) -> bool {
+    let x0 = x.saturating_sub(1);
+    let x1 = (x + 1).min(width.saturating_sub(1));
+    let y0 = y.saturating_sub(1);
+    let y1 = (y + 1).min(height.saturating_sub(1));
+    (y0..=y1).any(|ny| (x0..=x1).any(|nx| (nx != x || ny != y) && sky[ny * width + nx]))
+}
+
+pub(super) fn draw_life_sprites(
+    world: &World,
+    painter: &Painter,
+    rect: Rect,
+    overlay: Overlay,
+    sky: &[bool],
+) {
+    if overlay != Overlay::None {
+        return;
+    }
+    let cell_width = rect.width() / world.width() as f32;
+    let cell_height = rect.height() / world.height() as f32;
+    for (index, cell) in world.cells().iter().enumerate() {
+        let name = &world.rules().elements[cell.element].name;
+        let Some(kind) = life_sprite(name) else {
+            continue;
+        };
+        let x = index % world.width();
+        let y = index / world.width();
+        let exposed = has_sky_neighbor(x, y, world.width(), world.height(), sky);
+        if !exposed || (kind == LifeSprite::Fungus && !fungus_cap_anchor(world, x, y, sky)) {
+            continue;
+        }
+        let center = Pos2::new(
+            rect.left() + (x as f32 + 0.5) * cell_width,
+            rect.top() + (y as f32 + 0.5) * cell_height,
+        );
+        match kind {
+            LifeSprite::Beetle => draw_beetle(painter, center, cell_width, cell_height),
+            LifeSprite::Termite => draw_termite(painter, center, cell_width, cell_height),
+            LifeSprite::Fungus => draw_fungus(painter, center, cell_width, cell_height),
+        }
+    }
+}
+
+fn sprite_rect(center: Pos2, cell_width: f32, cell_height: f32, width: f32, height: f32) -> Rect {
+    let size = Vec2::new(cell_width * width, cell_height * height);
+    Rect::from_center_size(center, size)
+}
+
+fn draw_beetle(painter: &Painter, center: Pos2, cell_width: f32, cell_height: f32) {
+    let shell = Color32::from_rgb(160, 102, 59);
+    let highlight = Color32::from_rgb(206, 149, 91);
+    let outline = Color32::from_rgb(52, 43, 35);
+    let body = sprite_rect(center, cell_width, cell_height, 1.15, 0.78);
+    painter.add(Shape::ellipse_filled(
+        body.center(),
+        body.size() * 0.5,
+        shell,
+    ));
+    painter.add(Shape::ellipse_stroke(
+        body.center(),
+        body.size() * 0.5,
+        Stroke::new((cell_width * 0.10).max(0.45), outline),
+    ));
+    painter.line_segment(
+        [
+            Pos2::new(body.left() + body.width() * 0.56, body.top()),
+            Pos2::new(body.left() + body.width() * 0.56, body.bottom()),
+        ],
+        Stroke::new((cell_width * 0.07).max(0.35), highlight),
+    );
+    let head = sprite_rect(
+        Pos2::new(body.right() - body.width() * 0.02, center.y),
+        cell_width,
+        cell_height,
+        0.42,
+        0.42,
+    );
+    painter.circle_filled(head.center(), head.width() * 0.5, highlight);
+    painter.circle_stroke(
+        head.center(),
+        head.width() * 0.5,
+        Stroke::new((cell_width * 0.08).max(0.35), outline),
+    );
+    for fraction in [0.24, 0.5, 0.76] {
+        let x = body.left() + body.width() * fraction;
+        for sign in [-1.0, 1.0] {
+            painter.line_segment(
+                [
+                    Pos2::new(x, center.y),
+                    Pos2::new(x + cell_width * 0.18, center.y + sign * cell_height * 0.48),
+                ],
+                Stroke::new((cell_width * 0.07).max(0.35), outline),
+            );
+        }
+    }
+}
+
+fn draw_termite(painter: &Painter, center: Pos2, cell_width: f32, cell_height: f32) {
+    let body_color = Color32::from_rgb(190, 174, 117);
+    let segment = Color32::from_rgb(224, 210, 159);
+    let outline = Color32::from_rgb(54, 49, 39);
+    let body = sprite_rect(center, cell_width, cell_height, 1.48, 0.60);
+    painter.add(Shape::ellipse_filled(
+        body.center(),
+        body.size() * 0.5,
+        body_color,
+    ));
+    painter.add(Shape::ellipse_stroke(
+        body.center(),
+        body.size() * 0.5,
+        Stroke::new((cell_width * 0.09).max(0.4), outline),
+    ));
+    for fraction in [0.38, 0.61, 0.79] {
+        let x = body.left() + body.width() * fraction;
+        painter.line_segment(
+            [
+                Pos2::new(x, body.top() + body.height() * 0.12),
+                Pos2::new(x, body.bottom() - body.height() * 0.12),
+            ],
+            Stroke::new((cell_width * 0.07).max(0.35), segment),
+        );
+    }
+    let head = Pos2::new(body.left() + body.width() * 0.09, center.y);
+    painter.circle_filled(head, cell_width * 0.16, segment);
+    painter.circle_stroke(
+        head,
+        cell_width * 0.16,
+        Stroke::new((cell_width * 0.07).max(0.35), outline),
+    );
+    for sign in [-1.0, 1.0] {
+        painter.line_segment(
+            [
+                head,
+                Pos2::new(
+                    head.x - cell_width * 0.24,
+                    head.y + sign * cell_height * 0.35,
+                ),
+            ],
+            Stroke::new((cell_width * 0.06).max(0.3), outline),
+        );
+    }
+}
+
+fn draw_fungus(painter: &Painter, center: Pos2, cell_width: f32, cell_height: f32) {
+    let cap = Color32::from_rgb(219, 207, 178);
+    let stem = Color32::from_rgb(198, 185, 157);
+    let outline = Color32::from_rgb(89, 75, 59);
+    let stem_rect = sprite_rect(
+        Pos2::new(center.x, center.y + cell_height * 0.16),
+        cell_width,
+        cell_height,
+        0.30,
+        0.54,
+    );
+    painter.rect_filled(stem_rect, cell_width * 0.12, stem);
+    painter.rect_stroke(
+        stem_rect,
+        cell_width * 0.12,
+        Stroke::new((cell_width * 0.08).max(0.35), outline),
+        StrokeKind::Middle,
+    );
+    let cap_rect = sprite_rect(
+        Pos2::new(center.x, center.y - cell_height * 0.12),
+        cell_width,
+        cell_height,
+        1.12,
+        0.58,
+    );
+    painter.add(Shape::ellipse_filled(
+        cap_rect.center(),
+        cap_rect.size() * 0.5,
+        cap,
+    ));
+    painter.add(Shape::ellipse_stroke(
+        cap_rect.center(),
+        cap_rect.size() * 0.5,
+        Stroke::new((cell_width * 0.10).max(0.4), outline),
+    ));
 }
 
 #[cfg(test)]
@@ -537,6 +765,94 @@ mod tests {
         };
         assert!(luminance(heavy_core) < luminance(heavy_edge));
         assert!(luminance(heavy_edge) < luminance(light_core));
+    }
+
+    #[test]
+    fn critter_sprites_are_species_specific_and_buried_colors_are_subdued() {
+        assert_eq!(life_sprite("beetle"), Some(LifeSprite::Beetle));
+        assert_eq!(life_sprite("termite"), Some(LifeSprite::Termite));
+        assert_eq!(life_sprite("fungus"), Some(LifeSprite::Fungus));
+        assert_eq!(life_sprite("soil"), None);
+
+        let beetle = buried_life_color("beetle");
+        let termite = buried_life_color("termite");
+        let fungus = buried_life_color("fungus");
+        for color in [beetle, termite, fungus] {
+            assert!(color.r() < 145 && color.g() < 140 && color.b() < 120);
+        }
+        assert_ne!(beetle, termite);
+        assert_ne!(beetle, fungus);
+        assert_ne!(termite, fungus);
+        assert_eq!(buried_life_color("soil"), Color32::TRANSPARENT);
+    }
+
+    #[test]
+    fn buried_life_pixels_are_muted_while_surface_life_keeps_its_base_color() {
+        let mut world = World::new(5, 5, 7, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+        let soil = world.rules().id("soil").unwrap();
+        let air = world.rules().id("air").unwrap();
+        let beetle = world.rules().id("beetle").unwrap();
+        let termite = world.rules().id("termite").unwrap();
+        for y in 0..world.height() {
+            for x in 0..world.width() {
+                world.paint(x, y, soil);
+            }
+        }
+        for x in 0..world.width() {
+            world.paint(x, 0, air);
+        }
+        world.paint(2, 2, beetle);
+        world.paint(1, 1, termite);
+
+        let region = DirtyRegion {
+            x: 0,
+            y: 0,
+            width: world.width(),
+            height: world.height(),
+        };
+        let sky = sky_mask(&world);
+        let image = region_image(
+            &world,
+            region,
+            Overlay::None,
+            0,
+            0.0,
+            &sky,
+            &smoothed_skyline(&world),
+        );
+        assert_eq!(
+            image.pixels[2 * world.width() + 2],
+            buried_life_color("beetle")
+        );
+        assert_eq!(
+            image.pixels[world.width() + 1],
+            Color32::from_rgb(151, 124, 78)
+        );
+    }
+
+    #[test]
+    fn fungus_caps_mark_only_the_top_of_each_horizontal_colony() {
+        let mut world = World::new(5, 4, 7, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+        let fungus = world.rules().id("fungus").unwrap();
+        world.paint(1, 1, fungus);
+        world.paint(2, 1, fungus);
+        let sky = sky_mask(&world);
+
+        assert!(fungus_cap_anchor(&world, 1, 1, &sky));
+        assert!(!fungus_cap_anchor(&world, 2, 1, &sky));
+        assert!(!fungus_cap_anchor(&world, 1, 2, &sky));
+    }
+
+    #[test]
+    fn sprite_visibility_requires_neighboring_open_sky_and_handles_edges() {
+        let (width, height) = (5, 4);
+        let mut sky = vec![false; width * height];
+        sky[width + 1] = true;
+
+        assert!(has_sky_neighbor(2, 1, width, height, &sky));
+        assert!(has_sky_neighbor(0, 0, width, height, &sky));
+        assert!(!has_sky_neighbor(4, 3, width, height, &sky));
+        assert!(!has_sky_neighbor(1, 1, width, height, &[false; 20]));
     }
 
     #[test]
