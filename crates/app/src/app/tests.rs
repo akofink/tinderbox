@@ -218,6 +218,16 @@ fn smooth_play_skips_setup_and_handles_small_worlds() {
     let mut app = Tinderbox::new_state(true);
     assert!(app.running);
     assert!(!app.level_setup.open);
+    let wood = app.world.rules().id("wood").unwrap();
+    assert!(
+        app.world
+            .cells()
+            .iter()
+            .filter(|cell| cell.element == wood)
+            .count()
+            >= 69,
+        "smooth-play seeds several boats on water"
+    );
     let level = Preset::DryForest.level(app.world.rules(), 16, 16);
     app.set_level(level).unwrap();
     app.simulate_frame(&egui::Context::default(), 1.0 / 60.0);

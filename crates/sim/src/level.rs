@@ -60,6 +60,15 @@ pub struct Level {
     /// A small upwind fire, instead of scattering fire through the whole canopy.
     #[serde(default)]
     pub spark: bool,
+    /// Include a simple wooden boat over a small water patch.
+    #[serde(default)]
+    pub boat: bool,
+    /// Number of sand cells stacked as cargo on the boat (0..=8).
+    #[serde(default)]
+    pub boat_sand: u8,
+    /// Start a fire in a wooden hull plank.
+    #[serde(default)]
+    pub boat_burning: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -139,6 +148,9 @@ impl Preset {
             },
             amounts: BTreeMap::new(),
             spark: matches!(self, Self::DryForest),
+            boat: false,
+            boat_sand: 0,
+            boat_burning: false,
         };
         level.add_missing_elements(rules);
         for &(name, amount) in amounts {
@@ -192,6 +204,14 @@ impl Level {
         if self.wind.strength > 4 {
             return Err(LevelError("Wind strength must be 0..=4".into()));
         }
+        if self.boat_sand > 8 {
+            return Err(LevelError("Boat sand cargo must be 0..=8 cells".into()));
+        }
+        if !self.boat && (self.boat_sand > 0 || self.boat_burning) {
+            return Err(LevelError(
+                "Boat cargo and fire options require the boat option".into(),
+            ));
+        }
         if !(-40..=60).contains(&self.ambient_temperature)
             || self.ambient_humidity > 100
             || self.ambient_oxygen > 100
@@ -229,6 +249,10 @@ impl Level {
         );
         // Empty means a blank canvas regardless of amounts, not floating terrain.
         if self.generator == Generator::Empty {
+            if self.boat {
+                self.place_recipe_boat(&mut world)?;
+            }
+            world.mark_all_dirty();
             return Ok(world);
         }
         let surface: Vec<usize> = (0..self.width).map(|x| self.surface(x)).collect();
@@ -295,6 +319,9 @@ impl Level {
                 }
             }
         }
+        if self.boat {
+            self.place_recipe_boat(&mut world)?;
+        }
         if self.spark {
             place_spark(&mut world);
         }
@@ -335,6 +362,76 @@ fn place_spark(world: &mut World) {
 }
 
 impl Level {
+    fn place_recipe_boat(&self, world: &mut World) -> Result<(), LevelError> {
+        let y = self.height * 3 / 4 - 1;
+        let x = (4..self.width - 4)
+            .min_by_key(|x| x.abs_diff(self.width / 2))
+            .filter(|x| {
+                [(-2isize, 3isize), (-1, 4), (0, 3)]
+                    .into_iter()
+                    .all(|(dy, span)| {
+                        let row = y.checked_add_signed(dy).unwrap_or(self.height);
+                        (-span..=span).all(|dx| {
+                            let column = x.checked_add_signed(dx).unwrap_or(self.width);
+                            if row >= self.height || column >= self.width {
+                                return false;
+                            }
+                            let name = &world.rules.elements
+                                [world.cells[row * self.width + column].element]
+                                .name;
+                            matches!(name.as_str(), "air" | "water")
+                        })
+                    })
+            })
+            .ok_or_else(|| {
+                LevelError("Boat recipe option needs a clear 9-by-3 area near the waterline".into())
+            })?;
+        let water = world
+            .rules()
+            .id("water")
+            .ok_or_else(|| LevelError("Boat recipe option requires a water element".into()))?;
+        for dy in 1..=3 {
+            let row = y + dy;
+            if row >= self.height {
+                break;
+            }
+            for dx in -6isize..=6 {
+                let Some(column) = x
+                    .checked_add_signed(dx)
+                    .filter(|column| *column < self.width)
+                else {
+                    continue;
+                };
+                let index = row * self.width + column;
+                if world.cells[index].element == world.rules.id("air").unwrap_or(usize::MAX) {
+                    world.paint(column, row, water);
+                }
+            }
+        }
+        if !world.place_boat(x, y) {
+            return Err(LevelError(
+                "Boat recipe option needs wood and a clear 9-by-3 area near the waterline".into(),
+            ));
+        }
+        if self.boat_sand > 0 {
+            let sand = world
+                .rules()
+                .id("sand")
+                .ok_or_else(|| LevelError("Boat cargo option requires sand".into()))?;
+            for cargo in 0..self.boat_sand {
+                world.paint(x, y - 3 - usize::from(cargo), sand);
+            }
+        }
+        if self.boat_burning {
+            let fire = world
+                .rules()
+                .id("fire")
+                .ok_or_else(|| LevelError("Burning boat option requires fire".into()))?;
+            world.paint(x + 3, y - 2, fire);
+        }
+        Ok(())
+    }
+
     fn surface(&self, x: usize) -> usize {
         let wave = |span: usize, salt: u64| -> usize {
             let section = x / span;
@@ -477,6 +574,53 @@ mod tests {
                 .all(|c| Some(c.element) == empty.rules.id("air"))
         );
     }
+    #[test]
+    fn empty_level_recipe_can_include_a_deterministic_wooden_boat() {
+        let mut level = Preset::Island.level(&rules(), 96, 64);
+        level.generator = Generator::Empty;
+        level.boat = true;
+        level.boat_sand = 4;
+        level.boat_burning = true;
+        let encoded = level.to_toml().unwrap();
+        assert_eq!(Level::load(&encoded).unwrap(), level);
+        let first = level.generate(rules()).unwrap();
+        let second = level.generate(rules()).unwrap();
+        let wood = first.rules.id("wood").unwrap();
+        let water = first.rules.id("water").unwrap();
+        let sand = first.rules.id("sand").unwrap();
+        let fire = first.rules.id("fire").unwrap();
+        assert_eq!(first.cells, second.cells);
+        assert_eq!(
+            first
+                .cells
+                .iter()
+                .filter(|cell| cell.element == wood)
+                .count(),
+            22
+        );
+        assert!(first.cells.iter().any(|cell| cell.element == water));
+        assert!(first.cells.iter().any(|cell| cell.element == fire));
+        assert_eq!(
+            first
+                .cells
+                .iter()
+                .filter(|cell| cell.element == sand && cell.body_id != 0)
+                .count(),
+            4
+        );
+        assert_eq!(
+            first.cells.iter().filter(|cell| cell.body_id != 0).count(),
+            26
+        );
+        let mut played_a = first;
+        let mut played_b = second;
+        for _ in 0..12 {
+            played_a.step(1_024);
+            played_b.step(1_024);
+        }
+        assert_eq!(played_a.cells, played_b.cells);
+    }
+
     #[test]
     fn preset_landmarks_exist_and_small_worlds_work() {
         for preset in Preset::ALL {

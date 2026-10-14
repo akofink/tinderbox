@@ -49,7 +49,10 @@ pub(super) fn handle_canvas_pointer(app: &mut Tinderbox, response: &Response, re
     if response.dragged_by(egui::PointerButton::Primary)
         || response.clicked_by(egui::PointerButton::Primary)
     {
-        if app.gust_mode {
+        if app.boat_tool {
+            boat_at(app, pos, rect);
+            app.boat_tool = false;
+        } else if app.gust_mode {
             gust_at(app, pos, rect);
         } else {
             paint_at(app, pos, rect, app.selected);
@@ -59,6 +62,12 @@ pub(super) fn handle_canvas_pointer(app: &mut Tinderbox, response: &Response, re
         let fire = app.world.rules().id("fire").unwrap_or(app.selected);
         paint_at(app, pos, rect, fire);
     }
+}
+
+fn boat_at(app: &mut Tinderbox, pos: Pos2, rect: Rect) {
+    let x = ((pos.x - rect.left()) / rect.width() * app.world.width() as f32) as usize;
+    let y = ((pos.y - rect.top()) / rect.height() * app.world.height() as f32) as usize;
+    app.world.place_boat(x, y);
 }
 
 fn gust_at(app: &mut Tinderbox, pos: Pos2, rect: Rect) {

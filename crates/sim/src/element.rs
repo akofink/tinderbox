@@ -67,4 +67,5 @@ pub struct Cell {
     pub moisture: u8,
     /// Burn progress on a 0..=255 scale.
     pub burn_progress: u8,
+    pub(crate) body_id: u32,
 }

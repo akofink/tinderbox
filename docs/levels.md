@@ -5,7 +5,7 @@
 - **Dry forest, east wind**: dense trees on rolling stone hills with a few sparks and a gentle east wind. Try pouring water across the fire front.
 - **Island**: a wooded island and sandy shore surrounded by water. Try damming the shoreline with stone.
 - **Sandstorm valley**: sandy slopes with ash, smoke, sparks and a strong east wind. Try adding water at the bottom or igniting a painted grove.
-- **Empty canvas**: a completely blank world, ignoring amount settings.
+- **Empty canvas**: a blank world, ignoring amount settings unless the wooden boat option is enabled. A boat recipe adds a small water patch; optional sand cargo lowers it, and the burning option starts a fire in a hull plank.
 
 Amounts are percentages within a material's terrain region, not fractions of the entire world. Stone makes the underlying terrain, soil and sand coat the ground, trees form clumps above it, water fills depressions, and fire starts along the surface. Other elements use their movement type to choose a region. Every non-air element in the active rules automatically gets a slider, including newly added ones. Zero disables generation of that element, but does not stop painting it or producing it through interactions.
 
@@ -26,6 +26,9 @@ height = 240
 seed = "29"
 generator = "island"
 ambient_oxygen = 21
+boat = false
+boat_sand = 0
+boat_burning = false
 
 [wind]
 direction = "calm"
@@ -38,6 +41,6 @@ tree = 50
 water = 100
 ```
 
-Supported generators are `empty`, `hills`, `island`, and `valley`. Seeds are exported as decimal strings to preserve the full 64-bit range; non-negative TOML integers are also accepted. Missing element amounts default to zero. Wind directions are `calm`, `west` and `east`, with strength 0..4; recipes without a wind table default to calm. Older recipes without `ambient_oxygen` default to 21%. Unknown element names, unsupported versions, invalid dimensions and amounts outside 0..100 fail clearly. File loading is limited to 64 KiB.
+Supported generators are `empty`, `hills`, `island`, and `valley`. Set `boat = true` to add a small wooden hull over water; `boat_sand` stacks 0..8 sand cargo cells, and `boat_burning = true` starts a fire in a hull plank. These optional recipe fields default to no boat, no cargo, and no fire. Seeds are exported as decimal strings to preserve the full 64-bit range; non-negative TOML integers are also accepted. Missing element amounts default to zero. Wind directions are `calm`, `west` and `east`, with strength 0..4; recipes without a wind table default to calm. Older recipes without `ambient_oxygen` default to 21%. Unknown element names, unsupported versions, invalid dimensions and amounts outside 0..100 fail clearly. File loading is limited to 64 KiB.
 
 **Reset** (or `R`) discards painting and evolution and regenerates the applied level using its original seed, wind and settings. It does not choose a new seed. To get a different world, open setup and use **Next seed**. Setup drafts and loaded files do not change the reset target until Play succeeds.
