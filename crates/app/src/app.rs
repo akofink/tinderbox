@@ -1,6 +1,7 @@
 //! Application loop and shared sandbox state. Native and wasm share this UI.
 pub(crate) mod files;
 mod input;
+mod inspector;
 mod level_setup;
 mod panels;
 mod render;
@@ -97,6 +98,9 @@ pub(super) struct Tinderbox {
     brush: usize,
     gust_mode: bool,
     boat_tool: bool,
+    inspect_mode: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    inspect_cell: Option<(usize, usize)>,
     overlay: Overlay,
     running: bool,
     speed: f32,
@@ -161,6 +165,7 @@ struct CaptureOptions {
     output: Option<PathBuf>,
     after_frames: Option<usize>,
     at_seconds: Option<u64>,
+    inspect_at: Option<(usize, usize)>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -208,6 +213,8 @@ impl Tinderbox {
             app.running =
                 args.capture.after_frames != Some(0) && args.capture.at_seconds != Some(0);
         }
+        app.inspect_mode = args.capture.inspect_at.is_some();
+        app.inspect_cell = args.capture.inspect_at;
         app.capture = (args.capture.after_frames.is_some() || args.capture.at_seconds.is_some())
             .then_some(args.capture);
         app
@@ -257,6 +264,9 @@ impl Tinderbox {
             brush: 3,
             gust_mode: false,
             boat_tool: false,
+            inspect_mode: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            inspect_cell: None,
             overlay: Overlay::None,
             running: stress_play,
             speed: 1.0,
@@ -901,6 +911,11 @@ fn native_args_from(args: impl IntoIterator<Item = String>) -> Result<NativeArgs
                 args.next()
                     .ok_or("--capture-at-seconds requires a second count")?,
             )),
+            "--inspect-at" => Some((
+                "inspect_at",
+                args.next()
+                    .ok_or("--inspect-at requires X,Y cell coordinates")?,
+            )),
             _ => None,
         };
         let Some((flag, value)) = value else {
@@ -920,6 +935,13 @@ fn native_args_from(args: impl IntoIterator<Item = String>) -> Result<NativeArgs
                     .parse::<u64>()
                     .map_err(|_| "--capture-at-seconds must be a non-negative integer")?;
                 parsed.capture.at_seconds = Some(count);
+            }
+            "inspect_at" => {
+                let (x, y) = value
+                    .split_once(',')
+                    .and_then(|(x, y)| Some((x.parse::<usize>().ok()?, y.parse::<usize>().ok()?)))
+                    .ok_or("--inspect-at must use non-negative X,Y cell coordinates")?;
+                parsed.capture.inspect_at = Some((x, y));
             }
             _ => unreachable!(),
         }
