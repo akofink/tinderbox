@@ -113,7 +113,7 @@ name = "fungus"
 color = [202, 186, 155]
 motion = "static"
 density = 90
-lifetime = 240
+lifetime = 12000
 decay_to = "soil"
 
 [[elements]]
@@ -121,7 +121,7 @@ name = "beetle"
 color = [112, 67, 42]
 motion = "static"
 density = 80
-lifetime = 180
+lifetime = 12000
 decay_to = "wet_soil"
 
 [[elements]]
@@ -129,7 +129,7 @@ name = "termite"
 color = [183, 139, 80]
 motion = "static"
 density = 80
-lifetime = 180
+lifetime = 12000
 decay_to = "wet_soil"
 
 [[elements]]
@@ -509,70 +509,60 @@ chance = 0.16
 when = "fungus"
 with = "deadwood"
 result = "fertile_soil"
-self_result = "fertile_soil"
 chance = 0.2
 
 [[interactions]]
 when = "fungus"
 with = "ash"
 result = "fertile_soil"
-self_result = "fertile_soil"
 chance = 0.2
 
 [[interactions]]
 when = "fungus"
 with = "humus"
 result = "fertile_soil"
-self_result = "fertile_soil"
 chance = 0.2
 
 [[interactions]]
 when = "beetle"
 with = "leaf_litter"
 result = "fertile_soil"
-self_result = "fertile_soil"
 chance = 0.2
 
 [[interactions]]
 when = "beetle"
 with = "ash"
 result = "fertile_soil"
-self_result = "fertile_soil"
 chance = 0.2
 
 [[interactions]]
 when = "beetle"
 with = "humus"
 result = "fertile_soil"
-self_result = "fertile_soil"
 chance = 0.2
 
 [[interactions]]
 when = "termite"
 with = "deadwood"
 result = "fertile_soil"
-self_result = "fertile_soil"
 chance = 0.2
 
 [[interactions]]
 when = "termite"
 with = "leaf_litter"
 result = "fertile_soil"
-self_result = "fertile_soil"
 chance = 0.2
 
 [[interactions]]
 when = "termite"
 with = "ash"
 result = "fertile_soil"
-self_result = "fertile_soil"
 chance = 0.2
 
 [[interactions]]
 when = "termite"
 with = "humus"
 result = "fertile_soil"
-self_result = "fertile_soil"
 chance = 0.2
 
 # Dead organic matter catches fire readily.

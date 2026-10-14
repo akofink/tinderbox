@@ -111,6 +111,10 @@ fn export_roundtrip_keeps_disabled_probability() {
 #[test]
 fn ecology_rules_are_live_validated_and_round_trip() {
     let mut world = World::new(4, 4, 45, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    let beetle = world.rules().id("beetle").unwrap();
+    world.set_material_lifetime(beetle, 12_000).unwrap();
+    assert_eq!(world.rules().elements[beetle].lifetime, 12_000);
+    assert!(world.set_material_lifetime(usize::MAX, 1).is_err());
     let mut ecology = world.rules().ecology.clone();
     ecology.fungus_min_humidity = 22.0;
     ecology.critter_move_chance = 0.75;

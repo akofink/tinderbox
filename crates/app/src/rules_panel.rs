@@ -215,6 +215,21 @@ impl RulesPanel {
                     });
                 }
                 ui.collapsing("Decomposer and fungus behavior", |ui| {
+                    for (name, label) in [
+                        ("fungus", "Fungus lifespan (updates)"),
+                        ("beetle", "Beetle lifespan (updates)"),
+                        ("termite", "Termite lifespan (updates)"),
+                    ] {
+                        if let Some(index) = world.rules().id(name) {
+                            let mut lifetime = world.rules().elements[index].lifetime;
+                            if ui
+                                .add(egui::Slider::new(&mut lifetime, 1..=20_000).text(label))
+                                .changed()
+                            {
+                                let _ = world.set_material_lifetime(index, lifetime);
+                            }
+                        }
+                    }
                     let mut ecology = world.rules().ecology.clone();
                     let mut changed = false;
                     changed |= ui

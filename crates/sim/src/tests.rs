@@ -1,7 +1,110 @@
-use crate::{DEFAULT_RULES, Rules, World};
+use crate::{
+    DEFAULT_RULES, Rules, World,
+    level::{Generator, Level},
+};
 
 fn world(seed: u64) -> World {
     World::new(32, 24, seed, Rules::load(DEFAULT_RULES).unwrap()).unwrap()
+}
+
+#[test]
+fn decomposers_persist_on_a_well_fed_forest_floor_and_decline_without_food() {
+    let rules = Rules::load(DEFAULT_RULES).unwrap();
+    let recipe = Level {
+        version: 1,
+        width: 20,
+        height: 16,
+        fit_window: false,
+        seed: 20_261_013,
+        generator: Generator::Hills,
+        wind: Default::default(),
+        ambient_temperature: 20,
+        ambient_humidity: 100,
+        ambient_oxygen: 21,
+        amounts: [
+            ("stone", 100),
+            ("soil", 100),
+            ("tree", 12),
+            ("wet_soil", 45),
+            ("fertile_soil", 10),
+            ("deadwood", 45),
+            ("leaf_litter", 45),
+            ("humus", 45),
+            ("fungus", 75),
+            ("beetle", 55),
+            ("termite", 45),
+        ]
+        .into_iter()
+        .map(|(name, amount)| (name.to_owned(), amount))
+        .collect(),
+        spark: false,
+        boat: false,
+        boat_sand: 0,
+        boat_burning: false,
+    };
+    let mut fed = recipe.generate(rules.clone()).unwrap();
+    let mut starved = recipe.generate(rules).unwrap();
+    let food_names = [
+        "deadwood",
+        "leaf_litter",
+        "humus",
+        "wet_soil",
+        "fertile_soil",
+    ];
+    for world in [&mut starved] {
+        for cell in &mut world.cells {
+            if food_names.contains(&world.rules.elements[cell.element].name.as_str()) {
+                cell.element = world.rules.id("stone").unwrap();
+            }
+        }
+    }
+    let counts = |world: &World, name: &str| {
+        let id = world.rules().id(name).unwrap();
+        world
+            .cells()
+            .iter()
+            .filter(|cell| cell.element == id)
+            .count()
+    };
+    let advance_seconds = |world: &mut World, seconds: usize| {
+        // The 120x75 showcase recipe gets about 80 full cell sweeps per simulated second
+        // at the native 12,000-work, 60-frame budget. Preserve that per-cell update rate
+        // in this smaller headless recipe so the test stays fast and deterministic.
+        for _ in 0..seconds * 80 {
+            world.step(usize::MAX);
+        }
+    };
+    advance_seconds(&mut fed, 120);
+    for (name, cap) in [("fungus", 150), ("beetle", 150), ("termite", 150)] {
+        let count = counts(&fed, name);
+        assert!(
+            count > 0,
+            "{name} should persist after 120 seconds; count={count}"
+        );
+        assert!(count < cap, "{name} should remain bounded; count={count}");
+    }
+    let initial = [
+        counts(&starved, "fungus"),
+        counts(&starved, "beetle"),
+        counts(&starved, "termite"),
+    ];
+    assert!(initial.iter().all(|count| *count > 0));
+    advance_seconds(&mut starved, 300);
+    let remaining = [
+        counts(&starved, "fungus"),
+        counts(&starved, "beetle"),
+        counts(&starved, "termite"),
+    ];
+    for (name, before, after) in [
+        ("fungus", initial[0], remaining[0]),
+        ("beetle", initial[1], remaining[1]),
+        ("termite", initial[2], remaining[2]),
+    ] {
+        assert!(
+            after < before,
+            "starved {name} should decline: {before} -> {after}"
+        );
+    }
 }
 
 #[test]
@@ -499,7 +602,7 @@ fn damp_organic_matter_wakes_decomposers_and_returns_fertile_soil() {
         put(&mut world, 0, 0, decomposer);
         put(&mut world, 1, 0, matter);
         world.step(1);
-        assert!(has(&world, 0, 0, "fertile_soil"));
+        assert!(has(&world, 0, 0, decomposer));
         assert!(has(&world, 1, 0, "fertile_soil"));
     }
 }
@@ -650,11 +753,12 @@ fn critters_flee_fire_and_turn_meals_into_fertile_soil() {
     assert_ne!(fleeing.cells()[positions[0]].element, stone);
 
     let mut foraging = guaranteed_world(95, &[("beetle", "leaf_litter")]);
+    foraging.rules.ecology.critter_move_chance = 0.0;
     put(&mut foraging, 2, 4, "beetle");
     put(&mut foraging, 3, 4, "leaf_litter");
     foraging.scheduler.enqueue_focus(4 * foraging.width() + 2);
     foraging.step(1);
-    assert!(has(&foraging, 2, 4, "fertile_soil"));
+    assert!(has(&foraging, 2, 4, "beetle"));
     assert!(has(&foraging, 3, 4, "fertile_soil"));
 }
 

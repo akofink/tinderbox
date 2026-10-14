@@ -123,13 +123,21 @@ impl World {
                 return true;
             }
         }
-        // Breeding is a configurable, bounded local event and requires a same-species neighbor.
-        let has_mate = self
-            .neighbors(index)
+        // Breeding requires both a nearby mate and food, so depleted habitat cannot support growth.
+        let neighbors = self.neighbors(index);
+        let has_mate = neighbors
             .into_iter()
             .flatten()
             .any(|neighbor| self.cells[neighbor].element == species);
-        if has_mate && self.random_f32() < self.rules.ecology.breeding_chance {
+        let has_food = neighbors.into_iter().flatten().any(|neighbor| {
+            self.rules.interactions.iter().any(|rule| {
+                rule.enabled
+                    && rule.chance > 0.0
+                    && rule.when == species
+                    && rule.with == self.cells[neighbor].element
+            })
+        });
+        if has_mate && has_food && self.random_f32() < self.rules.ecology.breeding_chance {
             for neighbor in self.neighbors(index).into_iter().flatten() {
                 if self.cells[neighbor].element == air {
                     let below = neighbor

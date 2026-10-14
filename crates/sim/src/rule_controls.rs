@@ -2,6 +2,17 @@
 use crate::{AtmosphereRules, Cell, DEFAULT_RULES, EcologyRules, Rules, RulesError, World};
 
 impl World {
+    /// Change one material's lifetime in scheduled updates without advancing simulation time.
+    pub fn set_material_lifetime(&mut self, index: usize, lifetime: u16) -> Result<(), RulesError> {
+        let element = self
+            .rules
+            .elements
+            .get_mut(index)
+            .ok_or_else(|| RulesError(format!("unknown element {index}")))?;
+        element.lifetime = lifetime;
+        Ok(())
+    }
+
     /// Change one material's relative density without advancing simulation time.
     pub fn set_material_density(&mut self, index: usize, density: u8) -> Result<(), RulesError> {
         let element = self
