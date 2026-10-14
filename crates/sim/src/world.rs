@@ -175,7 +175,9 @@ impl World {
         self.ambient_humidity = previous.ambient_humidity;
         self.ambient_oxygen = previous.ambient_oxygen;
         for y in 0..self.atmosphere_height {
-            let source_cell_y = (y * ATMOSPHERE_CELL_SIZE) as isize - row_offset;
+            let target_cell_y =
+                (y * ATMOSPHERE_CELL_SIZE + ATMOSPHERE_CELL_SIZE / 2).min(self.height - 1);
+            let source_cell_y = target_cell_y as isize - row_offset;
             if !(0..previous.height as isize).contains(&source_cell_y) {
                 continue;
             }

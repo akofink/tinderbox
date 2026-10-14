@@ -1141,6 +1141,19 @@ mod tests {
     }
 
     #[test]
+    fn non_aligned_vertical_resize_preserves_nearest_atmosphere_row() {
+        let rules = rules();
+        let level = Preset::Island.level(&rules, 64, 48);
+        let mut original = level.generate(rules.clone()).unwrap();
+        original.atmosphere[0].temperature = 42.0;
+        let mut taller_level = level.clone();
+        taller_level.height += 1;
+        let mut taller = taller_level.generate(rules).unwrap();
+        taller.preserve_resize_state_from(&original);
+        assert_eq!(taller.atmosphere_at(0, 0).unwrap().temperature, 42.0);
+    }
+
+    #[test]
     fn growing_height_adds_sky_above_existing_terrain() {
         let rules = rules();
         let level = Preset::Island.level(&rules, 64, 48);
