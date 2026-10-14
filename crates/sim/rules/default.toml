@@ -192,7 +192,7 @@ heat_transfer = 0.08
 evaporation_rate = 0.08
 condensation_humidity = 78.0
 pressure_wind = 0.15
-oxygen_consumption = 0.35
+oxygen_consumption = 0.2
 oxygen_diffusion = 0.08
 
 # Wind strengthens fire spread only when the target is directly downwind.

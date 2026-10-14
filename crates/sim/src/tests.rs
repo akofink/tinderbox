@@ -618,6 +618,73 @@ fn lava_heats_a_lake_and_cloud_rain_wets_soil_for_regrowth() {
 }
 
 #[test]
+fn fire_front_spreads_downwind_and_respects_humidity_and_oxygen() {
+    use crate::level::{Generator, Level};
+    use std::collections::BTreeMap;
+    let rules = Rules::load(DEFAULT_RULES).unwrap();
+    let burned_fraction = |humidity, oxygen, direction| {
+        let level = Level {
+            version: 1,
+            width: 192,
+            height: 120,
+            seed: 731,
+            generator: Generator::Hills,
+            wind: crate::Wind {
+                direction,
+                strength: 1,
+            },
+            ambient_temperature: 20,
+            ambient_humidity: humidity,
+            ambient_oxygen: oxygen,
+            amounts: BTreeMap::from([
+                ("stone".into(), 100),
+                ("soil".into(), 100),
+                ("tree".into(), 75),
+            ]),
+            spark: true,
+        };
+        let mut world = level.generate(rules.clone()).unwrap();
+        let tree = world.rules().id("tree").unwrap();
+        let initial = world
+            .cells()
+            .iter()
+            .filter(|cell| cell.element == tree)
+            .count();
+        for _ in 0..60 {
+            world.step(usize::MAX);
+        }
+        let remaining = world
+            .cells()
+            .iter()
+            .filter(|cell| cell.element == tree)
+            .count();
+        (initial - remaining) as f32 / initial as f32
+    };
+    let dry_following = burned_fraction(0, 21, crate::WindDirection::East);
+    let dry_headwind = burned_fraction(0, 21, crate::WindDirection::West);
+    let moist_following = burned_fraction(80, 21, crate::WindDirection::East);
+    let airless = burned_fraction(0, 0, crate::WindDirection::East);
+    assert!(
+        dry_following > 0.5,
+        "dry following-wind forest burned {:.1}%",
+        dry_following * 100.0
+    );
+    assert!(
+        dry_following > dry_headwind + 0.15,
+        "following wind {:.1}%, headwind {:.1}%",
+        dry_following * 100.0,
+        dry_headwind * 100.0
+    );
+    assert!(
+        dry_following > moist_following + 0.15,
+        "dry {:.1}%, moist {:.1}%",
+        dry_following * 100.0,
+        moist_following * 100.0
+    );
+    assert_eq!(airless, 0.0, "zero oxygen must not burn trees");
+}
+
+#[test]
 fn dry_forest_fire_front_leaves_a_regrowing_canopy() {
     let rules = Rules::load(DEFAULT_RULES).unwrap();
     let level = crate::level::Preset::DryForest.level(&rules, 96, 64);
