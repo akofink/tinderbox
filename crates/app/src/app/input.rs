@@ -31,11 +31,20 @@ pub(crate) fn world_to_screen(
     )
 }
 
+pub(super) fn clear_level_setup_text_focus(ctx: &egui::Context) {
+    if let Some(focused) = ctx
+        .memory(|memory| memory.focused())
+        .filter(|id| egui::text_edit::TextEditState::load(ctx, *id).is_some())
+    {
+        ctx.memory_mut(|memory| memory.surrender_focus(focused));
+    }
+}
+
 pub(super) fn handle_keyboard(app: &mut Tinderbox, ctx: &egui::Context) {
     let editing_text = ctx
         .memory(|m| m.focused())
         .is_some_and(|id| egui::text_edit::TextEditState::load(ctx, id).is_some());
-    if app.level_setup.open || editing_text {
+    if app.level_setup.open || (app.rules_panel.open && editing_text) {
         return;
     }
     let keys = ctx.input(|input| {
@@ -73,10 +82,10 @@ pub(super) fn handle_keyboard(app: &mut Tinderbox, ctx: &egui::Context) {
         app.inspect_mode = !app.inspect_mode;
     }
     if keys.7 {
-        app.pan_camera(-8.0, app.level.width as f32);
+        app.pan_camera(-8.0, app.camera_view_width);
     }
     if keys.8 {
-        app.pan_camera(8.0, app.level.width as f32);
+        app.pan_camera(8.0, app.camera_view_width);
     }
 }
 
@@ -85,8 +94,9 @@ pub(super) fn handle_canvas_pointer(
     response: &Response,
     rect: Rect,
     view_width: f32,
+    pan_drag: bool,
 ) {
-    if app.level_setup.open || app.inspect_mode || !response.hovered() {
+    if app.level_setup.open || app.inspect_mode || pan_drag || !response.hovered() {
         return;
     }
     let Some(pos) = response.interact_pointer_pos() else {

@@ -44,7 +44,7 @@ fn endless_arrow_keys_scroll_the_camera() {
     let mut app = Tinderbox::new_state(false);
     let mut level = app.level.clone();
     level.mode = LevelMode::Endless;
-    level.width = 128;
+    level.width = 2048;
     level.height = 64;
     app.set_level(level).unwrap();
     app.center_camera_on_origin(128.0);
@@ -66,6 +66,103 @@ fn endless_arrow_keys_scroll_the_camera() {
     );
     let after = app.world_start_chunk * ENDLESS_CHUNK_WIDTH as i64 + app.camera_x as i64;
     assert_eq!(after, before + 8);
+}
+
+#[test]
+fn endless_shift_drag_pans_without_painting() {
+    let mut app = Tinderbox::new_state(false);
+    let mut level = app.level.clone();
+    level.mode = LevelMode::Endless;
+    level.width = 128;
+    level.height = 64;
+    app.set_level(level).unwrap();
+    app.level_setup.open = false;
+    let ctx = egui::Context::default();
+    let screen_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let mut canvas_rect = egui::Rect::NOTHING;
+    let _ = ctx.run(
+        egui::RawInput {
+            screen_rect: Some(screen_rect),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                canvas_rect = panels::world::show(&mut app, ui);
+            });
+        },
+    );
+    let pos = canvas_rect.center();
+    let _ = ctx.run(
+        egui::RawInput {
+            screen_rect: Some(screen_rect),
+            modifiers: egui::Modifiers::SHIFT,
+            events: vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::SHIFT,
+                },
+            ],
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                panels::world::show(&mut app, ui);
+            });
+        },
+    );
+    let view_width = canvas_rect.width() * app.world.height() as f32 / canvas_rect.height();
+    let camera_before = app.camera_x;
+    let world_x = (app.world_start_chunk as f32 * ENDLESS_CHUNK_WIDTH as f32
+        + camera_before
+        + view_width / 2.0)
+        .floor() as i64;
+    let local_x = (world_x - app.world_start_chunk * ENDLESS_CHUNK_WIDTH as i64) as usize;
+    let cell_before = app.world.cells()[app.world.height() / 2 * app.world.width() + local_x];
+    let camera_world_before =
+        app.world_start_chunk as f32 * ENDLESS_CHUNK_WIDTH as f32 + camera_before;
+    let _ = ctx.run(
+        egui::RawInput {
+            screen_rect: Some(screen_rect),
+            modifiers: egui::Modifiers::SHIFT,
+            events: vec![egui::Event::PointerMoved(pos + egui::vec2(50.0, 0.0))],
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                panels::world::show(&mut app, ui);
+            });
+        },
+    );
+    let camera_world_after =
+        app.world_start_chunk as f32 * ENDLESS_CHUNK_WIDTH as f32 + app.camera_x;
+    assert!(
+        camera_world_after < camera_world_before,
+        "dragging right should pan west"
+    );
+    let local_x = (world_x - app.world_start_chunk * ENDLESS_CHUNK_WIDTH as i64) as usize;
+    assert_eq!(
+        app.world.cells()[app.world.height() / 2 * app.world.width() + local_x],
+        cell_before,
+        "a pan gesture must not paint cells"
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn endless_texture_capacity_avoids_growth_during_normal_scrolling() {
+    let mut app = Tinderbox::new_state(false);
+    let mut level = app.level.clone();
+    level.mode = LevelMode::Endless;
+    level.width = 128;
+    level.height = 64;
+    app.set_level(level).unwrap();
+    assert_eq!(app.world_texture.size()[0], 8192);
+    app.set_camera_x(1200);
+    assert!(app.world.width() > 1280);
+    assert_eq!(app.world_texture.size()[0], 8192);
 }
 
 #[test]
@@ -296,11 +393,49 @@ fn setup_blocks_keyboard_play_and_step() {
 }
 
 #[test]
+fn clearing_setup_text_focus_unblocks_arrow_scrolling() {
+    let mut app = Tinderbox::new_state(false);
+    let mut level = app.level.clone();
+    level.mode = LevelMode::Endless;
+    level.width = 128;
+    level.height = 64;
+    app.set_level(level).unwrap();
+    app.level_setup.open = false;
+    app.center_camera_on_origin(128.0);
+    let ctx = egui::Context::default();
+    let id = egui::Id::new("setup_seed_text");
+    let _ = ctx.run(Default::default(), |ctx| {
+        ctx.memory_mut(|memory| memory.request_focus(id));
+        egui::text_edit::TextEditState::default().store(ctx, id);
+    });
+    input::clear_level_setup_text_focus(&ctx);
+    let before = app.world_start_chunk as f32 * ENDLESS_CHUNK_WIDTH as f32 + app.camera_x;
+    let _ = ctx.run(
+        egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::ArrowRight,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        },
+        |ctx| input::handle_keyboard(&mut app, ctx),
+    );
+    assert_eq!(
+        app.world_start_chunk as f32 * ENDLESS_CHUNK_WIDTH as f32 + app.camera_x,
+        before + 8.0
+    );
+}
+
+#[test]
 fn shortcuts_work_with_button_focus_but_not_in_text_fields() {
     for text_focus in [false, true] {
         let mut app = Tinderbox::new_state(false);
         let level = app.level.clone();
         play_level(&mut app, level);
+        app.rules_panel.open = text_focus;
         let ctx = egui::Context::default();
         let id = egui::Id::new("focused_control");
         let _ = ctx.run(

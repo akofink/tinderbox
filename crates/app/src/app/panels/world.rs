@@ -2,7 +2,7 @@
 use crate::app::{Tinderbox, input, inspector, render};
 use eframe::egui::{self, Color32, Sense};
 
-pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
+pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) -> egui::Rect {
     if app.level.fit_window {
         app.resize_world_to_fit(ui.available_size());
     }
@@ -25,12 +25,27 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
         app.world.width() as f32
     };
     app.center_camera_on_origin(view_width);
-    if app.level.mode == tinderbox_sim::level::LevelMode::Endless {
-        let scroll = ui.input(|input| input.smooth_scroll_delta);
+    let pan_drag = if app.level.mode == tinderbox_sim::level::LevelMode::Endless {
+        let (delta_x, shift_down, primary_down, middle_down, scroll) = ui.input(|input| {
+            (
+                input.pointer.delta().x,
+                input.modifiers.shift,
+                input.pointer.button_down(egui::PointerButton::Primary),
+                input.pointer.button_down(egui::PointerButton::Middle),
+                input.smooth_scroll_delta,
+            )
+        });
+        let dragging = response.hovered() && (middle_down || (shift_down && primary_down));
+        if dragging && delta_x != 0.0 {
+            app.pan_camera(-delta_x * view_width / rect.width().max(1.0), view_width);
+        }
         if response.hovered() && scroll != egui::Vec2::ZERO {
             app.pan_camera(-(scroll.x + scroll.y) * 0.2, view_width);
         }
-    }
+        dragging
+    } else {
+        false
+    };
     render::draw_world(
         &app.world_texture,
         &painter,
@@ -51,7 +66,7 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
     if app.level.mode == tinderbox_sim::level::LevelMode::Endless {
         render::draw_endless_cursor(&painter, rect);
     }
-    input::handle_canvas_pointer(app, &response, rect, view_width);
+    input::handle_canvas_pointer(app, &response, rect, view_width, pan_drag);
     if app.inspect_mode {
         #[cfg(not(target_arch = "wasm32"))]
         let inspect_pointer = app.inspect_cell.map(|(x, y)| {
@@ -71,4 +86,5 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
         }
     }
     super::hud::show(app, &painter, rect);
+    rect
 }
