@@ -830,17 +830,40 @@ impl World {
     }
 
     pub(super) fn set_element(&mut self, index: usize, element: usize) {
-        let changed = self.cells[index].element != element;
+        self.set_element_inner(index, element, true);
+    }
+
+    pub(super) fn set_element_inner(
+        &mut self,
+        index: usize,
+        element: usize,
+        check_canopy_support: bool,
+    ) {
+        let previous = self.cells[index].element;
+        let previous_burn_progress = self.cells[index].burn_progress;
+        let changed = previous != element;
+        let tree = self.rules.id("tree");
+        let fire = self.rules.id("fire");
+        let ash = self.rules.id("ash");
+        let tree_became_fire = changed && tree == Some(previous) && fire == Some(element);
+        let lost_tree_support = changed
+            && ((tree == Some(previous) && fire != Some(element))
+                || (fire == Some(previous) && ash == Some(element) && previous_burn_progress > 0));
         self.detach_body_member(index);
         self.cells[index] = crate::Cell {
             element,
             age: 0,
             moisture: 0,
-            burn_progress: 0,
+            // Tag tree-born flames so canopy can drop after they finish burning,
+            // rather than interrupting the fire front while it is still spreading.
+            burn_progress: u8::from(tree_became_fire),
             body_id: 0,
         };
         if changed {
             self.mark_cell_dirty(index);
+        }
+        if lost_tree_support && check_canopy_support {
+            self.drop_unsupported_canopy_near(index);
         }
     }
 

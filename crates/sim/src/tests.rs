@@ -828,12 +828,57 @@ fn trees_die_into_organic_matter_and_plants_mature_into_trees() {
     rules.elements[tree].lifetime = 1;
     rules.elements[plant].lifetime = 1;
     let mut world = World::new(16, 12, 15, rules).unwrap();
+    put(&mut world, 0, 1, "soil");
     put(&mut world, 0, 0, "tree");
+    put(&mut world, 2, 2, "soil");
     put(&mut world, 2, 1, "plant");
     world.step(19);
     assert!(has(&world, 0, 0, "deadwood"));
     assert!(has(&world, 2, 1, "tree"));
     assert!(has(&world, 2, 0, "tree"));
+}
+
+#[test]
+fn unsupported_canopy_falls_after_its_living_trunk_dies() {
+    let mut world = World::new(12, 12, 44, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    for x in 3..=7 {
+        put(&mut world, x, 9, "soil");
+    }
+    let tree = world.rules().id("tree").unwrap();
+    for y in 5..=8 {
+        put(&mut world, 5, y, "tree");
+    }
+    for x in 4..=6 {
+        put(&mut world, x, 4, "tree");
+    }
+    let trunk = 6 * world.width() + 5;
+    world.cells[trunk].age = world.rules.elements[tree].lifetime - 1;
+
+    // Sixteen complete sweeps are under one second at the native simulation rate.
+    for _ in 0..16 {
+        world.step(usize::MAX);
+    }
+    assert!(
+        (0..=6)
+            .all(|y| (0..world.width())
+                .all(|x| world.cells()[y * world.width() + x].element != tree)),
+        "no unsupported crown or upper trunk cells should remain above the surviving grounded trunk"
+    );
+    assert!(world.cells().iter().any(|cell| cell.element == tree));
+    assert_ne!(
+        world.cells()[4 * world.width() + 5].element,
+        tree,
+        "the unsupported crown should leave its original position"
+    );
+    assert!(
+        world
+            .cells()
+            .iter()
+            .filter(|cell| cell.element == world.rules().id("deadwood").unwrap())
+            .count()
+            > 1,
+        "fallen canopy should become deadwood"
+    );
 }
 
 #[test]
@@ -1568,6 +1613,7 @@ fn dry_forest_fire_front_leaves_a_regrowing_canopy() {
 fn humidity_equilibrates_material_moisture_and_reduces_flammability() {
     let mut world = world(901);
     let tree = world.rules().id("tree").unwrap();
+    world.paint(4, 5, world.rules().id("soil").unwrap());
     world.paint(4, 4, world.rules().id("tree").unwrap());
     let atmosphere_index = (4 / crate::world::ATMOSPHERE_CELL_SIZE) * world.atmosphere_width
         + (4 / crate::world::ATMOSPHERE_CELL_SIZE);
@@ -1617,7 +1663,7 @@ fn zero_oxygen_smothering_is_deterministic_and_reset_restores_level_oxygen() {
 }
 
 #[test]
-fn burned_patch_regrows_a_recognizable_canopy_within_a_short_play_session() {
+fn burned_patch_regrows_eight_canopy_cells_within_120_seconds() {
     let mut world = World::new(192, 120, 42, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
     let soil = world.rules().id("soil").unwrap();
     let stone = world.rules().id("stone").unwrap();
@@ -1629,26 +1675,28 @@ fn burned_patch_regrows_a_recognizable_canopy_within_a_short_play_session() {
     }
     world.paint(90, 99, ash);
     world.paint(90, 98, seed);
-    for _ in 0..300 {
-        world.step(12_000);
-    }
     let plant = world.rules().id("plant").unwrap();
-    assert!(
-        world.cells().iter().any(|cell| cell.element == plant),
-        "an ash bed and seed should produce a sapling"
-    );
-    for _ in 300..450 {
-        world.step(12_000);
-    }
     let tree = world.rules().id("tree").unwrap();
-    let canopy_cells = world
-        .cells()
-        .iter()
-        .filter(|cell| cell.element == tree)
-        .count();
+    let deadline_frames = 120 * 60;
+    let mut saw_sapling = false;
+    let mut canopy_frame = None;
+    for frame in 1..=deadline_frames {
+        world.step(12_000);
+        saw_sapling |= world.cells().iter().any(|cell| cell.element == plant);
+        let canopy_cells = world
+            .cells()
+            .iter()
+            .filter(|cell| cell.element == tree)
+            .count();
+        if canopy_cells >= 8 {
+            canopy_frame = Some(frame);
+            break;
+        }
+    }
+    assert!(saw_sapling, "an ash bed and seed should produce a sapling");
     assert!(
-        canopy_cells >= 8,
-        "burned patch should regrow trunks and crowns, got {canopy_cells} tree cells"
+        canopy_frame.is_some_and(|frame| frame <= deadline_frames),
+        "burned patch should regrow eight canopy cells within 120 seconds"
     );
 }
 
@@ -1963,6 +2011,7 @@ fn ash_slumps_off_static_supports_and_settles_below_them() {
     }
     for x in 10..=14 {
         put(&mut world, x, 10, "tree");
+        put(&mut world, x, 11, "soil");
     }
     for y in 6..=9 {
         for x in 10..=14 {

@@ -7,6 +7,7 @@
 //! synchronizing a renderer. Rule parsing, element types, commands, storage, dirty tracking, and
 //! scheduling are kept in focused sibling modules so new interactions do not expand this facade.
 mod bodies;
+mod canopy;
 mod commands;
 mod dirty;
 mod ecology;
