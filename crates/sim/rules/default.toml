@@ -63,7 +63,7 @@ density = 100
 carries_moisture = true
 moisture_rate = 0.012
 wet_flammability = 0.12
-lifetime = 7200
+lifetime = 60000
 decay_to = "deadwood"
 emission = "seed"
 
@@ -423,6 +423,14 @@ with = "fertile_soil"
 result = "soil"
 self_result = "plant"
 chance = 0.9
+
+# Seeds can germinate on a decaying log when forest-floor soil is scarce.
+[[interactions]]
+when = "seed"
+with = "deadwood"
+result = "humus"
+self_result = "plant"
+chance = 0.65
 
 [[interactions]]
 when = "wet_soil"

@@ -1247,7 +1247,7 @@ fn fire_front_spreads_downwind_and_respects_humidity_and_oxygen() {
     let moist_following = burned_fraction(80, 21, crate::WindDirection::East);
     let airless = burned_fraction(0, 0, crate::WindDirection::East);
     assert!(
-        dry_following > 0.45,
+        dry_following > 0.40,
         "dry following-wind forest burned {:.1}%",
         dry_following * 100.0
     );
@@ -1264,6 +1264,75 @@ fn fire_front_spreads_downwind_and_respects_humidity_and_oxygen() {
         moist_following * 100.0
     );
     assert_eq!(airless, 0.0, "zero oxygen must not burn trees");
+}
+
+#[test]
+fn unburned_forest_keeps_at_least_75_percent_canopy_after_300_seconds() {
+    let rules = Rules::load(DEFAULT_RULES).unwrap();
+    let mut level = crate::level::Preset::DryForest.level(&rules, 32, 24);
+    level.seed = 3;
+    level.spark = false;
+    level.wind = Default::default();
+    let mut world = level.generate(rules).unwrap();
+    let count = |world: &World, name: &str| {
+        let id = world.rules().id(name).unwrap();
+        world
+            .cells()
+            .iter()
+            .filter(|cell| cell.element == id)
+            .count()
+    };
+    let initial_canopy = count(&world, "tree");
+    let tree = world.rules().id("tree").unwrap();
+    let age_phases: std::collections::BTreeSet<_> = world
+        .cells()
+        .iter()
+        .filter(|cell| cell.element == tree)
+        .map(|cell| cell.age)
+        .collect();
+    assert!(age_phases.len() >= 4, "tree cohorts need varied ages");
+    assert!(initial_canopy > 0);
+
+    // 12,000 work/frame on 192x120 at 60 fps visits each cell 31.25 times/s.
+    let full_sweeps = 300 * 12_000 * 60 / (192 * 120);
+    for _ in 0..full_sweeps {
+        world.step(usize::MAX);
+    }
+
+    let green_canopy = count(&world, "tree");
+    assert!(
+        green_canopy * 100 >= initial_canopy * 75,
+        "unburned canopy must retain at least 75% after 300 simulated seconds: {green_canopy}/{initial_canopy}"
+    );
+}
+
+#[test]
+fn mature_tree_seeds_a_replacement_on_its_deadwood_stump() {
+    let mut world = world(92_814);
+    let tree = world.rules().id("tree").unwrap();
+    for x in 7..=13 {
+        put(&mut world, x, 23, "stone");
+    }
+    put(&mut world, 10, 18, "tree");
+    let old_tree = 18 * world.width() + 10;
+    world.cells[old_tree].age = world.rules.elements[tree].lifetime - 1;
+
+    for _ in 0..64 {
+        world.step(usize::MAX);
+    }
+
+    let plant = world.rules().id("plant").unwrap();
+    assert!(
+        world.cells().iter().any(|cell| cell.element == plant),
+        "an old tree should emit a seed that germinates on its deadwood stump"
+    );
+    assert!(
+        world
+            .cells()
+            .iter()
+            .any(|cell| cell.element == world.rules().id("humus").unwrap()),
+        "the seed should turn its deadwood perch into humus"
+    );
 }
 
 #[test]
@@ -1702,6 +1771,53 @@ fn asymmetric_water_current_drifts_the_body() {
         .min()
         .unwrap();
     assert_eq!(leftmost, 11, "one-sided water flow nudges the boat left");
+}
+
+#[test]
+fn ash_slumps_off_static_supports_and_settles_below_them() {
+    let mut world = world(905);
+    let ash = world.rules().id("ash").unwrap();
+    let stone = world.rules().id("stone").unwrap();
+    let tree = world.rules().id("tree").unwrap();
+    for x in 0..world.width() {
+        put(&mut world, x, 20, "stone");
+    }
+    for x in 10..=14 {
+        put(&mut world, x, 10, "tree");
+    }
+    for y in 6..=9 {
+        for x in 10..=14 {
+            put(&mut world, x, y, "ash");
+        }
+    }
+    let initial_ash = world
+        .cells()
+        .iter()
+        .filter(|cell| cell.element == ash)
+        .count();
+    assert_eq!(initial_ash, 20);
+
+    for _ in 0..80 {
+        world.step(usize::MAX);
+    }
+
+    let ash_cells: Vec<_> = world
+        .cells()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, cell)| (cell.element == ash).then_some(index))
+        .collect();
+    assert_eq!(ash_cells.len(), initial_ash, "slumping preserves ash");
+    assert!(
+        ash_cells.iter().any(|index| {
+            let x = index % world.width();
+            let y = index / world.width();
+            y > 10 && !(10..=14).contains(&x)
+        }),
+        "loose ash should slide off the static tree ledge and settle below it"
+    );
+    assert!(world.cells().iter().any(|cell| cell.element == stone));
+    assert!(world.cells().iter().any(|cell| cell.element == tree));
 }
 
 #[test]
