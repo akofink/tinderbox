@@ -27,6 +27,10 @@ impl Generator {
     }
 }
 
+fn is_fit_dimension(value: &usize) -> bool {
+    *value == 0
+}
+
 fn default_ambient_temperature() -> i16 {
     20
 }
@@ -41,8 +45,12 @@ fn default_ambient_oxygen() -> u8 {
 #[serde(deny_unknown_fields)]
 pub struct Level {
     pub version: u32,
+    #[serde(default, skip_serializing_if = "is_fit_dimension")]
     pub width: usize,
+    #[serde(default, skip_serializing_if = "is_fit_dimension")]
     pub height: usize,
+    #[serde(skip)]
+    pub fit_window: bool,
     // TOML integers are signed 64-bit. A decimal string preserves every u64 seed.
     #[serde(with = "seed_format")]
     pub seed: u64,
@@ -130,6 +138,7 @@ impl Preset {
             version: 1,
             width,
             height,
+            fit_window: false,
             seed,
             generator,
             ambient_temperature: 20,
@@ -172,14 +181,21 @@ impl Level {
         }
     }
     pub fn load(text: &str) -> Result<Self, LevelError> {
-        let level: Self =
+        let mut level: Self =
             toml::from_str(text).map_err(|e| LevelError(format!("Invalid level TOML: {e}")))?;
+        level.fit_window = level.width == 0 && level.height == 0;
         level.validate()?;
         Ok(level)
     }
     pub fn to_toml(&self) -> Result<String, LevelError> {
         self.validate()?;
-        toml::to_string_pretty(self).map_err(|e| LevelError(format!("Cannot encode level: {e}")))
+        let mut serializable = self.clone();
+        if serializable.fit_window {
+            serializable.width = 0;
+            serializable.height = 0;
+        }
+        toml::to_string_pretty(&serializable)
+            .map_err(|e| LevelError(format!("Cannot encode level: {e}")))
     }
     pub fn validate(&self) -> Result<(), LevelError> {
         if self.version != 1 {
@@ -188,14 +204,21 @@ impl Level {
                 self.version
             )));
         }
-        if self.width < 16
-            || self.height < 16
-            || self.width > MAX_LEVEL_DIMENSION
-            || self.height > MAX_LEVEL_DIMENSION
-            || self
-                .width
-                .checked_mul(self.height)
-                .is_none_or(|n| n > MAX_LEVEL_CELLS)
+        let dimensions_omitted = self.width == 0 && self.height == 0;
+        if (self.width == 0 || self.height == 0) && !dimensions_omitted {
+            return Err(LevelError(
+                "Width and height must both be specified, or both omitted to fit the window".into(),
+            ));
+        }
+        if !dimensions_omitted
+            && (self.width < 16
+                || self.height < 16
+                || self.width > MAX_LEVEL_DIMENSION
+                || self.height > MAX_LEVEL_DIMENSION
+                || self
+                    .width
+                    .checked_mul(self.height)
+                    .is_none_or(|n| n > MAX_LEVEL_CELLS))
         {
             return Err(LevelError(format!(
                 "World must be 16..={MAX_LEVEL_DIMENSION} cells per side and at most {MAX_LEVEL_CELLS} cells total"
@@ -232,6 +255,11 @@ impl Level {
     }
     pub fn generate(&self, rules: Rules) -> Result<World, LevelError> {
         self.validate()?;
+        if self.width == 0 || self.height == 0 {
+            return Err(LevelError(
+                "A fit-window recipe needs canvas dimensions before generation".into(),
+            ));
+        }
         for name in self.amounts.keys() {
             if rules.id(name).is_none() {
                 return Err(LevelError(format!(
@@ -661,6 +689,47 @@ mod tests {
             .replace("seed = \"29\"", "seed = 29");
         assert_eq!(Level::load(&numeric).unwrap(), level);
     }
+    #[test]
+    fn recipes_without_dimensions_fit_the_window_and_omit_size_on_export() {
+        let recipe = "version=1\nseed=7\ngenerator='hills'\n[amounts]\nstone=100\n";
+        let mut level = Level::load(recipe).unwrap();
+        assert!(level.fit_window);
+        assert_eq!((level.width, level.height), (0, 0));
+        assert!(level.generate(rules()).is_err());
+        level.width = 96;
+        level.height = 64;
+        let text = level.to_toml().unwrap();
+        assert!(!text.contains("width ="));
+        assert!(!text.contains("height ="));
+        assert!(Level::load(&text).unwrap().fit_window);
+    }
+
+    #[test]
+    fn resizing_from_a_seeded_level_keeps_existing_cells_and_extends_terrain() {
+        let rules = rules();
+        let level = Preset::Island.level(&rules, 64, 48);
+        let original = level.generate(rules.clone()).unwrap();
+        let original_cells = original.cells().to_vec();
+        let mut expanded_level = level.clone();
+        expanded_level.width = 80;
+        expanded_level.height = 56;
+        let mut expanded = expanded_level.generate(rules).unwrap();
+        let expected_extension = expanded.cells().to_vec();
+        expanded.preserve_resize_state_from(&original);
+        for y in 0..48 {
+            for x in 0..64 {
+                assert_eq!(expanded.cells()[y * 80 + x], original_cells[y * 64 + x]);
+            }
+        }
+        let air = expanded.rules().id("air").unwrap();
+        assert!(
+            expanded.cells()[48 * 80..]
+                .iter()
+                .any(|cell| cell.element != air)
+        );
+        assert_eq!(expected_extension[48 * 80], expanded.cells()[48 * 80]);
+    }
+
     #[test]
     fn older_recipes_default_to_calm_and_invalid_wind_fails() {
         let old =

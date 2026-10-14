@@ -3,6 +3,9 @@ use crate::app::{Tinderbox, input, render};
 use eframe::egui::{self, Color32, Sense};
 
 pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
+    if app.level.fit_window {
+        app.resize_world_to_fit(ui.available_size());
+    }
     let size = render::fitted_size(&app.world, ui.available_size());
     let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
     render::upload_dirty(app);

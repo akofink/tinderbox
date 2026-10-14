@@ -19,7 +19,6 @@ use std::{
     sync::mpsc::{self, Receiver},
     time::SystemTime,
 };
-#[cfg(not(target_arch = "wasm32"))]
 use tinderbox_sim::level::{MAX_LEVEL_CELLS, MAX_LEVEL_DIMENSION};
 use tinderbox_sim::{
     DEFAULT_RULES, Rules, World,
@@ -29,11 +28,29 @@ use web_time::Instant;
 
 const DEFAULT_WIDTH: usize = 400;
 const DEFAULT_HEIGHT: usize = 250;
+const DEFAULT_CELL_SIZE: f32 = 3.5;
 const WORK_PER_FRAME: usize = 12_000;
 const WORK_UNITS_PER_SECOND: f64 = (WORK_PER_FRAME * 60) as f64;
 const MAX_WORK_PER_FRAME: usize = WORK_PER_FRAME * 4;
 const MAX_CARRY_FRAMES: usize = 8;
 pub(super) const MAX_TEXTURE_REGIONS_PER_FRAME: usize = 32;
+
+fn fitted_world_dimensions(available: egui::Vec2, cell_size: f32) -> (usize, usize) {
+    let width = (available.x / cell_size)
+        .floor()
+        .clamp(16.0, MAX_LEVEL_DIMENSION as f32) as usize;
+    let height = (available.y / cell_size)
+        .floor()
+        .clamp(16.0, MAX_LEVEL_DIMENSION as f32) as usize;
+    if width.saturating_mul(height) <= MAX_LEVEL_CELLS {
+        return (width, height);
+    }
+    let scale = (MAX_LEVEL_CELLS as f64 / (width * height) as f64).sqrt();
+    (
+        ((width as f64 * scale).floor() as usize).max(16),
+        ((height as f64 * scale).floor() as usize).max(16),
+    )
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Overlay {
@@ -79,6 +96,7 @@ pub(super) struct Tinderbox {
     overlay: Overlay,
     running: bool,
     speed: f32,
+    cell_size: f32,
     show_hud: bool,
     rules_panel: RulesPanel,
     level: Level,
@@ -90,6 +108,8 @@ pub(super) struct Tinderbox {
     max_dirty_regions_uploaded: usize,
     last_frame: Instant,
     frame_ms: f32,
+    resize_target: Option<(usize, usize)>,
+    resize_target_since: Instant,
     stress_play: bool,
     stress_frames: usize,
     stress_total_ms: f64,
@@ -155,14 +175,28 @@ impl Tinderbox {
             Level::load(&text)
                 .unwrap_or_else(|error| panic!("Invalid level recipe {}: {error}", path.display()))
         });
-        let (width, height) = level
-            .as_ref()
-            .map_or_else(requested_world_size, |level| (level.width, level.height));
+        let (width, height) = level.as_ref().map_or_else(requested_world_size, |level| {
+            if level.fit_window || level.width == 0 {
+                requested_world_size()
+            } else {
+                (level.width, level.height)
+            }
+        });
         let mut app =
             Self::new_with_context(cc.egui_ctx.clone(), width, height, smooth_play_requested());
+        if args.level_path.is_none()
+            && std::env::args().any(|arg| arg == "--world-size" || arg.starts_with("--world-size="))
+        {
+            app.level.fit_window = false;
+            app.level_setup.draft.fit_window = false;
+        }
         app.level_file = args.level_path.clone();
         app.level_file_modified = app.level_file.as_ref().and_then(|path| file_modified(path));
-        if let Some(level) = level {
+        if let Some(mut level) = level {
+            if level.width == 0 || level.height == 0 {
+                (level.width, level.height) = (width, height);
+            }
+            app.level.fit_window = level.fit_window;
             app.set_level(level)
                 .expect("validated level recipe must generate");
             app.level_setup.open = false;
@@ -190,7 +224,8 @@ impl Tinderbox {
     ) -> Self {
         let rules = Rules::load(DEFAULT_RULES).expect("bundled rules are validated by tests");
         let selected = rules.id("sand").unwrap_or(0);
-        let level = Preset::DryForest.level(&rules, width, height);
+        let mut level = Preset::DryForest.level(&rules, width, height);
+        level.fit_window = true;
         let mut world = level.generate(rules).expect("default level is valid");
         if stress_play {
             seed_smooth_play_boats(&mut world);
@@ -218,6 +253,7 @@ impl Tinderbox {
             overlay: Overlay::None,
             running: stress_play,
             speed: 1.0,
+            cell_size: DEFAULT_CELL_SIZE,
             show_hud: true,
             rules_panel: RulesPanel::default(),
             level,
@@ -229,6 +265,8 @@ impl Tinderbox {
             max_dirty_regions_uploaded: 0,
             last_frame: Instant::now(),
             frame_ms: 0.0,
+            resize_target: None,
+            resize_target_since: Instant::now(),
             stress_play,
             stress_frames: 0,
             stress_total_ms: 0.0,
@@ -256,6 +294,34 @@ impl Tinderbox {
             play_when_preview_ready: false,
             failed_preview_revision: None,
         }
+    }
+
+    pub(super) fn resize_world_to_fit(&mut self, available: egui::Vec2) {
+        let (width, height) = fitted_world_dimensions(available, self.cell_size);
+        let target = (width, height);
+        if target == (self.world.width(), self.world.height()) {
+            self.resize_target = None;
+            return;
+        }
+        if self.resize_target != Some(target) {
+            self.resize_target = Some(target);
+            self.resize_target_since = Instant::now();
+            return;
+        }
+        if self.resize_target_since.elapsed() < std::time::Duration::from_millis(120) {
+            return;
+        }
+        self.resize_target = None;
+        let mut level = self.level.clone();
+        level.width = width;
+        level.height = height;
+        let Ok(mut resized) = level.generate(self.world.rules().clone()) else {
+            return;
+        };
+        resized.preserve_resize_state_from(&self.world);
+        self.level.width = width;
+        self.level.height = height;
+        self.install_world(resized);
     }
 
     fn resize_world_texture(&mut self) {

@@ -105,9 +105,12 @@ impl LevelSetup {
             .resizable(true)
             .default_width(760.0)
             .default_height(640.0)
-            .max_height((ctx.screen_rect().height() - 64.0).max(180.0))
+            .max_height((ctx.screen_rect().height() - 32.0).max(180.0))
+            .max_width((ctx.screen_rect().width() - 32.0).max(320.0))
+            .default_pos(egui::pos2(48.0, 48.0))
+            .movable(true)
+            .constrain(true)
             .vscroll(true)
-            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
                 ui.label("Edit the stage and watch the world preview update. Cancel restores your game.");
                 ui.horizontal_wrapped(|ui| {
@@ -129,11 +132,20 @@ impl LevelSetup {
                     }
                     if ui.button("Cancel / return to game").clicked() { action = Some(SetupAction::Cancel); }
                 });
+                ui.checkbox(&mut self.draft.fit_window, "Fit world to canvas");
+                ui.collapsing("Advanced world size override", |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Width");
+                        ui.add(egui::DragValue::new(&mut self.draft.width).range(16..=MAX_LEVEL_DIMENSION));
+                        ui.label("Height");
+                        ui.add(egui::DragValue::new(&mut self.draft.height).range(16..=MAX_LEVEL_DIMENSION));
+                        if ui.button("Use these dimensions").clicked() {
+                            self.draft.fit_window = false;
+                        }
+                    });
+                    ui.small("Disable Fit world to canvas to use these dimensions as an explicit recipe size.");
+                });
                 ui.horizontal_wrapped(|ui| {
-                    ui.label("Width");
-                    ui.add(egui::DragValue::new(&mut self.draft.width).range(16..=MAX_LEVEL_DIMENSION));
-                    ui.label("Height");
-                    ui.add(egui::DragValue::new(&mut self.draft.height).range(16..=MAX_LEVEL_DIMENSION));
                     ui.label("Seed");
                     if ui.add(egui::TextEdit::singleline(&mut self.seed_text).desired_width(145.0)).changed()
                         && let Ok(seed) = self.seed_text.parse::<u64>() {
