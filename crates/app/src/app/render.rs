@@ -12,6 +12,7 @@ pub(super) fn fitted_size(world: &World, available: Vec2) -> Vec2 {
 
 /// Uploads only changed regions, preserving excess work for later frames.
 pub(super) fn upload_dirty(app: &mut Tinderbox) {
+    let sky = sky_mask(&app.world);
     let mut uploaded = 0;
     for _ in 0..MAX_TEXTURE_REGIONS_PER_FRAME {
         let Some(region) = app.world.pop_dirty_region() else {
@@ -23,6 +24,7 @@ pub(super) fn upload_dirty(app: &mut Tinderbox) {
             app.overlay,
             app.level.ambient_humidity,
             app.sim_seconds,
+            &sky,
         );
         app.world_texture
             .set_partial([region.x, region.y], image, TextureOptions::NEAREST);
@@ -37,8 +39,8 @@ fn region_image(
     overlay: Overlay,
     ambient_humidity: u8,
     sim_seconds: f64,
+    sky: &[bool],
 ) -> ColorImage {
-    let cloud = world.rules().id("cloud").unwrap_or(usize::MAX);
     let rain = world.rules().id("rain").unwrap_or(usize::MAX);
     let cloud_fade = cloud_fade(sim_seconds);
     let mut image = ColorImage::new([region.width, region.height], Color32::BLACK);
@@ -53,19 +55,37 @@ fn region_image(
                     let world_x = region.x + x;
                     let world_y = region.y + y;
                     *pixel = if element.name == "cloud" {
-                        cloud_color(
-                            world,
-                            world_x,
-                            world_y,
-                            base,
-                            cloud,
-                            ambient_humidity,
-                            cloud_fade,
-                        )
+                        if !sky[index] {
+                            let air = world.rules().id("air").unwrap();
+                            let color = world.rules().elements[air].color;
+                            Color32::from_rgb(color[0], color[1], color[2])
+                        } else {
+                            cloud_color(
+                                world,
+                                world_x,
+                                world_y,
+                                base,
+                                ambient_humidity,
+                                cloud_fade,
+                                sim_seconds,
+                            )
+                        }
                     } else if element.name == "air" {
-                        rain_streak(world, world_x, world_y, rain).unwrap_or_else(|| {
-                            cloud_layer(world, world_x, world_y, base, ambient_humidity, cloud_fade)
-                        })
+                        if !sky[index] {
+                            base
+                        } else {
+                            rain_streak(world, world_x, world_y, rain).unwrap_or_else(|| {
+                                cloud_layer(
+                                    world,
+                                    world_x,
+                                    world_y,
+                                    base,
+                                    ambient_humidity,
+                                    cloud_fade,
+                                    sim_seconds,
+                                )
+                            })
+                        }
                     } else if element.name == "rain" {
                         rain_streak(world, world_x, world_y, rain).unwrap_or(base)
                     } else {
@@ -96,10 +116,11 @@ fn cloud_color(
     x: usize,
     y: usize,
     base: Color32,
-    cloud: usize,
     ambient_humidity: u8,
     cloud_fade: f32,
+    sim_seconds: f64,
 ) -> Color32 {
+    let cloud = world.rules().id("cloud").unwrap_or(usize::MAX);
     let mut neighbors = 0u8;
     for dy in -1isize..=1 {
         for dx in -1isize..=1 {
@@ -124,14 +145,16 @@ fn cloud_color(
                 Color32::from_rgb(element.color[0], element.color[1], element.color[2]),
                 ambient_humidity,
                 cloud_fade,
+                sim_seconds,
             );
         }
     }
     // Clouds darken as local vapor is depleted; clustered cells form softer edges.
     let humidity = world.atmosphere_at(x, y).map_or(45.0, |air| air.humidity);
     let maturity = ((100.0 - humidity) / 100.0).clamp(0.0, 1.0);
+    let heaviness = cloud_weather_profile(humidity, ambient_humidity, cloud_fade).1;
     let density = neighbors as f32 / 8.0;
-    let shade = 1.0 - maturity * 0.24 + density * 0.08;
+    let shade = 1.0 - maturity * 0.18 - heaviness * 0.20 + density * 0.05;
     Color32::from_rgb(
         (f32::from(base.r()) * shade).clamp(0.0, 255.0) as u8,
         (f32::from(base.g()) * shade).clamp(0.0, 255.0) as u8,
@@ -146,13 +169,15 @@ fn cloud_layer(
     base: Color32,
     ambient_humidity: u8,
     cloud_fade: f32,
+    sim_seconds: f64,
 ) -> Color32 {
     let humidity = interpolated_humidity(world, x, y);
     if humidity < 45.0 {
         return base;
     }
     let (coverage, heaviness) = cloud_weather_profile(humidity, ambient_humidity, cloud_fade);
-    let noise = cloud_noise(x as f32, y as f32);
+    let offset = cloud_drift_offset(world.wind(), sim_seconds);
+    let noise = cloud_noise(x as f32 - offset, y as f32);
     let edge = (coverage * 0.24).max(0.018);
     let mask = ((coverage + edge - noise) / edge).clamp(0.0, 1.0);
     let amount = mask * 0.72;
@@ -171,6 +196,73 @@ fn cloud_layer(
         (f32::from(base.g()) * (1.0 - amount) + cloud_color[1] * amount) as u8,
         (f32::from(base.b()) * (1.0 - amount) + cloud_color[2] * amount) as u8,
     )
+}
+
+fn cloud_drift_offset(wind: tinderbox_sim::Wind, sim_seconds: f64) -> f32 {
+    let horizontal = match wind.direction {
+        tinderbox_sim::WindDirection::West => -1.0,
+        tinderbox_sim::WindDirection::Calm => 0.0,
+        tinderbox_sim::WindDirection::East => 1.0,
+    };
+    let wind_speed = horizontal * f32::from(wind.strength.min(4)) * 2.0;
+    let calm_evolution = 0.15;
+    (wind_speed + calm_evolution) * sim_seconds.max(0.0) as f32
+}
+
+fn sky_mask(world: &World) -> Vec<bool> {
+    let air = world.rules().id("air").unwrap_or(usize::MAX);
+    let cloud = world.rules().id("cloud").unwrap_or(usize::MAX);
+    let rain = world.rules().id("rain").unwrap_or(usize::MAX);
+    sky_mask_from_cells(
+        world.width(),
+        world.height(),
+        world.cells(),
+        air,
+        cloud,
+        rain,
+    )
+}
+
+fn sky_mask_from_cells(
+    width: usize,
+    height: usize,
+    cells: &[tinderbox_sim::Cell],
+    air: usize,
+    cloud: usize,
+    rain: usize,
+) -> Vec<bool> {
+    let is_open = |element| element == air || element == cloud || element == rain;
+    let mut sky = vec![false; cells.len()];
+    let mut queue = Vec::with_capacity(width);
+    for x in 0..width {
+        let index = x;
+        let element = cells[index].element;
+        if is_open(element) && !sky[index] {
+            sky[index] = true;
+            queue.push(index);
+        }
+    }
+    let mut cursor = 0;
+    while cursor < queue.len() {
+        let index = queue[cursor];
+        cursor += 1;
+        let x = index % width;
+        let y = index / width;
+        let neighbors = [
+            (x > 0).then_some(index.wrapping_sub(1)),
+            (x + 1 < width).then_some(index + 1),
+            (y > 0).then_some(index.wrapping_sub(width)),
+            (y + 1 < height).then_some(index + width),
+        ];
+        for next in neighbors.into_iter().flatten() {
+            let element = cells[next].element;
+            if !sky[next] && is_open(element) {
+                sky[next] = true;
+                queue.push(next);
+            }
+        }
+    }
+    sky
 }
 
 fn cloud_coverage(humidity: f32) -> f32 {
@@ -288,7 +380,7 @@ pub(super) fn draw_world(texture: &TextureHandle, painter: &Painter, rect: Rect)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tinderbox_sim::{DEFAULT_RULES, Rules};
+    use tinderbox_sim::{Cell, DEFAULT_RULES, Rules, Wind, WindDirection};
 
     fn cloud_coverage_at(humidity: u8, sim_seconds: f64) -> f32 {
         let mut world = World::new(256, 192, 2026, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
@@ -310,9 +402,79 @@ mod tests {
             Overlay::None,
             humidity,
             sim_seconds,
+            &sky_mask(&world),
         );
         image.pixels.iter().filter(|pixel| **pixel != base).count() as f32
             / image.pixels.len() as f32
+    }
+
+    #[test]
+    fn sky_mask_excludes_below_surface_and_enclosed_air() {
+        let (width, height) = (7, 7);
+        let (air, solid) = (0, 1);
+        let mut cells = vec![Cell::default(); width * height];
+        for cell in &mut cells {
+            cell.element = air;
+        }
+        for x in 0..width {
+            cells[5 * width + x].element = solid;
+        }
+        // A sealed air pocket sits under the terrain ridge.
+        for x in 2..=4 {
+            cells[4 * width + x].element = solid;
+            cells[3 * width + x].element = air;
+            cells[2 * width + x].element = solid;
+        }
+        cells[3 * width + 2 - 1].element = solid;
+        cells[3 * width + 4 + 1].element = solid;
+        let sky = sky_mask_from_cells(width, height, &cells, air, 2, 3);
+        assert!(!sky[6 * width + 3], "cells below the surface are not sky");
+        assert!(!sky[3 * width + 3], "enclosed air is not sky");
+        assert!(sky[width + 3], "open air connected to the top is sky");
+    }
+
+    #[test]
+    fn cloud_layer_changes_over_simulation_time() {
+        let mut world = World::new(128, 96, 2026, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+        world.set_ambient(20, 50, 21);
+        world.set_wind(WindDirection::East, 1);
+        let sky = sky_mask(&world);
+        let region = DirtyRegion {
+            x: 0,
+            y: 0,
+            width: world.width(),
+            height: world.height(),
+        };
+        let before = region_image(&world, region, Overlay::None, 50, 0.0, &sky);
+        let after = region_image(&world, region, Overlay::None, 50, 10.0, &sky);
+        assert!(
+            before
+                .pixels
+                .iter()
+                .zip(after.pixels.iter())
+                .any(|(a, b)| a != b)
+        );
+    }
+
+    #[test]
+    fn cloud_drift_follows_wind_sign_and_evolves_in_calm_air() {
+        let east = cloud_drift_offset(
+            Wind {
+                direction: WindDirection::East,
+                strength: 2,
+            },
+            10.0,
+        );
+        let west = cloud_drift_offset(
+            Wind {
+                direction: WindDirection::West,
+                strength: 2,
+            },
+            10.0,
+        );
+        let calm = cloud_drift_offset(Wind::default(), 10.0);
+        assert!(east > calm && calm > west);
+        assert!(cloud_drift_offset(Wind::default(), 20.0) > calm);
     }
 
     #[test]

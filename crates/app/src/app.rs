@@ -695,8 +695,13 @@ impl Tinderbox {
         self.peak_carry_work = self.peak_carry_work.max(self.work.pending.ceil() as usize);
         let budget = self.work.take();
         if budget > 0 {
+            let previous_cloud_second = self.sim_seconds.floor();
             let completed = self.world.step(budget);
             self.sim_seconds += completed as f64 / WORK_UNITS_PER_SECOND;
+            if self.sim_seconds.floor() > previous_cloud_second {
+                // Cloud noise and weather fade depend on simulation time, not cell changes.
+                self.world.mark_all_dirty();
+            }
         }
     }
 }
