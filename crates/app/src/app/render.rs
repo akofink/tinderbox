@@ -4,7 +4,7 @@ use eframe::egui::{
     Color32, ColorImage, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, TextureHandle,
     TextureOptions, Vec2,
 };
-use tinderbox_sim::{DirtyRegion, World};
+use tinderbox_sim::{DirtyRegion, Motion, World};
 
 pub(super) fn fitted_size(world: &World, available: Vec2) -> Vec2 {
     let cell = (available.x / world.width() as f32)
@@ -197,8 +197,8 @@ fn cloud_layer(
     let (coverage, heaviness) =
         cloud_weather_profile(humidity, params.ambient_humidity, params.cloud_fade);
     let offset = cloud_drift_offset(world.wind(), params.sim_seconds);
-    let noise = cloud_noise(x as f32 - offset, y as f32);
-    let mask = cloud_mask(noise, coverage);
+    let coarse_cells = world.width() < 160 || world.height() < 100;
+    let mask = cloud_cell_mask(x as f32, y as f32, offset, coverage, coarse_cells);
     let amount = mask * 0.72 * params.altitude;
     if amount <= 0.0 {
         return base;
@@ -217,6 +217,18 @@ fn cloud_mask(noise: f32, coverage: f32) -> f32 {
     let edge = (coverage * 0.65).max(0.045);
     let transition = ((coverage + edge * 0.5 - noise) / edge).clamp(0.0, 1.0);
     transition * transition * (3.0 - 2.0 * transition)
+}
+
+fn cloud_cell_mask(x: f32, y: f32, offset: f32, coverage: f32, coarse_cells: bool) -> f32 {
+    if !coarse_cells {
+        return cloud_mask(cloud_noise(x - offset, y), coverage);
+    }
+    const SAMPLES: [(f32, f32); 4] = [(-0.25, -0.25), (0.25, -0.25), (-0.25, 0.25), (0.25, 0.25)];
+    SAMPLES
+        .iter()
+        .map(|(dx, dy)| cloud_mask(cloud_noise(x + dx - offset, y + dy), coverage))
+        .sum::<f32>()
+        / SAMPLES.len() as f32
 }
 
 fn heavy_cloud_color(base: Color32, heaviness: f32, core: f32) -> Color32 {
@@ -247,18 +259,26 @@ fn cloud_drift_offset(wind: tinderbox_sim::Wind, sim_seconds: f64) -> f32 {
 }
 
 fn smoothed_skyline(world: &World) -> Vec<f32> {
-    let air = world.rules().id("air").unwrap_or(usize::MAX);
-    let cloud = world.rules().id("cloud").unwrap_or(usize::MAX);
-    let rain = world.rules().id("rain").unwrap_or(usize::MAX);
-    let is_open = |element| element == air || element == cloud || element == rain;
     let raw = (0..world.width())
         .map(|x| {
             (0..world.height())
-                .find(|&y| !is_open(world.cells()[y * world.width() + x].element))
+                .find(|&y| {
+                    let element =
+                        &world.rules().elements[world.cells()[y * world.width() + x].element];
+                    is_skyline_obstacle(element.name.as_str(), element.motion)
+                })
                 .unwrap_or(world.height()) as f32
         })
         .collect::<Vec<_>>();
     smooth_skyline(&raw)
+}
+
+fn is_skyline_obstacle(name: &str, motion: Motion) -> bool {
+    motion != Motion::Gas
+        && !matches!(
+            name,
+            "air" | "rain" | "fire" | "oil_fire" | "sand" | "ash" | "seed"
+        )
 }
 
 fn smooth_skyline(raw: &[f32]) -> Vec<f32> {
@@ -680,7 +700,11 @@ fn draw_fungus(painter: &Painter, center: Pos2, cell_width: f32, cell_height: f3
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tinderbox_sim::{Cell, DEFAULT_RULES, Rules, Wind, WindDirection};
+    use std::collections::BTreeMap;
+    use tinderbox_sim::{
+        Cell, DEFAULT_RULES, Rules, Wind, WindDirection,
+        level::{Generator, Level},
+    };
 
     fn cloud_coverage_at(humidity: u8, sim_seconds: f64) -> f32 {
         let mut world = World::new(256, 192, 2026, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
@@ -735,12 +759,38 @@ mod tests {
     }
 
     #[test]
+    fn transient_weather_does_not_raise_the_cloud_skyline() {
+        assert!(!is_skyline_obstacle("air", Motion::Static));
+        assert!(!is_skyline_obstacle("cloud", Motion::Gas));
+        assert!(!is_skyline_obstacle("steam", Motion::Gas));
+        assert!(!is_skyline_obstacle("smoke", Motion::Gas));
+        assert!(!is_skyline_obstacle("rain", Motion::Fall));
+        assert!(!is_skyline_obstacle("fire", Motion::Static));
+        assert!(is_skyline_obstacle("tree", Motion::Static));
+        assert!(is_skyline_obstacle("wood", Motion::Fall));
+        assert!(is_skyline_obstacle("water", Motion::Liquid));
+        assert!(is_skyline_obstacle("stone", Motion::Static));
+    }
+
+    #[test]
     fn skyline_smoothing_and_altitude_fade_keep_clouds_above_obstacles() {
         let smoothed = smooth_skyline(&[40.0, 40.0, 10.0, 40.0, 40.0]);
         assert!(smoothed.iter().all(|height| *height == 10.0));
         assert_eq!(cloud_altitude_weight(30, 40.0), 0.0);
         assert_eq!(cloud_altitude_weight(0, 40.0), 1.0);
         assert!(cloud_altitude_weight(20, 40.0) > 0.0);
+    }
+
+    #[test]
+    fn coarse_cell_cloud_mask_averages_subcell_coverage() {
+        let (x, y, offset, coverage) = (34.0, 18.0, 7.5, 0.42);
+        let coarse = cloud_cell_mask(x, y, offset, coverage, true);
+        let fine = cloud_cell_mask(x, y, offset, coverage, false);
+        assert!((0.0..=1.0).contains(&coarse));
+        assert_ne!(
+            coarse, fine,
+            "coarse rendering should integrate subcell edges"
+        );
     }
 
     #[test]
@@ -898,6 +948,92 @@ mod tests {
         let calm = cloud_drift_offset(Wind::default(), 10.0);
         assert!(east > calm && calm > west);
         assert!(cloud_drift_offset(Wind::default(), 20.0) > calm);
+    }
+
+    fn weather_capture_coverage(world: &World, sim_seconds: f64) -> f32 {
+        const CAPTURE_X: usize = 8;
+        const CAPTURE_Y: usize = 17;
+        const CAPTURE_WIDTH: usize = 383;
+        const CAPTURE_HEIGHT: usize = 102;
+        let air = world.rules().id("air").unwrap();
+        let color = world.rules().elements[air].color;
+        let background = Color32::from_rgb(color[0], color[1], color[2]);
+        let luminance = |pixel: Color32| {
+            0.2126 * f32::from(pixel.r())
+                + 0.7152 * f32::from(pixel.g())
+                + 0.0722 * f32::from(pixel.b())
+        };
+        let image = region_image(
+            world,
+            DirtyRegion {
+                x: CAPTURE_X,
+                y: CAPTURE_Y,
+                width: CAPTURE_WIDTH,
+                height: CAPTURE_HEIGHT,
+            },
+            Overlay::None,
+            100,
+            sim_seconds,
+            &sky_mask(world),
+            &smoothed_skyline(world),
+        );
+        let sky_luminance = luminance(background);
+        image
+            .pixels
+            .iter()
+            .filter(|pixel| luminance(**pixel) > sky_luminance + 15.0)
+            .count() as f32
+            / image.pixels.len() as f32
+    }
+
+    fn full_humidity_weather_level() -> Level {
+        let mut amounts = BTreeMap::new();
+        amounts.insert("stone".into(), 100);
+        amounts.insert("soil".into(), 100);
+        amounts.insert("tree".into(), 75);
+        Level {
+            version: 1,
+            width: 400,
+            height: 250,
+            fit_window: false,
+            seed: 731,
+            generator: Generator::Hills,
+            wind: Wind {
+                direction: WindDirection::East,
+                strength: 1,
+            },
+            ambient_temperature: 20,
+            ambient_humidity: 100,
+            ambient_oxygen: 21,
+            amounts,
+            spark: true,
+            boat: false,
+            boat_sand: 0,
+            boat_burning: false,
+        }
+    }
+
+    #[test]
+    fn full_humidity_cloud_coverage_stays_substantial_through_thirty_seconds() {
+        let mut world = full_humidity_weather_level()
+            .generate(Rules::load(DEFAULT_RULES).unwrap())
+            .unwrap();
+        let mut coverage = Vec::new();
+        for frame in 1..=30 * 60 {
+            world.step(12_000);
+            if frame % 600 == 0 {
+                let seconds = frame / 60;
+                coverage.push(weather_capture_coverage(&world, seconds as f64));
+            }
+        }
+        assert_eq!(coverage.len(), 3);
+        for (seconds, fraction) in [10, 20, 30].into_iter().zip(coverage) {
+            assert!(
+                fraction >= 0.18,
+                "100% humidity cloud coverage at {seconds}s should remain substantial, got {:.1}%",
+                fraction * 100.0
+            );
+        }
     }
 
     #[test]
