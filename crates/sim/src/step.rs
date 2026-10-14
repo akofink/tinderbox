@@ -542,7 +542,7 @@ impl World {
                 * 0.12;
         let can_enter_air =
             other == air && (downward || self.rules.elements[moving].motion == Motion::Gas);
-        if can_enter_air || (can_displace && self.random_f32() < chance) {
+        if can_enter_air || (can_displace && self.random_density_f32() < chance) {
             self.cells.swap(a, b);
             self.mark_cell_dirty(a);
             self.mark_cell_dirty(b);
@@ -651,5 +651,15 @@ impl World {
 
     fn random_f32(&mut self) -> f32 {
         (self.random_u64() >> 40) as f32 / (1u32 << 24) as f32
+    }
+
+    /// Density motion has an independent stream so new settling choices cannot retune reactions.
+    fn random_density_f32(&mut self) -> f32 {
+        let mut x = self.density_rng;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.density_rng = x;
+        (x >> 40) as f32 / (1u32 << 24) as f32
     }
 }
