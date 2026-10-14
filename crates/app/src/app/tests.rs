@@ -69,6 +69,58 @@ fn endless_arrow_keys_scroll_the_camera() {
 }
 
 #[test]
+fn cloud_refresh_dirties_only_the_visible_world_span() {
+    let mut app = Tinderbox::new_state(false);
+    app.camera_x = 64.0;
+    app.camera_view_width = 32.0;
+    while app.world.pop_dirty_region().is_some() {}
+
+    app.mark_visible_world_dirty();
+
+    assert!(app.world.pending_dirty_regions() < app.world.width() / 16 * app.world.height() / 16);
+    while let Some(region) = app.world.pop_dirty_region() {
+        assert!((64..96).contains(&region.x));
+    }
+}
+
+#[test]
+fn camera_pan_dirties_only_newly_visible_columns() {
+    let mut app = Tinderbox::new_state(false);
+    let mut level = app.level.clone();
+    level.mode = LevelMode::Endless;
+    level.width = 1024;
+    level.height = 64;
+    app.set_level(level).unwrap();
+    app.camera_initialized = true;
+    app.camera_x = 320.0;
+    app.camera_view_width = 32.0;
+    while app.world.pop_dirty_region().is_some() {}
+
+    app.pan_camera(3.0, 32.0);
+
+    let regions: Vec<_> = std::iter::from_fn(|| app.world.pop_dirty_region()).collect();
+    assert_eq!(regions.len(), 4);
+    assert!(regions.iter().all(|region| region.x == 352));
+}
+
+#[test]
+fn smooth_play_pans_by_the_measured_endless_viewport() {
+    let mut app = Tinderbox::new_state(true);
+    let mut level = app.level.clone();
+    level.mode = LevelMode::Endless;
+    level.width = 2048;
+    level.height = 64;
+    app.set_level(level).unwrap();
+    app.center_camera_on_origin(128.0);
+    let before = app.world_start_chunk * ENDLESS_CHUNK_WIDTH as i64 + app.camera_x as i64;
+
+    app.simulate_frame(&egui::Context::default(), FIXED_FRAME_DT, FIXED_FRAME_DT);
+
+    let after = app.world_start_chunk * ENDLESS_CHUNK_WIDTH as i64 + app.camera_x as i64;
+    assert_eq!(after, before + 3);
+}
+
+#[test]
 fn endless_shift_drag_pans_without_painting() {
     let mut app = Tinderbox::new_state(false);
     let mut level = app.level.clone();

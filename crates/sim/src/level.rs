@@ -327,6 +327,7 @@ impl Level {
             });
         }
         let waterline = height * 3 / 4;
+        let water_amount = self.amounts.get("water").copied().unwrap_or(0);
         let columns: Vec<_> = (0..width)
             .map(|local_x| {
                 let world_x = index
@@ -340,7 +341,7 @@ impl Level {
                     .saturating_sub(column.abs_diff(1))
                     .max(2);
                 let flooded =
-                    ground > waterline && self.amounts.get("water").copied().unwrap_or(0) > 0;
+                    ground > waterline && water_column_selected(self.seed, world_x, water_amount);
                 (world_x, ground, canopy, flooded)
             })
             .collect();
@@ -356,15 +357,21 @@ impl Level {
         materials.sort_by(|a, b| (a.0, &a.2.name).cmp(&(b.0, &b.2.name)));
         for (_, id, element, amount) in materials {
             let salt = name_hash(&element.name);
-            let coherent_density = matches!(element.name.as_str(), "tree" | "sand" | "ash");
             for (local_x, &(world_x, ground, canopy, flooded)) in columns.iter().enumerate() {
                 let column = world_x.rem_euclid(4) as usize;
-                if coherent_density {
-                    let group_width = if element.name == "tree" { 4 } else { 8 };
-                    let group_x = world_x.div_euclid(group_width);
-                    if sample_signed(self.seed ^ salt, group_x, 0) % 100 >= u64::from(amount) {
-                        continue;
+                let group_accepts = match element.name.as_str() {
+                    "tree" => {
+                        let group_x = world_x.div_euclid(4);
+                        sample_signed(self.seed ^ salt, group_x, 0) % 100 < u64::from(amount)
                     }
+                    "ash" => {
+                        let group_x = world_x.div_euclid(8);
+                        sample_signed(self.seed ^ salt, group_x, 0) % 100 < u64::from(amount)
+                    }
+                    _ => true,
+                };
+                if !group_accepts {
+                    continue;
                 }
                 let tree_age = (element.name == "tree" && element.lifetime > 0)
                     .then(|| {
@@ -400,11 +407,19 @@ impl Level {
                             Motion::Gas => y < ground && y >= height / 3 && y < height / 2,
                         },
                     };
-                    if eligible
-                        && (coherent_density
-                            || sample_signed(self.seed ^ salt, world_x, y as i64) % 100
-                                < u64::from(amount))
-                    {
+                    let density_matches = match element.name.as_str() {
+                        "tree" | "ash" => true,
+                        "sand" => {
+                            coherent_noise_2d(self.seed ^ salt, world_x, y as i64, 12, 6)
+                                < u64::from(amount) * NOISE_SCALE / 100
+                        }
+                        "water" => flooded,
+                        _ => {
+                            sample_signed(self.seed ^ salt, world_x, y as i64) % 100
+                                < u64::from(amount)
+                        }
+                    };
+                    if eligible && density_matches {
                         let cell = &mut cells[y * width + local_x];
                         cell.element = id;
                         if let Some(tree_age) = tree_age {
@@ -544,6 +559,7 @@ impl Level {
         }
         let surface: Vec<usize> = (0..self.width).map(|x| self.surface(x)).collect();
         let waterline = self.height * 3 / 4;
+        let water_amount = self.amounts.get("water").copied().unwrap_or(0);
         // Layers are ordered by geometry, never by ruleset IDs or map iteration order.
         let mut materials: Vec<_> = world
             .rules
@@ -560,7 +576,7 @@ impl Level {
             let salt = name_hash(&element.name);
             for (x, &ground) in surface.iter().enumerate() {
                 let flooded =
-                    ground > waterline && self.amounts.get("water").copied().unwrap_or(0) > 0;
+                    ground > waterline && water_column_selected(self.seed, x as i64, water_amount);
                 let canopy = (self.height / 12
                     + (sample(self.seed ^ name_hash("tree"), x / 4, 1)
                         % (self.height / 8).max(1) as u64) as usize)
@@ -582,7 +598,8 @@ impl Level {
                         "plant" | "grass" => !flooded && y < ground && y + 3 >= ground,
                         "water" => {
                             let edge = x == 0 || x + 1 == self.width;
-                            y >= waterline
+                            flooded
+                                && y >= waterline
                                 && y < ground
                                 && (!edge || y >= ground.saturating_sub(MAX_EDGE_WATER_COLUMN))
                         }
@@ -597,15 +614,19 @@ impl Level {
                             }
                         },
                     };
-                    // Column-coherent forest clumps; per-cell density for other materials.
-                    let (density_x, density_y) = if element.name == "tree" {
-                        (x / 4, 0)
-                    } else {
-                        (x, y)
+                    let density_matches = match element.name.as_str() {
+                        "tree" => sample(self.seed ^ salt, x / 4, 0) % 100 < u64::from(amount),
+                        "sand" => {
+                            coherent_noise_2d(self.seed ^ salt, x as i64, y as i64, 12, 6)
+                                < u64::from(amount) * NOISE_SCALE / 100
+                        }
+                        "water" => flooded,
+                        _ => {
+                            sample_signed(self.seed ^ salt, x as i64, y as i64) % 100
+                                < u64::from(amount)
+                        }
                     };
-                    if eligible
-                        && sample(self.seed ^ salt, density_x, density_y) % 100 < u64::from(amount)
-                    {
+                    if eligible && density_matches {
                         let index = y * self.width + x;
                         world.cells[index].element = id;
                         world.cells[index].age = 0;
@@ -1006,11 +1027,60 @@ fn layer(name: &str, motion: Motion) -> u8 {
         },
     }
 }
+const NOISE_SCALE: u64 = 1024;
+const WATER_POOL_SPAN: i64 = 32;
+
 fn name_hash(name: &str) -> u64 {
     name.bytes().fold(0xcbf29ce484222325, |h, b| {
         (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
     })
 }
+
+fn water_column_selected(seed: u64, x: i64, amount: u8) -> bool {
+    if amount == 0 {
+        return false;
+    }
+    coherent_noise_1d(seed ^ name_hash("water"), x, WATER_POOL_SPAN)
+        < u64::from(amount) * NOISE_SCALE / 100
+}
+
+fn coherent_noise_1d(seed: u64, x: i64, span: i64) -> u64 {
+    let section = x.div_euclid(span);
+    let offset = x.rem_euclid(span);
+    let weight = smooth_weight(offset, span);
+    let a = sample_signed(seed, section, 0) % NOISE_SCALE;
+    let b = sample_signed(seed, section.wrapping_add(1), 0) % NOISE_SCALE;
+    interpolate(a, b, weight)
+}
+
+fn coherent_noise_2d(seed: u64, x: i64, y: i64, span_x: i64, span_y: i64) -> u64 {
+    let section_x = x.div_euclid(span_x);
+    let section_y = y.div_euclid(span_y);
+    let weight_x = smooth_weight(x.rem_euclid(span_x), span_x);
+    let weight_y = smooth_weight(y.rem_euclid(span_y), span_y);
+    let top = interpolate(
+        sample_signed(seed, section_x, section_y) % NOISE_SCALE,
+        sample_signed(seed, section_x.wrapping_add(1), section_y) % NOISE_SCALE,
+        weight_x,
+    );
+    let bottom = interpolate(
+        sample_signed(seed, section_x, section_y.wrapping_add(1)) % NOISE_SCALE,
+        sample_signed(seed, section_x.wrapping_add(1), section_y.wrapping_add(1)) % NOISE_SCALE,
+        weight_x,
+    );
+    interpolate(top, bottom, weight_y)
+}
+
+fn smooth_weight(offset: i64, span: i64) -> u64 {
+    let t = offset as u64 * NOISE_SCALE / span as u64;
+    let squared = t * t / NOISE_SCALE;
+    squared * (3 * NOISE_SCALE - 2 * t) / NOISE_SCALE
+}
+
+fn interpolate(a: u64, b: u64, weight: u64) -> u64 {
+    (a * (NOISE_SCALE - weight) + b * weight) / NOISE_SCALE
+}
+
 fn endless_surface(seed: u64, x: i64, height: usize, generator: Generator) -> usize {
     let span = 96i64;
     let section = x.div_euclid(span);
@@ -1059,30 +1129,104 @@ mod tests {
     }
 
     #[test]
-    fn endless_sand_forms_contiguous_layers_instead_of_cell_speckles() {
+    fn endless_sand_forms_irregular_connected_lenses() {
         let rules = rules();
-        let mut level = Preset::DryForest.level(&rules, 128, 96);
+        let mut level = Preset::DryForest.level(&rules, 128, 240);
         level.amounts.clear();
         level.amounts.insert("stone".into(), 100);
         level.amounts.insert("soil".into(), 100);
-        level.amounts.insert("sand".into(), 50);
+        level.amounts.insert("sand".into(), 35);
         let chunk = level.generate_chunk(-1, &rules).unwrap();
         let sand = rules.id("sand").unwrap();
+        let layer_depth = (chunk.height / 16).max(2);
         let mut sand_columns = 0;
+        let mut partial_columns = 0;
+        let mut connected_edges = 0;
         for x in 0..chunk.width {
-            let mut in_layer = false;
-            let mut layer_ended = false;
-            for y in 0..chunk.height {
-                if chunk.cell(x, y).unwrap().element == sand {
-                    assert!(!layer_ended, "sand layer at column {x} contains a gap");
-                    in_layer = true;
-                } else if in_layer {
-                    layer_ended = true;
-                }
+            let ground =
+                endless_surface(level.seed, -128 + x as i64, chunk.height, level.generator);
+            let count = (ground..ground + layer_depth)
+                .filter(|&y| chunk.cell(x, y).unwrap().element == sand)
+                .count();
+            sand_columns += usize::from(count > 0);
+            partial_columns += usize::from(count > 0 && count < layer_depth);
+            if x + 1 < chunk.width {
+                connected_edges += (ground..ground + layer_depth)
+                    .filter(|&y| {
+                        chunk.cell(x, y).unwrap().element == sand
+                            && chunk.cell(x + 1, y).unwrap().element == sand
+                    })
+                    .count();
             }
-            sand_columns += usize::from(in_layer);
         }
         assert!(sand_columns > 0, "the seeded chunk should contain sand");
+        assert!(
+            sand_columns < chunk.width,
+            "lenses should leave clear columns"
+        );
+        assert!(
+            partial_columns > 0,
+            "lenses should have uneven outlines, not slabs"
+        );
+        assert!(
+            connected_edges > 0,
+            "lenses should include connected neighboring cells"
+        );
+    }
+
+    #[test]
+    fn endless_hills_keep_forest_clearings_around_settled_pools() {
+        let rules = rules();
+        let mut level = Preset::DryForest.level(&rules, 1024, 240);
+        level.mode = LevelMode::Endless;
+        level.amounts.clear();
+        level.amounts.insert("stone".into(), 100);
+        level.amounts.insert("soil".into(), 100);
+        level.amounts.insert("tree".into(), 65);
+        level.amounts.insert("water".into(), 45);
+        let chunk = level.generate_chunk(-2, &rules).unwrap();
+        let tree = rules.id("tree").unwrap();
+        let water = rules.id("water").unwrap();
+        let tree_columns = (0..chunk.width)
+            .filter(|&x| (0..chunk.height).any(|y| chunk.cell(x, y).unwrap().element == tree))
+            .count();
+        let waterline = chunk.height * 3 / 4;
+        let water_columns = (0..chunk.width)
+            .filter(|&x| chunk.cell(x, waterline).unwrap().element == water)
+            .count();
+        let mut longest_pool = 0;
+        let mut current_pool = 0;
+        for x in 0..chunk.width {
+            if chunk.cell(x, waterline).unwrap().element == water {
+                current_pool += 1;
+            } else {
+                longest_pool = longest_pool.max(current_pool);
+                current_pool = 0;
+            }
+        }
+        longest_pool = longest_pool.max(current_pool);
+        assert!(tree_columns >= 20, "chunk -2 should contain forest clumps");
+        assert!(
+            tree_columns < chunk.width,
+            "forest clumps should leave clearings"
+        );
+        assert!(water_columns > 0, "the seeded basin should contain a pool");
+        assert!(
+            longest_pool >= 8,
+            "water should form a lake, not isolated columns"
+        );
+        for x in 0..chunk.width {
+            let world_x = -2 * ENDLESS_CHUNK_WIDTH as i64 + x as i64;
+            let ground = endless_surface(level.seed, world_x, chunk.height, level.generator);
+            let selected = water_column_selected(level.seed, world_x, 45);
+            for y in waterline..ground {
+                assert_eq!(
+                    chunk.cell(x, y).unwrap().element == water,
+                    selected,
+                    "water column at world x={world_x} should be fully settled"
+                );
+            }
+        }
     }
 
     #[test]
@@ -1146,6 +1290,31 @@ mod tests {
         changed_seed.seed = changed_seed.seed.wrapping_add(1);
         assert_ne!(changed_seed.generate_chunk(8, &rules).unwrap(), east);
         assert_eq!(east.cells.len(), ENDLESS_CHUNK_WIDTH * east.height);
+    }
+
+    #[test]
+    fn coherent_material_fields_match_the_contiguous_chunk_region() {
+        let rules = rules();
+        let mut level = Preset::DryForest.level(&rules, 1024, 240);
+        level.amounts.clear();
+        level.amounts.insert("stone".into(), 100);
+        level.amounts.insert("soil".into(), 100);
+        level.amounts.insert("tree".into(), 65);
+        level.amounts.insert("sand".into(), 35);
+        level.amounts.insert("water".into(), 45);
+        let region = level.generate_endless_region_at(-1, 2, &rules).unwrap();
+        for (offset, chunk_index) in [-1, 0].into_iter().enumerate() {
+            let chunk = level.generate_chunk(chunk_index, &rules).unwrap();
+            for y in 0..chunk.height {
+                for x in 0..chunk.width {
+                    assert_eq!(
+                        chunk.cell(x, y).unwrap(),
+                        region.cells()[y * region.width() + offset * chunk.width + x],
+                        "chunk {chunk_index} differs from its contiguous-region cells at ({x},{y})"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -1256,6 +1425,52 @@ mod tests {
                 "water generation remains bounded"
             );
         }
+    }
+
+    #[test]
+    fn fixed_hills_water_forms_level_pools_at_reasonable_volume() {
+        let rules = rules();
+        let mut level = Preset::DryForest.level(&rules, 320, 240);
+        level.amounts.clear();
+        level.amounts.insert("stone".into(), 100);
+        level.amounts.insert("soil".into(), 100);
+        level.amounts.insert("water".into(), 45);
+        let world = level.generate(rules.clone()).unwrap();
+        let water = rules.id("water").unwrap();
+        let waterline = level.height * 3 / 4;
+        let mut longest_pool = 0;
+        let mut current_pool = 0;
+        for x in 1..level.width - 1 {
+            if world.cells()[waterline * world.width() + x].element == water {
+                current_pool += 1;
+            } else {
+                longest_pool = longest_pool.max(current_pool);
+                current_pool = 0;
+            }
+        }
+        longest_pool = longest_pool.max(current_pool);
+        assert!(
+            longest_pool >= 6,
+            "fixed Hills should generate visible pools"
+        );
+        for x in 1..level.width - 1 {
+            let ground = level.surface(x);
+            let selected = ground > waterline && water_column_selected(level.seed, x as i64, 45);
+            for y in waterline..ground {
+                assert_eq!(
+                    world.cells()[y * world.width() + x].element == water,
+                    selected,
+                    "water column x={x} should be fully settled"
+                );
+            }
+        }
+        let water_cells = world
+            .cells()
+            .iter()
+            .filter(|cell| cell.element == water)
+            .count();
+        assert!(water_cells > 0, "the seeded hills should contain pools");
+        assert!(water_cells < world.width() * world.height() / 8);
     }
 
     #[test]

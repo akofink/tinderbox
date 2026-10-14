@@ -392,6 +392,19 @@ fn dirty_texture_regions_coalesce_changes_and_reset_marks_the_world() {
 }
 
 #[test]
+fn dirty_texture_rectangles_mark_only_intersecting_regions() {
+    let mut world = World::new(64, 32, 5, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    world.mark_dirty_rect(20, 2, 20, 10);
+    assert_eq!(world.pending_dirty_regions(), 2);
+    assert_eq!(world.pop_dirty_region().unwrap().x, 16);
+    assert_eq!(world.pop_dirty_region().unwrap().x, 32);
+    assert_eq!(world.pop_dirty_region(), None);
+
+    world.mark_dirty_rect(usize::MAX, 0, 1, 1);
+    assert_eq!(world.pending_dirty_regions(), 0);
+}
+
+#[test]
 fn each_update_obeys_work_budget_and_paint_is_bounded() {
     let mut world = world(1);
     assert_eq!(world.step(7), 7);
