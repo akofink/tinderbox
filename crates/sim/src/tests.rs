@@ -538,6 +538,148 @@ fn sand_sinks_through_water_to_the_bottom_without_losing_cells() {
 }
 
 #[test]
+fn sand_block_settles_into_basin_within_ten_simulated_seconds() {
+    let mut world = World::new(400, 250, 610, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    for x in 150..250 {
+        put(&mut world, x, 200, "stone");
+    }
+    for y in 10..200 {
+        put(&mut world, 150, y, "stone");
+        put(&mut world, 249, y, "stone");
+    }
+    for x in 151..249 {
+        for y in 150..200 {
+            put(&mut world, x, y, "water");
+        }
+    }
+    for x in 192..208 {
+        for y in 135..150 {
+            put(&mut world, x, y, "sand");
+        }
+    }
+    let sand = world.rules().id("sand").unwrap();
+    for _ in 0..600 {
+        world.step(12_000);
+    }
+    let sand_count = world
+        .cells()
+        .iter()
+        .filter(|cell| cell.element == sand)
+        .count();
+    let bottom_sand = world
+        .cells()
+        .iter()
+        .enumerate()
+        .filter(|(index, cell)| cell.element == sand && *index / world.width() >= 190)
+        .count();
+    assert_eq!(sand_count, 16 * 15);
+    assert!(
+        bottom_sand as f32 / sand_count as f32 >= 0.5,
+        "only {bottom_sand}/{sand_count} sand cells reached the basin bottom"
+    );
+}
+
+#[test]
+fn uneven_connected_water_surface_levels_within_ten_simulated_seconds() {
+    let mut world = World::new(400, 250, 611, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    for x in 50..350 {
+        put(&mut world, x, 200, "stone");
+    }
+    for y in 10..200 {
+        put(&mut world, 50, y, "stone");
+        put(&mut world, 349, y, "stone");
+    }
+    for x in 51..349 {
+        let surface = if x < 200 { 150 } else { 168 };
+        for y in surface..200 {
+            put(&mut world, x, y, "water");
+        }
+    }
+    for x in 190..210 {
+        for y in 140..160 {
+            put(&mut world, x, y, "sand");
+        }
+    }
+    let water = world.rules().id("water").unwrap();
+    for _ in 0..600 {
+        world.step(12_000);
+    }
+    let surfaces: Vec<_> = (51..349)
+        .map(|x| {
+            (10..200)
+                .find(|y| world.cells()[y * world.width() + x].element == water)
+                .expect("connected basin column should contain water")
+        })
+        .collect();
+    let spread = surfaces.iter().max().unwrap() - surfaces.iter().min().unwrap();
+    assert!(
+        spread <= 2,
+        "water surface varies by {spread} rows: {surfaces:?}"
+    );
+}
+
+#[test]
+fn density_lab_surface_levels_after_sand_displacement_within_ten_seconds() {
+    let rules = Rules::load(DEFAULT_RULES).unwrap();
+    let mut world = crate::level::Preset::DensityLab
+        .level(&rules, 400, 250)
+        .generate(rules)
+        .unwrap();
+    let water = world.rules().id("water").unwrap();
+    let left = world.width() / 10 + 1;
+    let right = world.width() - world.width() / 10 - 1;
+    for _ in 0..600 {
+        world.step(12_000);
+    }
+    let surfaces: Vec<_> = (left..right)
+        .filter_map(|x| {
+            (world.height() / 3..world.height() * 4 / 5)
+                .find(|y| world.cells()[y * world.width() + x].element == water)
+        })
+        .collect();
+    let spread = surfaces.iter().max().unwrap() - surfaces.iter().min().unwrap();
+    assert!(
+        spread <= 8,
+        "Density lab surface varies by {spread} rows: {surfaces:?}"
+    );
+}
+
+#[test]
+fn density_lab_steam_vent_reaches_above_surface_within_ten_seconds() {
+    let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+    rules.atmosphere.evaporation_rate = 0.0;
+    let mut world = World::new(400, 250, 612, rules).unwrap();
+    let water = world.rules().id("water").unwrap();
+    let steam = world.rules().id("steam").unwrap();
+    for x in 150..250 {
+        put(&mut world, x, 200, "stone");
+    }
+    for y in 100..200 {
+        put(&mut world, 150, y, "stone");
+        put(&mut world, 249, y, "stone");
+    }
+    for x in 151..249 {
+        for y in 120..200 {
+            put(&mut world, x, y, "water");
+        }
+    }
+    put(&mut world, 200, 160, "fire");
+    for _ in 0..600 {
+        world.step(12_000);
+    }
+    let reached_surface = world
+        .cells()
+        .iter()
+        .enumerate()
+        .any(|(index, cell)| cell.element == steam && index / world.width() < 120);
+    assert!(
+        reached_surface,
+        "steam vent produced no steam above the water surface after ten seconds"
+    );
+    assert!(world.cells().iter().any(|cell| cell.element == water));
+}
+
+#[test]
 fn gases_bubble_up_through_water_without_losing_cells() {
     for gas in ["steam", "smoke"] {
         let mut rules = Rules::load(DEFAULT_RULES).unwrap();
