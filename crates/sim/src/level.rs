@@ -631,6 +631,40 @@ impl Level {
         Ok(())
     }
 
+    /// Generates a resize target while blending newly exposed terrain into the
+    /// existing right edge. Existing cells are overlaid separately afterward.
+    pub fn generate_for_resize(&self, rules: Rules, previous: &World) -> Result<World, LevelError> {
+        let mut world = self.generate(rules)?;
+        if self.width <= previous.width() || self.generator == Generator::Empty {
+            return Ok(world);
+        }
+
+        let edge = previous.width() - 1;
+        let vertical_offset = self.height as isize - previous.height() as isize;
+        let mut previous_surface = terrain_surface(previous, edge)
+            .map(|surface| {
+                (surface as isize + vertical_offset).clamp(0, self.height as isize - 1) as usize
+            })
+            .unwrap_or_else(|| self.surface(edge).min(self.height - 1));
+        let extension = self.width - previous.width();
+        let air = world.rules().id("air").unwrap_or(0);
+        for x in previous.width()..self.width {
+            let generated_surface = self.surface(x).min(self.height - 1);
+            let step = x - previous.width() + 1;
+            let blended = previous_surface as isize
+                + (generated_surface as isize - previous_surface as isize) * step as isize
+                    / (extension + 1) as isize;
+            let desired = blended.clamp(
+                previous_surface.saturating_sub(2) as isize,
+                previous_surface.saturating_add(2).min(self.height - 1) as isize,
+            ) as usize;
+            shift_column(&mut world, x, generated_surface, desired, air);
+            previous_surface = desired;
+        }
+        world.mark_all_dirty();
+        Ok(world)
+    }
+
     fn surface(&self, x: usize) -> usize {
         let wave = |span: usize, salt: u64| -> usize {
             let section = x / span;
@@ -672,6 +706,45 @@ mod seed_format {
             Seed::Text(value) => value.parse().map_err(D::Error::custom),
             Seed::Number(value) => Ok(value),
         }
+    }
+}
+
+fn terrain_surface(world: &World, x: usize) -> Option<usize> {
+    let ground_ids: Vec<_> = ["stone", "soil", "sand", "ash"]
+        .into_iter()
+        .filter_map(|name| world.rules().id(name))
+        .collect();
+    (0..world.height())
+        .find(|&y| ground_ids.contains(&world.cells()[y * world.width() + x].element))
+}
+
+fn shift_column(
+    world: &mut World,
+    x: usize,
+    source_surface: usize,
+    target_surface: usize,
+    air: usize,
+) {
+    let height = world.height();
+    let shift = target_surface as isize - source_surface as isize;
+    let source: Vec<_> = (0..height)
+        .map(|y| world.cells[y * world.width + x])
+        .collect();
+    for y in 0..height {
+        let source_y = y as isize - shift;
+        world.cells[y * world.width + x] = if source_y < 0 {
+            crate::Cell {
+                element: air,
+                age: 0,
+                moisture: 0,
+                burn_progress: 0,
+                body_id: 0,
+            }
+        } else if source_y >= height as isize {
+            source[height - 1]
+        } else {
+            source[source_y as usize]
+        };
     }
 }
 
@@ -1021,29 +1094,82 @@ mod tests {
     }
 
     #[test]
-    fn resizing_from_a_seeded_level_keeps_existing_cells_and_extends_terrain() {
+    fn shrinking_height_keeps_every_cell_in_the_bottom_terrain_band() {
         let rules = rules();
         let level = Preset::Island.level(&rules, 64, 48);
         let original = level.generate(rules.clone()).unwrap();
         let original_cells = original.cells().to_vec();
-        let mut expanded_level = level.clone();
-        expanded_level.width = 80;
-        expanded_level.height = 56;
-        let mut expanded = expanded_level.generate(rules).unwrap();
-        let expected_extension = expanded.cells().to_vec();
-        expanded.preserve_resize_state_from(&original);
-        for y in 0..48 {
+        let mut smaller_level = level.clone();
+        smaller_level.height = 32;
+        let mut smaller = smaller_level.generate(rules).unwrap();
+        smaller.preserve_resize_state_from(&original);
+        for y in 32..48 {
             for x in 0..64 {
-                assert_eq!(expanded.cells()[y * 80 + x], original_cells[y * 64 + x]);
+                let previous = original_cells[y * 64 + x];
+                if previous.element != original.rules().id("air").unwrap() {
+                    assert_eq!(smaller.cells()[(y - 16) * 64 + x], previous);
+                }
             }
         }
-        let air = expanded.rules().id("air").unwrap();
+        let air = original.rules().id("air").unwrap();
         assert!(
-            expanded.cells()[48 * 80..]
+            original.cells()[..16 * 64]
                 .iter()
-                .any(|cell| cell.element != air)
+                .all(|cell| cell.element == air)
         );
-        assert_eq!(expected_extension[48 * 80], expanded.cells()[48 * 80]);
+    }
+
+    #[test]
+    fn width_extension_blends_terrain_with_a_bounded_edge_slope() {
+        let rules = rules();
+        let level = Preset::Island.level(&rules, 64, 48);
+        let original = level.generate(rules.clone()).unwrap();
+        let mut wider_level = level.clone();
+        wider_level.width = 128;
+        wider_level.height = 32;
+        let mut wider = wider_level.generate_for_resize(rules, &original).unwrap();
+        wider.preserve_resize_state_from(&original);
+        let mut last_surface = terrain_surface(&wider, 63).unwrap();
+        for x in 64..wider.width() {
+            let surface = terrain_surface(&wider, x).unwrap();
+            assert!(
+                surface.abs_diff(last_surface) <= 2,
+                "terrain step at x={x}: {last_surface} -> {surface}"
+            );
+            last_surface = surface;
+        }
+    }
+
+    #[test]
+    fn non_aligned_vertical_resize_preserves_nearest_atmosphere_row() {
+        let rules = rules();
+        let level = Preset::Island.level(&rules, 64, 48);
+        let mut original = level.generate(rules.clone()).unwrap();
+        original.atmosphere[0].temperature = 42.0;
+        let mut taller_level = level.clone();
+        taller_level.height += 1;
+        let mut taller = taller_level.generate(rules).unwrap();
+        taller.preserve_resize_state_from(&original);
+        assert_eq!(taller.atmosphere_at(0, 0).unwrap().temperature, 42.0);
+    }
+
+    #[test]
+    fn growing_height_adds_sky_above_existing_terrain() {
+        let rules = rules();
+        let level = Preset::Island.level(&rules, 64, 48);
+        let original = level.generate(rules.clone()).unwrap();
+        let original_cells = original.cells().to_vec();
+        let mut taller_level = level.clone();
+        taller_level.height = 64;
+        let mut taller = taller_level.generate(rules).unwrap();
+        taller.preserve_resize_state_from(&original);
+        assert_eq!(&taller.cells()[16 * 64..], &original_cells[..]);
+        let air = taller.rules().id("air").unwrap();
+        assert!(
+            taller.cells()[..16 * 64]
+                .iter()
+                .all(|cell| cell.element == air)
+        );
     }
 
     #[test]

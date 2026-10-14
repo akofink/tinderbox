@@ -122,15 +122,21 @@ impl World {
     /// The receiver supplies newly exposed cells, typically generated from the same level seed.
     pub fn preserve_resize_state_from(&mut self, previous: &World) {
         let copy_width = self.width.min(previous.width);
-        let copy_height = self.height.min(previous.height);
+        // Keep the world bottom-anchored: shrinking discards sky from the top,
+        // while growing adds rows of generated sky above existing terrain.
+        let row_offset = self.height as isize - previous.height as isize;
 
         self.bodies.clear();
         for cell in &mut self.cells {
             cell.body_id = 0;
         }
-        for y in 0..copy_height {
+        for y in 0..self.height {
+            let source_y = y as isize - row_offset;
+            if !(0..previous.height as isize).contains(&source_y) {
+                continue;
+            }
             for x in 0..copy_width {
-                let source = previous.cells[y * previous.width + x];
+                let source = previous.cells[source_y as usize * previous.width + x];
                 let target = y * self.width + x;
                 self.cells[target] = source;
                 self.cells[target].body_id = 0;
@@ -144,7 +150,9 @@ impl World {
                 .filter_map(|&index| {
                     let x = index % previous.width;
                     let y = index / previous.width;
-                    (x < self.width && y < self.height).then_some(y * self.width + x)
+                    let target_y = y as isize + row_offset;
+                    (x < self.width && (0..self.height as isize).contains(&target_y))
+                        .then(|| target_y as usize * self.width + x)
                 })
                 .collect();
             if body.members.is_empty() {
@@ -167,10 +175,17 @@ impl World {
         self.ambient_humidity = previous.ambient_humidity;
         self.ambient_oxygen = previous.ambient_oxygen;
         for y in 0..self.atmosphere_height {
-            for x in 0..self.atmosphere_width {
-                if x < previous.atmosphere_width && y < previous.atmosphere_height {
+            let target_cell_y =
+                (y * ATMOSPHERE_CELL_SIZE + ATMOSPHERE_CELL_SIZE / 2).min(self.height - 1);
+            let source_cell_y = target_cell_y as isize - row_offset;
+            if !(0..previous.height as isize).contains(&source_cell_y) {
+                continue;
+            }
+            let source_y = source_cell_y as usize / ATMOSPHERE_CELL_SIZE;
+            for x in 0..self.atmosphere_width.min(previous.atmosphere_width) {
+                if source_y < previous.atmosphere_height {
                     self.atmosphere[y * self.atmosphere_width + x] =
-                        previous.atmosphere[y * previous.atmosphere_width + x];
+                        previous.atmosphere[source_y * previous.atmosphere_width + x];
                 }
             }
         }

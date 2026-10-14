@@ -4,8 +4,6 @@ use crate::labels::{self, GROUPS};
 use eframe::egui::{self, Color32, Sense, Vec2};
 
 pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
-    ui.heading("Elements");
-    ui.separator();
     let elements: Vec<_> = app
         .world
         .rules()
@@ -17,6 +15,8 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
         .id_salt("palette")
         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
         .show(ui, |ui| {
+            ui.heading("Elements");
+            ui.separator();
             for group in GROUPS {
                 let rows: Vec<_> = elements
                     .iter()
@@ -47,25 +47,25 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
                     }
                 }
             }
+            ui.separator();
+            let boat_button = if app.boat_tool {
+                "Click world to place boat"
+            } else {
+                "Place wooden boat"
+            };
+            if ui.button(boat_button).clicked() {
+                app.boat_tool = true;
+                app.gust_mode = false;
+            }
+            if app.boat_tool {
+                ui.small("Click at the waterline; the stamp needs clear space.");
+            }
+            if ui.button("Ignite (I)").clicked() {
+                app.selected = app.world.rules().id("fire").unwrap_or(app.selected);
+            }
+            if ui.button("Erase (E)").clicked() {
+                app.selected = app.world.rules().id("air").unwrap_or(0);
+            }
+            ui.small("Drag paints. Right-click ignites.\nSpace play/pause. Period steps.\nR reset. H HUD.");
         });
-    ui.separator();
-    let boat_button = if app.boat_tool {
-        "Click world to place boat"
-    } else {
-        "Place wooden boat"
-    };
-    if ui.button(boat_button).clicked() {
-        app.boat_tool = true;
-        app.gust_mode = false;
-    }
-    if app.boat_tool {
-        ui.small("Click at the waterline; the stamp needs clear space.");
-    }
-    if ui.button("Ignite (I)").clicked() {
-        app.selected = app.world.rules().id("fire").unwrap_or(app.selected);
-    }
-    if ui.button("Erase (E)").clicked() {
-        app.selected = app.world.rules().id("air").unwrap_or(app.selected);
-    }
-    ui.small("Drag paints. Right-click ignites.\nSpace play/pause. Period steps.\nR reset. H HUD.");
 }

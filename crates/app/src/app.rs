@@ -318,7 +318,8 @@ impl Tinderbox {
         let mut level = self.level.clone();
         level.width = width;
         level.height = height;
-        let Ok(mut resized) = level.generate(self.world.rules().clone()) else {
+        let Ok(mut resized) = level.generate_for_resize(self.world.rules().clone(), &self.world)
+        else {
             return;
         };
         resized.preserve_resize_state_from(&self.world);
