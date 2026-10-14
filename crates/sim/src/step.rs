@@ -125,6 +125,11 @@ impl World {
         }
         let x = i % self.width;
         let y = i / self.width;
+        let is_critter = matches!(self.rules.elements[e].name.as_str(), "beetle" | "termite");
+        // Let critters move before a successful meal interaction returns early below.
+        if is_critter && self.update_ecology(i) {
+            return;
+        }
         for (dx, dy) in [(0isize, -1isize), (1, 0), (0, 1), (-1, 0)] {
             let Some(nx) = x.checked_add_signed(dx).filter(|v| *v < self.width) else {
                 continue;
@@ -188,7 +193,7 @@ impl World {
                 return;
             }
         }
-        if self.update_ecology(i) {
+        if !is_critter && self.update_ecology(i) {
             return;
         }
         if self.cells[i].body_id != 0 {
