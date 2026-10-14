@@ -363,7 +363,9 @@ impl World {
                 }
                 "water" => {
                     moisture += 1.0;
-                    heat -= 4.0;
+                    // Water and ice cool nearby air gently; large bodies must not outpace
+                    // ambient relaxation and freeze otherwise temperate lakes in seconds.
+                    heat -= 0.1;
                 }
                 "steam" => {
                     moisture += 0.5;
@@ -371,7 +373,7 @@ impl World {
                     plume_seed = true;
                 }
                 "smoke" => plume_seed = true,
-                "ice" => heat -= 3.0,
+                "ice" => heat -= 0.1,
                 _ => {}
             }
         }

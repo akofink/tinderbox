@@ -255,7 +255,7 @@ impl World {
         if vertical != 0 && self.translate_body(body_index, 0, vertical) {
             return;
         }
-        if wind.strength > 0 && wind.direction != crate::WindDirection::Calm {
+        if bob_phase % 4 == 0 && wind.strength > 0 && wind.direction != crate::WindDirection::Calm {
             let dx = wind.direction.horizontal() as isize;
             if self.translate_body(body_index, dx, 0) {
                 return;

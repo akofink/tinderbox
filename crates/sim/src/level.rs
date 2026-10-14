@@ -167,7 +167,7 @@ impl Preset {
             fit_window: false,
             seed,
             generator,
-            ambient_temperature: 20,
+            ambient_temperature: if self == Self::DensityLab { 1 } else { 20 },
             ambient_humidity: 45,
             ambient_oxygen: 21,
             wind: match self {
@@ -478,7 +478,7 @@ impl Level {
         }
         if self.generator == Generator::BoatLake {
             let centers = if width >= 48 {
-                vec![width / 3, width / 2, width * 2 / 3]
+                vec![width / 5, width * 2 / 5, width * 3 / 5, width * 4 / 5]
             } else {
                 vec![width / 2]
             };
@@ -490,21 +490,24 @@ impl Level {
                 if !world.place_boat(x, y) {
                     return Err(LevelError("Boat lake could not place its boats".into()));
                 }
-                if index == 1 {
+                if index == 1 || index == 2 {
                     let sand = world
                         .rules()
                         .id("sand")
                         .ok_or_else(|| LevelError("Boat lake requires sand".into()))?;
-                    for cargo in 0..8 {
+                    let cargo_count = if index == 1 { 3 } else { 8 };
+                    for cargo in 0..cargo_count {
                         let dx = cargo % 4;
                         world.paint(x + dx - 2, y - 3 - cargo / 4, sand);
                     }
-                } else if index == 2 {
+                } else if index == 3 {
                     let fire = world
                         .rules()
                         .id("fire")
                         .ok_or_else(|| LevelError("Boat lake requires fire".into()))?;
-                    world.paint(x + 3, y - 2, fire);
+                    for dx in [-3isize, -1, 1] {
+                        world.paint(x.checked_add_signed(dx).unwrap(), y - 2, fire);
+                    }
                 }
             }
         } else {
@@ -545,7 +548,9 @@ impl Level {
             for x in oil_x..oil_x + width / 12 {
                 world.paint(x, waterline - 1, oil);
             }
-            world.paint(oil_x, waterline - 2, oil_fire);
+            for dx in 0..4 {
+                world.paint(oil_x + dx, waterline - 2, oil_fire);
+            }
             let vent_x = left + third + width / 20;
             world.paint(vent_x, waterline + 2, fire);
             world.paint(vent_x + 1, waterline + 2, steam);
@@ -863,19 +868,33 @@ mod tests {
                 .filter(|cell| cell.body_id != 0)
                 .map(|cell| cell.body_id)
                 .max(),
-            Some(3)
+            Some(4)
         );
-        assert!(boats.cells.iter().any(|cell| cell.element == fire));
-        for _ in 0..4 {
-            boats.step(8_000);
-        }
         assert!(
             boats
                 .cells
                 .iter()
-                .filter(|cell| cell.element == sand && cell.body_id != 0)
+                .filter(|cell| cell.element == fire)
                 .count()
-                >= 4
+                >= 3
+        );
+        for _ in 0..4 {
+            boats.step(8_000);
+        }
+        let cargo_in = |body_id| {
+            boats
+                .cells
+                .iter()
+                .filter(|cell| cell.element == sand && cell.body_id == body_id)
+                .count()
+        };
+        assert!(
+            cargo_in(2) >= 3,
+            "the loaded boat should carry its three sand cells"
+        );
+        assert!(
+            cargo_in(3) >= 8,
+            "the overloaded boat should carry eight sand cells"
         );
         let lab = Preset::DensityLab
             .level(&rules, 96, 64)
@@ -892,6 +911,7 @@ mod tests {
         let oil_fire = lab.rules.id("oil_fire").unwrap();
         let steam = lab.rules.id("steam").unwrap();
         assert!(lab.cells.iter().any(|cell| cell.element == oil_fire));
+        assert_eq!(lab.ambient_temperature, 1.0);
         let width = lab.width();
         let wall_x = width / 10;
         let wall_y = lab.height() * 4 / 5 - 1;
@@ -918,6 +938,36 @@ mod tests {
                 .count()
                 > 100,
             "lake should remain contained"
+        );
+        assert!(
+            lab.cells
+                .iter()
+                .filter(|cell| cell.element == lab.rules.id("ice").unwrap())
+                .count()
+                >= 8,
+            "near-freezing Density lab should keep its ice afloat"
+        );
+    }
+
+    #[test]
+    fn room_temperature_boat_lake_does_not_freeze_after_five_simulated_seconds() {
+        let rules = rules();
+        let mut world = Preset::BoatLake
+            .level(&rules, 400, 250)
+            .generate(rules)
+            .unwrap();
+        for _ in 0..300 {
+            world.step(12_000);
+        }
+        let ice = world.rules.id("ice").unwrap();
+        assert_eq!(
+            world
+                .cells
+                .iter()
+                .filter(|cell| cell.element == ice)
+                .count(),
+            0,
+            "a 20 C Boat lake should not freeze in five simulated seconds"
         );
     }
 
