@@ -182,7 +182,7 @@ pub(super) fn show(app: &Tinderbox, painter: &egui::Painter, canvas: Rect, point
     painter.rect_stroke(
         lens,
         2.0,
-        Stroke::new(2.0, Color32::WHITE),
+        Stroke::new(2.0_f32, Color32::WHITE),
         egui::StrokeKind::Outside,
     );
     let cell_center = Pos2::new(
@@ -192,7 +192,7 @@ pub(super) fn show(app: &Tinderbox, painter: &egui::Painter, canvas: Rect, point
     painter.circle_stroke(
         cell_center,
         cell_w.max(cell_h) * 0.9,
-        Stroke::new(1.5, Color32::YELLOW),
+        Stroke::new(1.5_f32, Color32::YELLOW),
     );
     let panel_width = 250.0_f32.min(canvas.width());
     let panel_height = (description.lines.len() as f32 * 16.0 + 34.0).min(canvas.height());
@@ -211,7 +211,7 @@ pub(super) fn show(app: &Tinderbox, painter: &egui::Painter, canvas: Rect, point
     painter.rect_stroke(
         panel,
         4.0,
-        Stroke::new(1.0, Color32::LIGHT_GRAY),
+        Stroke::new(1.0_f32, Color32::LIGHT_GRAY),
         egui::StrokeKind::Inside,
     );
     painter.text(
