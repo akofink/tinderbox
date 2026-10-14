@@ -135,6 +135,11 @@ impl LevelSetup {
                             ui.selectable_value(&mut self.draft.generator, generator, generator.label());
                         }
                     });
+                ui.checkbox(&mut self.draft.boat, "Include a wooden boat over water");
+                if self.draft.boat {
+                    ui.add(egui::Slider::new(&mut self.draft.boat_sand, 0..=8).text("Sand cargo cells"));
+                    ui.checkbox(&mut self.draft.boat_burning, "Start the hull burning");
+                }
                 ui.horizontal(|ui| {
                     egui::ComboBox::from_label("Starting wind")
                         .selected_text(format!("{:?}", self.draft.wind.direction))

@@ -1,4 +1,5 @@
 //! World storage, construction, and read-only accessors.
+use crate::bodies::Body;
 use crate::dirty::DirtyRegions;
 use crate::scheduler::Scheduler;
 use crate::{Cell, DirtyRegion, Rules, RulesError, Wind, WindDirection};
@@ -52,6 +53,7 @@ pub struct World {
     pub(super) width: usize,
     pub(super) height: usize,
     pub(super) cells: Vec<Cell>,
+    pub(super) bodies: Vec<Body>,
     pub(super) rules: Rules,
     pub(super) scheduler: Scheduler,
     pub(super) dirty_regions: DirtyRegions,
@@ -90,10 +92,12 @@ impl World {
                     age: 0,
                     moisture: 0,
                     burn_progress: 0,
+                    body_id: 0,
                 };
                 count
             ],
             rules,
+            bodies: Vec::new(),
             scheduler: Scheduler::new(count),
             dirty_regions: DirtyRegions::new(width, height),
             rng: seed.max(1),

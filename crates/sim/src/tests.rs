@@ -206,6 +206,7 @@ fn put(world: &mut World, x: usize, y: usize, element: &str) {
         age: 0,
         moisture: 0,
         burn_progress: 0,
+        body_id: 0,
     };
 }
 
@@ -752,4 +753,297 @@ fn burned_patch_regrows_a_recognizable_canopy_within_a_short_play_session() {
         canopy_cells >= 8,
         "burned patch should regrow trunks and crowns, got {canopy_cells} tree cells"
     );
+}
+
+#[test]
+fn empty_boat_floats_as_one_body_and_cargo_pushes_it_down() {
+    let mut world = World::new(32, 24, 1, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    for x in 1..world.width() - 1 {
+        put(&mut world, x, 15, "water");
+        put(&mut world, x, 16, "water");
+        put(&mut world, x, 17, "stone");
+    }
+    let right_edge = world.width() - 1;
+    for y in 15..=16 {
+        put(&mut world, 0, y, "stone");
+        put(&mut world, right_edge, y, "stone");
+    }
+    assert!(world.place_boat(16, 14));
+    let wood = world.rules().id("wood").unwrap();
+    let initial: Vec<_> = world
+        .cells()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, cell)| (cell.element == wood).then_some(index))
+        .collect();
+    assert_eq!(initial.len(), 23);
+    for _ in 0..6 {
+        world.step(768);
+    }
+    let floating: Vec<_> = world
+        .cells()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, cell)| (cell.element == wood).then_some(index))
+        .collect();
+    assert_eq!(floating.len(), initial.len());
+    assert_eq!(
+        floating.iter().map(|index| index / world.width()).min(),
+        initial.iter().map(|index| index / world.width()).min(),
+        "empty body remains at its waterline"
+    );
+    let translation = floating[0] as isize - initial[0] as isize;
+    assert!(
+        initial
+            .iter()
+            .zip(&floating)
+            .all(|(before, after)| *after as isize - *before as isize == translation),
+        "the hull translates as one piece"
+    );
+    assert_eq!(
+        world
+            .cells()
+            .iter()
+            .filter(|cell| cell.body_id != 0)
+            .count(),
+        23
+    );
+    let mut bobbed = false;
+    for _ in 0..64 {
+        let anchor = world
+            .cells()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, cell)| (cell.body_id != 0).then_some(index))
+            .min()
+            .unwrap();
+        world.scheduler.enqueue_focus(anchor);
+        world.step(23);
+        let top = world
+            .cells()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, cell)| (cell.body_id != 0).then_some(index / world.width()))
+            .min()
+            .unwrap();
+        bobbed |= top
+            != initial
+                .iter()
+                .map(|index| index / world.width())
+                .min()
+                .unwrap();
+    }
+    assert!(bobbed, "the fixed-step buoyancy phase makes the hull bob");
+
+    let sand = world.rules().id("sand").unwrap();
+    let boat_y = world
+        .cells()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, cell)| (cell.body_id != 0).then_some(index / world.width()))
+        .min()
+        .unwrap();
+    let boat_x = world
+        .cells()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, cell)| {
+            (cell.body_id != 0 && index / world.width() == boat_y).then_some(index % world.width())
+        })
+        .nth(3)
+        .unwrap();
+    for row in 1..=4 {
+        world.paint(boat_x, boat_y - row, sand);
+    }
+    for _ in 0..8 {
+        world.step(768);
+    }
+    let loaded: Vec<_> = world
+        .cells()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, cell)| (cell.element == wood).then_some(index))
+        .collect();
+    assert_eq!(
+        loaded.len(),
+        23,
+        "group movement neither drops nor duplicates hull cells"
+    );
+    assert!(
+        loaded
+            .iter()
+            .map(|index| index / world.width())
+            .min()
+            .unwrap()
+            > initial
+                .iter()
+                .map(|index| index / world.width())
+                .min()
+                .unwrap(),
+        "heavy cargo should lower the boat"
+    );
+    assert_eq!(
+        world
+            .cells()
+            .iter()
+            .filter(|cell| cell.body_id != 0)
+            .count(),
+        27
+    );
+}
+
+#[test]
+fn a_hole_reduces_displacement_and_sinks_a_loaded_boat() {
+    let mut world = World::new(32, 24, 4, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    for x in 1..world.width() - 1 {
+        put(&mut world, x, 15, "water");
+        put(&mut world, x, 16, "water");
+        put(&mut world, x, 17, "stone");
+    }
+    let right_edge = world.width() - 1;
+    for y in 15..=16 {
+        put(&mut world, 0, y, "stone");
+        put(&mut world, right_edge, y, "stone");
+    }
+    assert!(world.place_boat(16, 14));
+    let sand = world.rules().id("sand").unwrap();
+    world.paint(16, 11, sand);
+    for _ in 0..4 {
+        world.step(768);
+    }
+    let wood = world.rules().id("wood").unwrap();
+    let hull: Vec<_> = world
+        .cells()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, cell)| (cell.element == wood && cell.body_id != 0).then_some(index))
+        .collect();
+    let baseline_y = hull
+        .iter()
+        .map(|index| index / world.width())
+        .min()
+        .unwrap();
+    let keel_y = hull
+        .iter()
+        .map(|index| index / world.width())
+        .max()
+        .unwrap();
+    let keel_x = hull
+        .iter()
+        .filter(|index| **index / world.width() == keel_y)
+        .map(|index| *index % world.width())
+        .nth(3)
+        .unwrap();
+    let air = world.rules().id("air").unwrap();
+    world.paint(keel_x, keel_y, air);
+    for _ in 0..8 {
+        world.step(768);
+    }
+    let remaining: Vec<_> = world
+        .cells()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, cell)| (cell.element == wood && cell.body_id != 0).then_some(index))
+        .collect();
+    assert!(remaining.len() < 23, "erased hull plank makes a hole");
+    assert!(
+        remaining
+            .iter()
+            .map(|index| index / world.width())
+            .min()
+            .unwrap()
+            > baseline_y,
+        "a loaded leaky hull sinks"
+    );
+}
+
+#[test]
+fn wind_moves_the_hull_as_a_single_tagged_group() {
+    let mut world = World::new(48, 24, 3, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    for x in 1..world.width() - 1 {
+        put(&mut world, x, 15, "water");
+        put(&mut world, x, 16, "water");
+        put(&mut world, x, 17, "stone");
+    }
+    assert!(world.place_boat(20, 14));
+    let before: Vec<_> = world
+        .cells()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, cell)| (cell.body_id != 0).then_some(index))
+        .collect();
+    world.set_wind(crate::WindDirection::East, 2);
+    for _ in 0..4 {
+        world.step(1_152);
+    }
+    let after: Vec<_> = world
+        .cells()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, cell)| (cell.body_id != 0).then_some(index))
+        .collect();
+    assert_eq!(after.len(), before.len());
+    let translation = after[0] as isize - before[0] as isize;
+    assert!(translation > 0, "east wind should drift the body east");
+    assert!(
+        before
+            .iter()
+            .zip(&after)
+            .all(|(source, target)| *target as isize - *source as isize == translation),
+        "body members keep their exact relative positions"
+    );
+}
+
+#[test]
+fn asymmetric_water_current_drifts_the_body() {
+    let mut world = World::new(32, 24, 5, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    for x in 12..=20 {
+        put(&mut world, x, 15, "water");
+    }
+    assert!(world.place_boat(16, 14));
+    put(&mut world, 12, 12, "water");
+    let anchor = 12 * world.width() + 13;
+    world.scheduler.enqueue_focus(anchor);
+    assert_eq!(world.step(23), 23);
+    let leftmost = world
+        .cells()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, cell)| (cell.body_id != 0).then_some(index % world.width()))
+        .min()
+        .unwrap();
+    assert_eq!(leftmost, 11, "one-sided water flow nudges the boat left");
+}
+
+#[test]
+fn burning_body_detaches_changed_wood_into_loose_cells() {
+    let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+    for rule in &mut rules.interactions {
+        if rules.elements[rule.when].name == "fire" && rules.elements[rule.with].name == "wood" {
+            rule.chance = 1.0;
+        }
+    }
+    let mut world = World::new(32, 24, 2, rules).unwrap();
+    for x in 0..world.width() {
+        put(&mut world, x, 15, "water");
+    }
+    assert!(world.place_boat(16, 14));
+    put(&mut world, 16, 11, "fire");
+    for _ in 0..12 {
+        world.step(768);
+    }
+    let loose_burnt = world.cells().iter().any(|cell| {
+        cell.body_id == 0
+            && matches!(
+                world.rules().elements[cell.element].name.as_str(),
+                "fire" | "ash"
+            )
+    });
+    let attached_wood = world
+        .cells()
+        .iter()
+        .filter(|cell| cell.body_id != 0 && world.rules().elements[cell.element].name == "wood")
+        .count();
+    assert!(loose_burnt, "burned hull cells leave the rigid body");
+    assert!(attached_wood < 23, "fire breaks the boat apart");
 }

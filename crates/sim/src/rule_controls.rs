@@ -70,12 +70,13 @@ impl World {
             .iter()
             .map(|e| rules.id(&e.name))
             .collect();
-        for cell in &mut self.cells {
-            if let Some(id) = mapping.get(cell.element).copied().flatten() {
-                cell.element = id;
+        for index in 0..self.cells.len() {
+            if let Some(id) = mapping.get(self.cells[index].element).copied().flatten() {
+                self.cells[index].element = id;
             } else {
-                *cell = Cell::default();
-                cell.element = air;
+                self.detach_body_member(index);
+                self.cells[index] = Cell::default();
+                self.cells[index].element = air;
             }
         }
         self.dirty_regions.mark_all();

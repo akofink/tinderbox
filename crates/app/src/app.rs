@@ -71,6 +71,7 @@ pub(super) struct Tinderbox {
     selected: usize,
     brush: usize,
     gust_mode: bool,
+    boat_tool: bool,
     overlay: Overlay,
     running: bool,
     speed: f32,
@@ -155,7 +156,10 @@ impl Tinderbox {
         let rules = Rules::load(DEFAULT_RULES).expect("bundled rules are validated by tests");
         let selected = rules.id("sand").unwrap_or(0);
         let level = Preset::DryForest.level(&rules, width, height);
-        let world = level.generate(rules).expect("default level is valid");
+        let mut world = level.generate(rules).expect("default level is valid");
+        if stress_play {
+            seed_smooth_play_boats(&mut world);
+        }
         let air = world.rules().id("air").unwrap_or(0);
         let air_color = world.rules().elements[air].color;
         let world_texture = ctx.load_texture(
@@ -174,6 +178,7 @@ impl Tinderbox {
             selected,
             brush: 3,
             gust_mode: false,
+            boat_tool: false,
             overlay: Overlay::None,
             running: stress_play,
             speed: 1.0,
@@ -359,6 +364,31 @@ impl Tinderbox {
             let completed = self.world.step(budget);
             self.sim_seconds += completed as f64 / WORK_UNITS_PER_SECOND;
         }
+    }
+}
+
+fn seed_smooth_play_boats(world: &mut World) {
+    let water = world.rules().id("water").unwrap_or(0);
+    let stone = world.rules().id("stone").unwrap_or(0);
+    let y = world.height() / 3;
+    for center_x in [world.width() / 4, world.width() / 2, world.width() * 3 / 4] {
+        for dx in -7isize..=7 {
+            let Some(x) = center_x
+                .checked_add_signed(dx)
+                .filter(|x| *x < world.width())
+            else {
+                continue;
+            };
+            for dy in 1..=2 {
+                if y + dy < world.height() {
+                    world.paint(x, y + dy, water);
+                }
+            }
+            if y + 3 < world.height() {
+                world.paint(x, y + 3, stone);
+            }
+        }
+        world.place_boat(center_x, y);
     }
 }
 

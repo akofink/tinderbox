@@ -25,5 +25,8 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
     }
     if ui.selectable_label(app.gust_mode, "Gust brush").clicked() {
         app.gust_mode = !app.gust_mode;
+        if app.gust_mode {
+            app.boat_tool = false;
+        }
     }
 }

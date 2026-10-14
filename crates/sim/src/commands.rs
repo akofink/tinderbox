@@ -10,8 +10,10 @@ impl World {
             age: 0,
             moisture: 0,
             burn_progress: 0,
+            body_id: 0,
         });
         self.scheduler.reset();
+        self.bodies.clear();
         self.gusts.fill(Default::default());
         self.atmosphere.fill(crate::AtmosphereCell {
             temperature: self.ambient_temperature,
@@ -41,12 +43,15 @@ impl World {
         if self.cells[index].element != element {
             self.dirty_regions.mark_cell(x, y);
         }
+        self.detach_body_member(index);
         self.cells[index] = Cell {
             element,
             age: 0,
             moisture: 0,
             burn_progress: 0,
+            body_id: 0,
         };
+        self.attach_cargo(index);
         self.scheduler.enqueue_focus(index);
         let x = index % self.width;
         let y = index / self.width;

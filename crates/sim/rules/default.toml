@@ -40,6 +40,14 @@ color = [157, 218, 241]
 motion = "static"
 
 [[elements]]
+name = "wood"
+color = [132, 88, 52]
+motion = "static"
+carries_moisture = true
+moisture_rate = 0.02
+wet_flammability = 0.12
+
+[[elements]]
 name = "tree"
 color = [55, 156, 78]
 motion = "static"
@@ -188,6 +196,13 @@ oxygen_consumption = 0.35
 oxygen_diffusion = 0.08
 
 # Wind strengthens fire spread only when the target is directly downwind.
+[[interactions]]
+when = "fire"
+with = "wood"
+result = "fire"
+chance = 0.22
+downwind_bonus = 0.35
+
 [[interactions]]
 when = "fire"
 with = "tree"

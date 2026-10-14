@@ -5,8 +5,8 @@ use crate::{
 };
 
 impl World {
-    /// Processes at most `budget` cells, servicing recent player actions first.
-    /// Returns the number of cell updates completed.
+    /// Processes at most `budget` work units, servicing recent player actions first.
+    /// A rigid-body translation is charged by its member-cell count. Returns work units used.
     pub fn step(&mut self, budget: usize) -> usize {
         let work = budget.min(self.cells.len());
         let mut completed = 0;
@@ -15,13 +15,26 @@ impl World {
                 .scheduler
                 .pop_focus()
                 .unwrap_or_else(|| self.scheduler.next_background(self.cells.len()));
-            self.update_cell(index);
-            self.atmosphere_credit += 1;
-            if self.atmosphere_credit >= ATMOSPHERE_INTERVAL {
-                self.atmosphere_credit -= ATMOSPHERE_INTERVAL;
-                self.update_atmosphere_cell();
+            let cost = self.body_work_cost(index);
+            let remaining = work - completed;
+            if cost <= remaining {
+                self.update_cell(index);
+                completed += cost;
+            } else {
+                // Do not let a rigid-group translation overrun the caller's work budget.
+                // Retain a runnable body at the front of the queue for the next call.
+                if cost <= work && self.cells[index].body_id != 0 {
+                    self.scheduler.enqueue_focus(index);
+                }
+                completed += 1;
             }
-            completed += 1;
+            for _ in 0..if cost <= remaining { cost } else { 1 } {
+                self.atmosphere_credit += 1;
+                if self.atmosphere_credit >= ATMOSPHERE_INTERVAL {
+                    self.atmosphere_credit -= ATMOSPHERE_INTERVAL;
+                    self.update_atmosphere_cell();
+                }
+            }
         }
         completed
     }
@@ -153,6 +166,10 @@ impl World {
                 return;
             }
         }
+        if self.cells[i].body_id != 0 {
+            self.update_body_at(i);
+            return;
+        }
         if wind.strength > 0
             && wind.direction != crate::WindDirection::Calm
             && wind_response > 0.0
@@ -229,7 +246,7 @@ impl World {
             "water" if temp <= atmosphere_rules.freezing_point => self.rules.id("ice"),
             "water" if temp >= atmosphere_rules.boiling_point => self.rules.id("steam"),
             "ice" if temp >= atmosphere_rules.melting_point => self.rules.id("water"),
-            "tree" | "plant" | "oil" | "deadwood" | "leaf_litter" | "humus"
+            "tree" | "plant" | "oil" | "wood" | "deadwood" | "leaf_litter" | "humus"
                 if temp >= ignition_point =>
             {
                 self.rules.id("fire")
@@ -545,18 +562,20 @@ impl World {
 
     fn set_element(&mut self, index: usize, element: usize) {
         let changed = self.cells[index].element != element;
+        self.detach_body_member(index);
         self.cells[index] = crate::Cell {
             element,
             age: 0,
             moisture: 0,
             burn_progress: 0,
+            body_id: 0,
         };
         if changed {
             self.mark_cell_dirty(index);
         }
     }
 
-    fn mark_cell_dirty(&mut self, index: usize) {
+    pub(super) fn mark_cell_dirty(&mut self, index: usize) {
         self.dirty_regions
             .mark_cell(index % self.width, index / self.width);
     }
