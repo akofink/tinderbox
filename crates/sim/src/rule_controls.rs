@@ -2,6 +2,17 @@
 use crate::{AtmosphereRules, Cell, DEFAULT_RULES, Rules, RulesError, World};
 
 impl World {
+    /// Change one material's relative density without advancing simulation time.
+    pub fn set_material_density(&mut self, index: usize, density: u8) -> Result<(), RulesError> {
+        let element = self
+            .rules
+            .elements
+            .get_mut(index)
+            .ok_or_else(|| RulesError(format!("unknown element {index}")))?;
+        element.density = density;
+        Ok(())
+    }
+
     /// Atomically replace the atmospheric tuning after validating thresholds and rates.
     pub fn set_atmosphere_rules(&mut self, settings: AtmosphereRules) -> Result<(), RulesError> {
         crate::rules::validate_atmosphere(&settings)?;

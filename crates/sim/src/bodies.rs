@@ -6,6 +6,9 @@ const MAX_BODIES: usize = 4_096;
 const WOOD_MASS: usize = 1;
 const SAND_MASS: usize = 5;
 const WATER_MASS: usize = 4;
+const WOOD_DENSITY_REFERENCE: f32 = 90.0;
+const SAND_DENSITY_REFERENCE: f32 = 220.0;
+const WATER_DENSITY_REFERENCE: f32 = 150.0;
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct Body {
@@ -169,9 +172,14 @@ impl World {
         if !body.active || body.anchor != index {
             return;
         }
-        let mut mass = 0usize;
+        let mut mass = 0.0f32;
         let mut hull_cells = 0usize;
         let mut water_contacts = 0usize;
+        let water_density = self
+            .rules
+            .id("water")
+            .map(|water| self.rules.elements[water].density as f32 / WATER_DENSITY_REFERENCE)
+            .unwrap_or(1.0);
         let mut water_above = false;
         for &member in &body.members {
             let x = member % self.width;
@@ -179,13 +187,14 @@ impl World {
             let element_name = self.rules.elements[self.cells[member].element]
                 .name
                 .as_str();
+            let density = self.rules.elements[self.cells[member].element].density as f32;
             mass += match element_name {
                 "wood" => {
                     hull_cells += 1;
-                    WOOD_MASS
+                    WOOD_MASS as f32 * density / WOOD_DENSITY_REFERENCE
                 }
-                "sand" => SAND_MASS,
-                _ => 1,
+                "sand" => SAND_MASS as f32 * density / SAND_DENSITY_REFERENCE,
+                _ => density / 100.0,
             };
             for (dx, dy) in [(0isize, -1isize), (1, 0), (0, 1), (-1, 0)] {
                 let Some(nx) = x
@@ -213,15 +222,17 @@ impl World {
         let wind = self.wind_at(index);
         // Water directly below the hull is the displaced volume. Losing wood scales that
         // volume down, so even a loaded boat can sink through a hole in its planks.
-        let capacity = water_contacts * WATER_MASS * hull_cells / body.hull_cells.max(1);
+        let capacity =
+            water_contacts as f32 * WATER_MASS as f32 * water_density * hull_cells as f32
+                / body.hull_cells.max(1) as f32;
         let bob_phase = {
             let body = &mut self.bodies[body_index];
             body.bob_phase = body.bob_phase.wrapping_add(1) % 64;
             body.bob_phase
         };
-        let buoyancy = if capacity == 0 || mass > capacity {
+        let buoyancy = if capacity == 0.0 || mass > capacity {
             1
-        } else if water_above && mass * 2 < capacity {
+        } else if water_above && mass * 2.0 < capacity {
             -1
         } else {
             0

@@ -161,6 +161,16 @@ fn bundled_export_preserves_lifecycle_and_motion() {
 }
 
 #[test]
+fn material_density_can_be_tuned_and_exported() {
+    let mut world = World::new(2, 1, 42, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    let water = world.rules().id("water").unwrap();
+    world.set_material_density(water, 177).unwrap();
+    let exported = world.rules().to_toml().unwrap();
+    assert_eq!(Rules::load(&exported).unwrap().elements[water].density, 177);
+    assert!(world.set_material_density(usize::MAX, 0).is_err());
+}
+
+#[test]
 fn disabled_rule_never_fires_even_with_maximum_wind_bonus() {
     use tinderbox_sim::WindDirection;
     let text = PAIR.replace("chance = 1.0", "chance = 0.0\ndownwind_bonus = 1.0");
