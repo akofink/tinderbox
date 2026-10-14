@@ -21,6 +21,33 @@ fn startup_waits_for_setup_and_cancel_preserves_a_running_game() {
 }
 
 #[test]
+fn live_setup_preview_regenerates_without_play_and_cancel_restores_the_running_world() {
+    let mut app = Tinderbox::new_state(false);
+    app.setup_action(SetupAction::Play(app.level.clone()));
+    app.world.step(500);
+    let cells = app.world.cells().to_vec();
+    let original_size = (app.world.width(), app.world.height());
+    let original_level = app.level.clone();
+    app.open_level_setup();
+
+    let level = Preset::Island.level(app.world.rules(), 80, 48);
+    let world = level.generate(app.world.rules().clone()).unwrap();
+    app.level_setup.draft = level.clone();
+    app.level_setup.revision = app.level_setup.revision.wrapping_add(1);
+    let revision = app.level_setup.revision;
+    app.apply_setup_preview(world, revision);
+
+    assert_eq!((app.world.width(), app.world.height()), (80, 48));
+    assert_ne!(app.world.cells(), cells);
+    assert_eq!(app.level, original_level);
+    app.setup_action(SetupAction::Cancel);
+    assert_eq!((app.world.width(), app.world.height()), original_size);
+    assert_eq!(app.world.cells(), cells);
+    assert_eq!(app.level, original_level);
+    assert!(app.running);
+}
+
+#[test]
 fn play_applies_size_and_reset_restores_cells_and_seeded_evolution() {
     let mut app = Tinderbox::new_state(false);
     let level = Preset::Island.level(app.world.rules(), 80, 48);

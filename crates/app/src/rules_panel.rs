@@ -212,6 +212,53 @@ impl RulesPanel {
                         }
                     });
                 }
+                ui.collapsing("Decomposer and fungus behavior", |ui| {
+                    let mut ecology = world.rules().ecology.clone();
+                    let mut changed = false;
+                    changed |= ui
+                        .add(egui::Slider::new(&mut ecology.critter_move_chance, 0.0..=1.0)
+                            .text("Critter move chance"))
+                        .changed();
+                    changed |= ui
+                        .add(egui::Slider::new(&mut ecology.flee_chance, 0.0..=1.0)
+                            .text("Flee chance near fire or water"))
+                        .changed();
+                    changed |= ui
+                        .add(egui::Slider::new(&mut ecology.breeding_chance, 0.0..=0.1)
+                            .text("Local breeding chance"))
+                        .changed();
+                    changed |= ui
+                        .add(egui::Slider::new(&mut ecology.fungus_spread_chance, 0.0..=1.0)
+                            .text("Fungus spread chance"))
+                        .changed();
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(&mut ecology.fungus_starvation_chance, 0.0..=1.0)
+                                .text("Fungus fade chance without food"),
+                        )
+                        .changed();
+                    changed |= ui
+                        .add(egui::Slider::new(&mut ecology.fungus_min_humidity, 0.0..=100.0)
+                            .text("Minimum fungal humidity %"))
+                        .changed();
+                    changed |= ui
+                        .add(egui::Slider::new(&mut ecology.fungus_kill_temperature, 30.0..=100.0)
+                            .text("Fungus dies above °C"))
+                        .changed();
+                    changed |= ui
+                        .add(egui::Slider::new(
+                            &mut ecology.fungus_slow_temperature,
+                            20.0..=(ecology.fungus_kill_temperature - 1.0).max(20.0),
+                        )
+                        .text("Fungal growth slows above °C"))
+                        .changed();
+                    if changed {
+                        self.report(
+                            world.set_ecology_rules(ecology).map_err(|e| e.to_string()),
+                            "Ecology tuning updated.",
+                        );
+                    }
+                });
                 ui.collapsing("Material density, moisture, and fire response", |ui| {
                     ui.small("Density: air = 100; lower materials rise and higher materials sink when movable.");
                     let materials: Vec<_> = world.rules().elements.iter().enumerate().map(|(i, e)| (i, e.name.clone(), e.density, e.carries_moisture, e.moisture_rate, e.wet_flammability)).collect();

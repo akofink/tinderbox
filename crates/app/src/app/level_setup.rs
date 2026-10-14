@@ -16,10 +16,13 @@ pub(crate) struct LevelSetup {
     pub open: bool,
     pub draft: Level,
     pub error: Option<String>,
+    pub revision: u64,
     text: String,
     seed_text: String,
     #[cfg(not(target_arch = "wasm32"))]
     file_path: String,
+    #[cfg(not(target_arch = "wasm32"))]
+    loaded_path: Option<std::path::PathBuf>,
     message: String,
 }
 impl LevelSetup {
@@ -29,9 +32,12 @@ impl LevelSetup {
             seed_text: level.seed.to_string(),
             draft: level,
             error: None,
+            revision: 0,
             text: String::new(),
             #[cfg(not(target_arch = "wasm32"))]
             file_path: "tinderbox-level.toml".into(),
+            #[cfg(not(target_arch = "wasm32"))]
+            loaded_path: None,
             message: String::new(),
         }
     }
@@ -46,6 +52,10 @@ impl LevelSetup {
     pub(super) fn import_text(&mut self, text: String, rules: &Rules) {
         self.text = text;
         self.load_text(rules);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn take_loaded_path(&mut self) -> Option<std::path::PathBuf> {
+        self.loaded_path.take()
     }
     fn load_text(&mut self, rules: &Rules) {
         match Level::load(&self.text).and_then(|level| {
@@ -63,8 +73,9 @@ impl LevelSetup {
                 level.add_missing_elements(rules);
                 self.seed_text = level.seed.to_string();
                 self.draft = level;
+                self.revision = self.revision.wrapping_add(1);
                 self.error = None;
-                self.message = "Loaded settings. Press Play level to start.".into();
+                self.message = "Loaded settings. The preview will update shortly.".into();
             }
             Err(e) => self.error = Some(e.to_string()),
         }
@@ -82,6 +93,7 @@ impl LevelSetup {
             return None;
         }
         let mut action = None;
+        let original_draft = self.draft.clone();
         // No title-bar close button: Cancel explicitly restores the paused game.
         egui::Window::new("Level setup")
             .id(egui::Id::new("level_setup"))
@@ -93,7 +105,7 @@ impl LevelSetup {
             .vscroll(true)
             .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
             .show(ctx, |ui| {
-                ui.label("Set the stage, then press Play. The current game stays untouched until then.");
+                ui.label("Edit the stage and watch the world preview update. Cancel restores your game.");
                 ui.horizontal_wrapped(|ui| {
                     ui.label("Presets:");
                     for preset in Preset::ALL {
@@ -194,7 +206,12 @@ impl LevelSetup {
                         }
                         if ui.button("Load file").clicked() {
                             match files::load_text(&self.file_path) {
-                                Ok(text) => self.import_text(text, rules),
+                                Ok(text) => {
+                                    self.import_text(text, rules);
+                                    if self.error.is_none() {
+                                        self.loaded_path = Some(self.file_path.clone().into());
+                                    }
+                                }
                                 Err(e) => self.error = Some(e),
                             }
                         }
@@ -237,6 +254,9 @@ impl LevelSetup {
                 });
 
             });
+        if self.draft != original_draft {
+            self.revision = self.revision.wrapping_add(1);
+        }
         action
     }
 }
