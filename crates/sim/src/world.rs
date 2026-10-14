@@ -136,6 +136,7 @@ impl World {
             ));
         }
         let old_width = self.width;
+        let pending_dirty = self.dirty_regions.pending_origins().collect::<Vec<_>>();
         let new_width = old_width
             .checked_add(chunk.width)
             .filter(|width| {
@@ -209,6 +210,9 @@ impl World {
         self.atmosphere_credit = 0;
         self.scheduler = Scheduler::new(count);
         self.dirty_regions = DirtyRegions::new(new_width, self.height);
+        for (x, y) in pending_dirty {
+            self.dirty_regions.mark_cell(x + offset_x, y);
+        }
         if prepend {
             self.mark_all_dirty();
         } else {

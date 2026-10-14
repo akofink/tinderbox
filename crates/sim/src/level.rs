@@ -1063,6 +1063,19 @@ mod tests {
     }
 
     #[test]
+    fn endless_extension_preserves_pending_texture_uploads() {
+        let rules = rules();
+        let mut level = Preset::DryForest.level(&rules, 128, 64);
+        level.mode = LevelMode::Endless;
+        let mut world = level.generate_endless_region(&rules).unwrap();
+        let old_pending = world.pending_dirty_regions();
+        let index = world.width() as i64 / ENDLESS_CHUNK_WIDTH as i64 - 2;
+        let chunk = level.generate_chunk(index, &rules).unwrap();
+        world.extend_horizontal(&chunk, false).unwrap();
+        assert!(world.pending_dirty_regions() > old_pending);
+    }
+
+    #[test]
     fn adjacent_endless_chunks_join_with_continuous_terrain() {
         let rules = rules();
         let base_level = Preset::DryForest.level(&rules, 128, 96);

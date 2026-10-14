@@ -373,6 +373,7 @@ impl Tinderbox {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn set_camera_x(&mut self, camera_x: usize) {
         if self.level.mode != LevelMode::Endless {
             return;

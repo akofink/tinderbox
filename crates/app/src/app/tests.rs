@@ -81,6 +81,7 @@ fn endless_camera_centers_the_world_origin_in_the_actual_viewport() {
     assert_eq!(app.camera_x, origin_x - 180.0);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn endless_capture_offset_generates_chunks_until_the_camera_is_in_bounds() {
     let mut app = Tinderbox::new_state(false);
