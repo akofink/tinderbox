@@ -49,6 +49,16 @@ Example interactions to seed the default ruleset:
 - Seeds sprout on wet soil; plants spread slowly near water; ash plus water enriches soil so regrowth is faster.
 - Wind spreads fire faster downwind.
 
+## Endless world
+
+Instead of one fixed screen, the world generates seemingly without end and scrolls side to side, with a cursor or
+a simple character as the player's point of presence. Simulating the whole generated span is acceptable at first.
+Implications to keep in mind now: generation stays deterministic per seed and region so terrain regenerates
+identically; storage, dirty uploads, and the coarse atmosphere grid should be expressible as chunks rather than one
+fixed grid; and Cascade's focus-near-the-player lesson becomes the path to simulating only an active span around the
+camera, with distant chunks dormant or coarsely stepped. Edge-dependent rules (for example ambient humidity sources
+at world edges) should not assume fixed edges.
+
 ## Engine lessons carried over from Cascade
 
 - Headless simulation crate with no graphics, windowing, or wall-clock dependency; deterministic for a seed;
@@ -82,6 +92,8 @@ A browser build on GitHub Pages is a later milestone, so keep the simulation cra
    wind controls and gust brush; remaining starting elements.
 3. **Shareable.** Browser build on GitHub Pages; README with screenshots or a short animation; more elements and
    interactions from play testing.
+4. **Endless world.** Chunked, deterministic, side-scrolling generation with a camera that follows a cursor or simple
+   character; whole-span simulation first, then an active span around the player.
 
 ## Non-goals for v0.1
 
