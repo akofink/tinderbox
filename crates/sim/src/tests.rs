@@ -452,6 +452,41 @@ fn default_rules_include_the_remaining_starting_elements() {
 }
 
 #[test]
+fn critter_and_fungus_colors_stand_out_from_forest_floor_materials() {
+    let rules = Rules::load(DEFAULT_RULES).unwrap();
+    let color = |name: &str| rules.elements[rules.id(name).unwrap()].color;
+
+    assert_eq!(color("beetle"), [27, 205, 184]);
+    assert_eq!(color("termite"), [255, 241, 116]);
+    assert_eq!(color("fungus"), [235, 146, 198]);
+
+    let visible_life = [color("beetle"), color("termite"), color("fungus")];
+    let surroundings = [
+        color("soil"),
+        color("wet_soil"),
+        color("deadwood"),
+        color("leaf_litter"),
+        color("humus"),
+        color("water"),
+        color("fire"),
+        color("ash"),
+    ];
+    for life in visible_life {
+        for ground in surroundings {
+            let distance = life
+                .into_iter()
+                .zip(ground)
+                .map(|(a, b)| i16::from(a).abs_diff(i16::from(b)))
+                .sum::<u16>();
+            assert!(distance > 140, "{life:?} is too close to {ground:?}");
+        }
+    }
+    assert_ne!(visible_life[0], visible_life[1]);
+    assert_ne!(visible_life[0], visible_life[2]);
+    assert_ne!(visible_life[1], visible_life[2]);
+}
+
+#[test]
 fn soil_ash_water_and_seed_interactions_form_regrowth_chain() {
     let mut hydrated = guaranteed_world(5, &[("soil", "water")]);
     put(&mut hydrated, 0, 0, "soil");
