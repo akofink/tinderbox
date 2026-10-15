@@ -214,11 +214,15 @@ pub(super) struct Tinderbox {
     #[cfg(not(target_arch = "wasm32"))]
     span_shot_path: Option<PathBuf>,
     #[cfg(not(target_arch = "wasm32"))]
-    span_shots: u8,
+    span_step: SpanStep,
     #[cfg(not(target_arch = "wasm32"))]
-    span_scroll_frames: usize,
+    span_wait_frames: usize,
+    #[cfg(not(target_arch = "wasm32"))]
+    span_mark: f64,
     #[cfg(not(target_arch = "wasm32"))]
     span_home: f32,
+    #[cfg(not(target_arch = "wasm32"))]
+    span_grove: f32,
     #[cfg(not(target_arch = "wasm32"))]
     level_file: Option<PathBuf>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -259,6 +263,38 @@ struct CaptureOptions {
     measure_real_seconds: Option<f64>,
     inspect_at: Option<(usize, usize)>,
 }
+
+/// Scripted span-demo stages. Each capture moves to its next stage when it is requested.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SpanStep {
+    Settle,
+    ToHome,
+    Ignite,
+    Burning,
+    ToControl,
+    ToAway,
+    Away,
+    ToReturn,
+    AfterWait,
+    ToControlBack,
+    Done,
+}
+
+/// Seconds after ignition for the burning capture.
+#[cfg(not(target_arch = "wasm32"))]
+const SPAN_BURN_SECONDS: f64 = 9.0;
+/// Simulated seconds the camera stays away before the away capture.
+#[cfg(not(target_arch = "wasm32"))]
+const SPAN_AWAY_SECONDS: f64 = 60.0;
+/// Simulated seconds after returning before the after-30s capture.
+#[cfg(not(target_arch = "wasm32"))]
+const SPAN_AFTER_SECONDS: f64 = 30.0;
+/// Cell offsets of the control spot (west, outside the span) and the away spot (east).
+#[cfg(not(target_arch = "wasm32"))]
+const SPAN_CONTROL_OFFSET: f32 = 2000.0;
+#[cfg(not(target_arch = "wasm32"))]
+const SPAN_AWAY_OFFSET: f32 = 4000.0;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -451,11 +487,15 @@ impl Tinderbox {
             #[cfg(not(target_arch = "wasm32"))]
             span_shot_path: None,
             #[cfg(not(target_arch = "wasm32"))]
-            span_shots: 0,
+            span_step: SpanStep::Settle,
             #[cfg(not(target_arch = "wasm32"))]
-            span_scroll_frames: 0,
+            span_wait_frames: 0,
+            #[cfg(not(target_arch = "wasm32"))]
+            span_mark: 0.0,
             #[cfg(not(target_arch = "wasm32"))]
             span_home: 0.0,
+            #[cfg(not(target_arch = "wasm32"))]
+            span_grove: 0.0,
             #[cfg(not(target_arch = "wasm32"))]
             level_file: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -669,61 +709,172 @@ impl Tinderbox {
         }
         let dir = self.span_evidence_dir.clone().unwrap();
         let view = self.camera_view_width.max(1.0);
-        match self.span_shots {
-            0 => {
-                if self.span_scroll_frames == 0 {
-                    self.ignite_span_marker();
-                }
-                self.span_scroll_frames += 1;
-                if self.span_scroll_frames > 45 && self.world.pending_dirty_regions() == 0 {
-                    self.request_span_shot(ctx, dir.join("before-span.png"));
+        let settled = self.world.pending_dirty_regions() == 0;
+        self.span_wait_frames += 1;
+        match self.span_step {
+            SpanStep::Settle => {
+                let center = self.find_grove_center(view);
+                self.span_grove = self.global_x_of(center);
+                self.span_home = self.span_grove - view * 0.5;
+                println!(
+                    "SPAN_DEMO grove resident_x={center} global_x={:.1} home={:.1} control={:.1} away={:.1}",
+                    self.span_grove,
+                    self.span_home,
+                    self.span_home - SPAN_CONTROL_OFFSET,
+                    self.span_home + SPAN_AWAY_OFFSET
+                );
+                self.span_step = SpanStep::ToHome;
+                self.span_wait_frames = 0;
+            }
+            SpanStep::ToHome => {
+                if self.span_goto(self.span_home, view) {
+                    self.span_shoot(ctx, &dir, "1-before.png", SpanStep::Ignite);
                 }
             }
-            1 => {
-                if self.span_scroll_frames > 220 {
-                    if self.world.pending_dirty_regions() == 0 {
-                        self.request_span_shot(ctx, dir.join("away-span.png"));
-                    }
-                } else {
-                    self.pan_camera(16.0, view);
-                    self.span_scroll_frames += 1;
+            SpanStep::Ignite => {
+                self.ignite_span_grove();
+                self.span_mark = self.sim_seconds;
+                self.span_step = SpanStep::Burning;
+                self.span_wait_frames = 0;
+            }
+            SpanStep::Burning => {
+                if settled && self.sim_seconds >= self.span_mark + SPAN_BURN_SECONDS {
+                    self.span_shoot(ctx, &dir, "2-burning.png", SpanStep::ToControl);
                 }
             }
-            2 => {
-                let global =
-                    self.world_start_chunk as f32 * ENDLESS_CHUNK_WIDTH as f32 + self.camera_x;
-                let delta = self.span_home - global;
-                if delta.abs() > 1.0 {
-                    self.pan_camera(delta.clamp(-32.0, 32.0), view);
-                } else if self.span_scroll_frames > 30 && self.world.pending_dirty_regions() == 0 {
-                    self.request_span_shot(ctx, dir.join("after-span.png"));
-                } else {
-                    self.span_scroll_frames += 1;
+            SpanStep::ToControl => {
+                if self.span_goto(self.span_home - SPAN_CONTROL_OFFSET, view) {
+                    self.span_shoot(ctx, &dir, "control-out.png", SpanStep::ToAway);
                 }
             }
-            _ => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            SpanStep::ToAway => {
+                if self.span_goto(self.span_home + SPAN_AWAY_OFFSET, view) {
+                    self.span_mark = self.sim_seconds;
+                    self.span_step = SpanStep::Away;
+                    self.span_wait_frames = 0;
+                }
+            }
+            SpanStep::Away => {
+                if settled && self.sim_seconds >= self.span_mark + SPAN_AWAY_SECONDS {
+                    self.span_shoot(ctx, &dir, "3-away.png", SpanStep::ToReturn);
+                }
+            }
+            SpanStep::ToReturn => {
+                if self.span_goto(self.span_home, view) {
+                    self.span_mark = self.sim_seconds;
+                    self.span_shoot(ctx, &dir, "4-return.png", SpanStep::AfterWait);
+                }
+            }
+            SpanStep::AfterWait => {
+                if settled && self.sim_seconds >= self.span_mark + SPAN_AFTER_SECONDS {
+                    self.span_shoot(ctx, &dir, "5-after-30s.png", SpanStep::ToControlBack);
+                }
+            }
+            SpanStep::ToControlBack => {
+                if self.span_goto(self.span_home - SPAN_CONTROL_OFFSET, view) {
+                    self.span_shoot(ctx, &dir, "control-back.png", SpanStep::Done);
+                }
+            }
+            SpanStep::Done => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
         }
     }
 
+    /// Moves the camera toward a global x. Returns true once it is parked there,
+    /// the world is clean, and at least a few frames have passed.
     #[cfg(not(target_arch = "wasm32"))]
-    fn ignite_span_marker(&mut self) {
-        let Some(fire) = self.world.rules().id("fire") else {
+    fn span_goto(&mut self, target: f32, view: f32) -> bool {
+        let global = self.global_x_of(0) + self.camera_x;
+        let delta = target - global;
+        if delta.abs() > 1.0 {
+            self.pan_camera(delta.clamp(-32.0, 32.0), view);
+            return false;
+        }
+        self.span_wait_frames >= 3 && self.world.pending_dirty_regions() == 0
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn global_x_of(&self, resident_x: usize) -> f32 {
+        self.world_start_chunk as f32 * ENDLESS_CHUNK_WIDTH as f32 + resident_x as f32
+    }
+
+    /// Picks the resident column whose ±12-column window holds the most tree cells in view.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn find_grove_center(&self, view: f32) -> usize {
+        let Some(tree) = self.world.rules().id("tree") else {
+            return self.camera_x as usize;
+        };
+        let width = self.world.width();
+        let height = self.world.height();
+        let cells = self.world.cells();
+        let column_trees: Vec<usize> = (0..width)
+            .map(|x| {
+                (0..height)
+                    .filter(|&y| cells[y * width + x].element == tree)
+                    .count()
+            })
+            .collect();
+        let first = (self.camera_x as usize).min(width.saturating_sub(1));
+        let last = ((self.camera_x + view) as usize).min(width);
+        let radius = 12usize;
+        (first..last)
+            .max_by_key(|&center| {
+                let lo = center.saturating_sub(radius);
+                let hi = (center + radius + 1).min(width);
+                column_trees[lo..hi].iter().sum::<usize>()
+            })
+            .unwrap_or(first)
+    }
+
+    /// Ignites the lowest tree in each column of the grove, so fire starts at ground level.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn ignite_span_grove(&mut self) {
+        let (Some(fire), Some(tree)) =
+            (self.world.rules().id("fire"), self.world.rules().id("tree"))
+        else {
             return;
         };
-        let x = (self.camera_x as usize + 64).min(self.world.width().saturating_sub(10));
-        let y = self.world.height() / 2;
-        for dy in 0..8 {
-            for dx in 0..10 {
-                self.world.paint(x + dx, y + dy, fire);
+        let center = (self.span_grove - self.global_x_of(0)).round().max(0.0) as usize;
+        let width = self.world.width();
+        let height = self.world.height();
+        let mut ignited = Vec::new();
+        for x in center.saturating_sub(2)..(center + 3).min(width) {
+            let base = (0..height)
+                .rev()
+                .find(|&y| self.world.cells()[y * width + x].element == tree);
+            if let Some(y) = base {
+                self.world.paint(x, y, fire);
+                ignited.push((x, y));
             }
         }
-        self.span_home = self.world_start_chunk as f32 * ENDLESS_CHUNK_WIDTH as f32 + self.camera_x;
         println!(
-            "SPAN_EVIDENCE ignited x={x} y={y} home={:.1} world={}x{}",
-            self.span_home,
-            self.world.width(),
-            self.world.height()
+            "SPAN_DEMO ignited ground-level cells={:?} sim={:.2} camera_chunk={} world={}x{}",
+            ignited,
+            self.sim_seconds,
+            self.world_start_chunk + (self.camera_x as usize / ENDLESS_CHUNK_WIDTH) as i64,
+            width,
+            height
         );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn span_shoot(
+        &mut self,
+        ctx: &egui::Context,
+        dir: &std::path::Path,
+        name: &str,
+        next: SpanStep,
+    ) {
+        println!(
+            "SPAN_DEMO capture={name} sim={:.2} camera_chunk={} world={}x{} dormant_chunks={}",
+            self.sim_seconds,
+            self.world_start_chunk + (self.camera_x as usize / ENDLESS_CHUNK_WIDTH) as i64,
+            self.world.width(),
+            self.world.height(),
+            self.world.dormant_chunk_count()
+        );
+        self.span_step = next;
+        self.span_wait_frames = 0;
+        self.request_span_shot(ctx, dir.join(name));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1065,6 +1216,12 @@ impl Tinderbox {
         }) {
             if self.world.pending_dirty_regions() != 0 {
                 self.capture_requested = false;
+                // A scripted span shot must not be dropped: ask again once the world is clean.
+                if self.span_shot_path.is_some() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(
+                        egui::UserData::default(),
+                    ));
+                }
                 return;
             }
             if self.span_shot_path.is_some() || self.capture.is_some() {
@@ -1104,8 +1261,6 @@ impl Tinderbox {
                     self.world.dormant_chunk_count()
                 );
                 if self.span_shot_path.take().is_some() {
-                    self.span_shots = self.span_shots.saturating_add(1);
-                    self.span_scroll_frames = 0;
                     return;
                 }
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
