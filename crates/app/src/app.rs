@@ -45,6 +45,14 @@ const MIN_SMOOTH_PLAY_FRAME_INTERVAL: std::time::Duration = std::time::Duration:
 const SMOOTH_PLAY_WARMUP_FRAMES: usize = 2;
 const MAX_INTERACTIVE_FRAME_DT: f32 = 0.25;
 
+fn simulation_frame_dt(wall_dt: f32, fixed_step: bool) -> f32 {
+    if fixed_step {
+        FIXED_FRAME_DT
+    } else {
+        wall_dt.clamp(0.0, MAX_INTERACTIVE_FRAME_DT)
+    }
+}
+
 fn fitted_world_dimensions(available: egui::Vec2, cell_size: f32) -> (usize, usize) {
     let width = (available.x / cell_size)
         .floor()
@@ -264,6 +272,13 @@ struct CaptureOptions {
     inspect_at: Option<(usize, usize)>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+impl CaptureOptions {
+    fn fixed_step(&self) -> bool {
+        self.after_frames.is_some() || self.at_seconds.is_some()
+    }
+}
+
 /// Scripted span-demo stages. Each capture moves to its next stage when it is requested.
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -307,6 +322,33 @@ struct NativeArgs {
     speed: f32,
 }
 impl Tinderbox {
+    fn speed_status(&self) -> String {
+        if self.fixed_step_capture() {
+            return format!("{:.2}x requested, fixed-step capture", self.speed);
+        }
+        format!(
+            "{:.2}x requested, {:.2}x achieved",
+            self.speed, self.sim_rate
+        )
+    }
+
+    fn fixed_step_capture(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.capture
+                .as_ref()
+                .is_some_and(CaptureOptions::fixed_step)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            false
+        }
+    }
+
+    fn fixed_step_simulation(&self) -> bool {
+        self.stress_play || self.fixed_step_capture()
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let args = native_args().unwrap_or_else(|error| panic!("{error}"));
@@ -1516,18 +1558,8 @@ impl eframe::App for Tinderbox {
         self.last_frame = now;
         let update_work_started = Instant::now();
         self.frame_ms = self.frame_ms * 0.9 + wall_dt * 100.0;
-        #[cfg(not(target_arch = "wasm32"))]
-        let fixed_step = self.stress_play
-            || self.capture.as_ref().is_some_and(|capture| {
-                capture.after_frames.is_some() || capture.at_seconds.is_some()
-            });
-        #[cfg(target_arch = "wasm32")]
-        let fixed_step = false;
-        let dt = if fixed_step {
-            FIXED_FRAME_DT
-        } else {
-            wall_dt.clamp(0.0, MAX_INTERACTIVE_FRAME_DT)
-        };
+        let fixed_step = self.fixed_step_simulation();
+        let dt = simulation_frame_dt(wall_dt, fixed_step);
         self.simulate_frame(ctx, dt, wall_dt);
         input::handle_keyboard(self, ctx);
         // Interactive play and smooth-play use native vsync. Captures request frames

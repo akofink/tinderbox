@@ -723,6 +723,50 @@ fn smooth_play_skips_setup_and_handles_small_worlds() {
 fn deterministic_native_step_targets_sixty_hertz() {
     assert!((FIXED_FRAME_DT - 1.0 / 60.0).abs() < f32::EPSILON);
     assert_eq!(MAX_INTERACTIVE_FRAME_DT, 0.25);
+    assert_eq!(simulation_frame_dt(1.0 / 120.0, true), FIXED_FRAME_DT);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn fixed_step_capture_hud_labels_simulation_mode_instead_of_wall_clock_rate() {
+    let mut app = Tinderbox::new_state(false);
+    app.sim_rate = 2.03;
+    app.capture = Some(CaptureOptions {
+        at_seconds: Some(12),
+        ..Default::default()
+    });
+
+    assert!(app.fixed_step_capture());
+    assert!(app.fixed_step_simulation());
+    assert_eq!(app.speed_status(), "1.00x requested, fixed-step capture");
+
+    app.capture = Some(CaptureOptions {
+        measure_real_seconds: Some(5.0),
+        ..Default::default()
+    });
+    assert!(!app.fixed_step_capture());
+    assert!(!app.fixed_step_simulation());
+    assert_eq!(app.speed_status(), "1.00x requested, 2.03x achieved");
+}
+
+#[test]
+fn interactive_play_tracks_real_time_at_120_hz() {
+    const REFRESH_RATE: usize = 120;
+    let wall_dt = 1.0 / REFRESH_RATE as f32;
+    let mut work = WorkAccumulator::default();
+    let mut completed = 0;
+
+    for _ in 0..REFRESH_RATE {
+        work.accrue(simulation_frame_dt(wall_dt, false), 1.0);
+        completed += work.take(MAX_WORK_PER_FRAME);
+    }
+
+    let simulated_seconds = completed as f64 / WORK_UNITS_PER_SECOND;
+    assert!(
+        (simulated_seconds - 1.0).abs() < 0.01,
+        "simulated {simulated_seconds}s"
+    );
+    assert_eq!(work.dropped, 0.0);
 }
 
 #[test]
