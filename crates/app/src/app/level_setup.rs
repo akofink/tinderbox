@@ -19,7 +19,6 @@ pub(crate) struct LevelSetup {
     pub revision: u64,
     text: String,
     seed_text: String,
-    #[cfg(not(target_arch = "wasm32"))]
     file_path: String,
     #[cfg(not(target_arch = "wasm32"))]
     loaded_path: Option<std::path::PathBuf>,
@@ -34,7 +33,6 @@ impl LevelSetup {
             error: None,
             revision: 0,
             text: String::new(),
-            #[cfg(not(target_arch = "wasm32"))]
             file_path: "tinderbox-level.toml".into(),
             #[cfg(not(target_arch = "wasm32"))]
             loaded_path: None,
@@ -218,50 +216,35 @@ impl LevelSetup {
                 if !self.message.is_empty() { ui.label(&self.message); }
                 ui.separator();
                 ui.collapsing("Save / load level (TOML)", |ui| {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    ui.horizontal(|ui| {
-                        ui.label("File");
-                        ui.text_edit_singleline(&mut self.file_path);
-                        if ui.button("Save file").clicked() {
+                    match files::controls(ui, "level", "tinderbox-level.toml", &mut self.file_path) {
+                        Some(files::Action::Save) => {
                             match self.encode_draft().map_err(|e| e.to_string())
                                 .and_then(|text| files::save_text("level", &self.file_path, &text)) {
                                 Ok(()) => { self.error = None; self.message = format!("Saved {}", self.file_path); }
                                 Err(e) => self.error = Some(e),
                             }
                         }
-                        if ui.button("Load file").clicked() {
-                            match files::load_text(&self.file_path) {
-                                Ok(text) => {
-                                    self.import_text(text, rules);
-                                    if self.error.is_none() {
-                                        self.loaded_path = Some(self.file_path.clone().into());
-                                    }
+                        Some(files::Action::Load) => match files::load_text(&self.file_path) {
+                            Ok(text) => {
+                                self.import_text(text, rules);
+                                #[cfg(not(target_arch = "wasm32"))]
+                                if self.error.is_none() {
+                                    self.loaded_path = Some(self.file_path.clone().into());
                                 }
-                                Err(e) => self.error = Some(e),
                             }
-                        }
-                    });
-                    #[cfg(target_arch = "wasm32")]
-                    ui.horizontal_wrapped(|ui| {
-                        if ui.button("Download level").clicked() {
-                            match self.encode_draft().map_err(|e| e.to_string())
-                                .and_then(|text| files::save_text("level", "tinderbox-level.toml", &text)) {
-                                Ok(()) => { self.error = None; self.message = "Downloaded level and stored it in this browser.".into(); }
-                                Err(e) => self.error = Some(e),
-                            }
-                        }
-                        if ui.button("Upload level").clicked() {
+                            Err(e) => self.error = Some(e),
+                        },
+                        Some(files::Action::Upload) => {
                             if let Err(e) = files::begin_upload("level") { self.error = Some(e); }
                         }
-                        if ui.button("Stored level").clicked() {
-                            match files::load_text("level") {
-                                Ok(text) => self.import_text(text, rules),
-                                Err(e) => self.error = Some(e),
-                            }
-                        }
-                        let notice = files::notice();
-                        if !notice.is_empty() { ui.label(notice); }
-                    });
+                        Some(files::Action::Restore) => match files::load_text("level") {
+                            Ok(text) => self.import_text(text, rules),
+                            Err(e) => self.error = Some(e),
+                        },
+                        None => {}
+                    }
+                    let notice = files::notice();
+                    if !notice.is_empty() { ui.label(notice); }
                     ui.horizontal(|ui| {
                         if ui.button("Export settings to text").clicked() {
                             match self.encode_draft() {

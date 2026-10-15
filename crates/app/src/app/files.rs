@@ -24,6 +24,58 @@ pub(crate) fn notice() -> String {
         .unwrap_or_default()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Action {
+    Save,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    Load,
+    Upload,
+    Restore,
+}
+
+/// Draw platform-specific file actions while keeping target selection in this module.
+pub(crate) fn controls(
+    ui: &mut eframe::egui::Ui,
+    key: &str,
+    filename: &str,
+    path: &mut String,
+) -> Option<Action> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (key, filename);
+        let mut action = None;
+        ui.horizontal(|ui| {
+            ui.label("File");
+            ui.text_edit_singleline(path);
+            if ui.button("Save file").clicked() {
+                action = Some(Action::Save);
+            }
+            if ui.button("Load file").clicked() {
+                action = Some(Action::Load);
+            }
+        });
+        action
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = path;
+        let mut action = None;
+        ui.horizontal_wrapped(|ui| {
+            if ui.button(format!("Download {key}")).clicked() {
+                action = Some(Action::Save);
+            }
+            if ui.button(format!("Upload {key}")).clicked() {
+                action = Some(Action::Upload);
+            }
+            if ui.button(format!("Stored {key}")).clicked() {
+                action = Some(Action::Restore);
+            }
+        });
+        let _ = filename;
+        action
+    }
+}
+
 pub(crate) fn save_text(key: &str, filename: &str, contents: &str) -> Result<(), String> {
     check_size(contents)?;
     #[cfg(target_arch = "wasm32")]
@@ -199,15 +251,21 @@ mod browser {
         if done.is_some() {
             return done;
         }
-        dropped_text(ctx).map(|text| ("rules".to_owned(), check_size(&text).map(|()| text)))
+        dropped_text(ctx).map(|text| {
+            (
+                "rules".to_owned(),
+                text.and_then(|text| check_size(&text).map(|()| text)),
+            )
+        })
     }
 
-    fn dropped_text(ctx: &eframe::egui::Context) -> Option<String> {
+    fn dropped_text(ctx: &eframe::egui::Context) -> Option<Result<String, String>> {
         ctx.input(|input| {
             input.raw.dropped_files.iter().find_map(|file| {
-                file.bytes
-                    .as_ref()
-                    .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+                file.bytes.as_ref().map(|bytes| {
+                    String::from_utf8(bytes.to_vec())
+                        .map_err(|_| "Dropped file is not valid UTF-8 text".to_owned())
+                })
             })
         })
     }
@@ -224,10 +282,18 @@ pub(crate) fn begin_upload(key: &str) -> Result<(), String> {
     begin_upload_browser(key)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn begin_upload(_key: &str) -> Result<(), String> {
+    Err("File upload is only available in a browser.".into())
+}
+
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn finish_upload(key: &str, text: Result<String, String>) {
     finish_upload_browser(key, text);
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn finish_upload(_key: &str, _text: Result<String, String>) {}
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn poll(ctx: &eframe::egui::Context) -> Option<(String, String)> {
@@ -242,7 +308,13 @@ pub(crate) fn poll(ctx: &eframe::egui::Context) -> Option<(String, String)> {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
-    use super::{load_text, notice, remember, save_text, set_notice};
+    use super::{load_text, notice, remember, save_text, set_notice, storage_key};
+
+    #[test]
+    fn browser_storage_keys_are_namespaced() {
+        assert_eq!(storage_key("level"), "tinderbox:level");
+        assert_eq!(storage_key("rules"), "tinderbox:rules");
+    }
 
     #[test]
     fn native_round_trip_and_size_limit() {
