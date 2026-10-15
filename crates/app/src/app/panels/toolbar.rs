@@ -16,19 +16,21 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
         if ui.button("Reset").clicked() {
             app.reset();
         }
+        ui.separator();
+        ui.label("Speed");
+        ui.add(egui::Slider::new(&mut app.speed, 0.25..=10.0).suffix("×"));
+        ui.label("Brush");
+        ui.add(egui::Slider::new(&mut app.brush, 1..=16).suffix(" cells"));
+    });
+    ui.horizontal_wrapped(|ui| {
         if ui.button("Level setup").clicked() {
             app.open_level_setup();
         }
         if ui.button("Wildfire").clicked() {
             app.wildfire();
         }
-        ui.separator();
-        ui.label("Brush");
-        ui.add(egui::Slider::new(&mut app.brush, 1..=16).suffix(" cells"));
         ui.label("Cell size");
         ui.add(egui::Slider::new(&mut app.cell_size, 2.0..=8.0).suffix(" pt"));
-        ui.label("Speed");
-        ui.add(egui::Slider::new(&mut app.speed, 0.25..=10.0).suffix("×"));
         ui.checkbox(&mut app.show_hud, "HUD");
         ui.toggle_value(&mut app.inspect_mode, "Inspect (M)");
         let previous_overlay = app.overlay;
