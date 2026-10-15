@@ -10,7 +10,7 @@ pub(super) fn show(app: &Tinderbox, painter: &Painter, rect: Rect) {
         rect.left_top() + egui::Vec2::splat(8.0),
         egui::Align2::LEFT_TOP,
         format!(
-            "{:.1} ms/frame   sim {:.1}s   {:.1}x requested, {:.1}x achieved   focus {} carry {} dropped {} dirty {}{}",
+            "{:.1} ms/frame   sim {:.1}s   {:.2}x requested, {:.2}x achieved   focus {} carry {} dropped {} dirty {}{}",
             app.frame_ms,
             app.sim_seconds,
             app.speed,
