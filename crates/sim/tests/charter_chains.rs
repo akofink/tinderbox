@@ -128,10 +128,14 @@ fn charter_chains_are_measurable_and_regression_covered() {
         match target {
             1 => assert!(count(&ecology, "ash") > 0 && count(&ecology, "fire") > 0),
             30 => assert!(count(&ecology, "beetle") > 0),
-            60 => assert!(count(&ecology, "fertile_soil") > 0 && count(&ecology, "plant") > 0),
             180 => {
+                assert!(count(&ecology, "deadwood") + count(&ecology, "leaf_litter") > 0);
                 assert!(count(&ecology, "termite") > 0);
-                assert!(count(&ecology, "tree") > 0);
+                assert!(count(&ecology, "humus") > 0);
+                assert!(count(&ecology, "fertile_soil") > 0);
+                assert!(count(&ecology, "plant") > 0 && count(&ecology, "tree") > 0);
+                assert!(count(&ecology, "beetle") < 100 && count(&ecology, "termite") < 100);
+                assert!(count(&ecology, "plant") < 200 && count(&ecology, "tree") < 200);
             }
             _ => {}
         }

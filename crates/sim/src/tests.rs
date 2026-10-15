@@ -282,12 +282,23 @@ fn atmosphere_rules_validate_and_round_trip_with_legacy_defaults() {
         loaded.elements[tree_id].wet_flammability,
         rules.elements[tree_id].wet_flammability
     );
+    let fire_id = rules.id("fire").unwrap();
+    assert_eq!(
+        loaded.elements[fire_id].alternate_decay_to,
+        rules.elements[fire_id].alternate_decay_to
+    );
+    assert_eq!(
+        loaded.elements[fire_id].alternate_decay_chance,
+        rules.elements[fire_id].alternate_decay_chance
+    );
     let legacy = DEFAULT_RULES
         .lines()
         .filter(|line| {
             !line.starts_with("carries_moisture =")
                 && !line.starts_with("moisture_rate =")
                 && !line.starts_with("wet_flammability =")
+                && !line.starts_with("alternate_decay_to =")
+                && !line.starts_with("alternate_decay_chance =")
                 && !line.starts_with("oxygen_consumption =")
                 && !line.starts_with("oxygen_diffusion =")
         })
@@ -304,6 +315,36 @@ fn atmosphere_rules_validate_and_round_trip_with_legacy_defaults() {
             .to_string()
             .contains("thresholds must be ordered")
     );
+}
+
+#[test]
+fn alternate_decay_rules_load_validate_and_drive_lifecycle_outcomes() {
+    let invalid_chance = DEFAULT_RULES.replace(
+        "alternate_decay_chance = 0.1",
+        "alternate_decay_chance = 1.5",
+    );
+    assert!(
+        Rules::load(&invalid_chance)
+            .unwrap_err()
+            .to_string()
+            .contains("alternate_decay_chance must be between 0 and 1")
+    );
+    let missing_target = DEFAULT_RULES.replace("alternate_decay_to = \"leaf_litter\"\n", "");
+    assert!(
+        Rules::load(&missing_target)
+            .unwrap_err()
+            .to_string()
+            .contains("alternate_decay_chance requires alternate_decay_to")
+    );
+
+    let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+    let fire = rules.id("fire").unwrap();
+    rules.elements[fire].lifetime = 1;
+    rules.elements[fire].alternate_decay_chance = 1.0;
+    let mut world = World::new(8, 8, 9, rules).unwrap();
+    put(&mut world, 4, 4, "fire");
+    world.step(usize::MAX);
+    assert!(has(&world, 4, 4, "leaf_litter"));
 }
 
 #[test]

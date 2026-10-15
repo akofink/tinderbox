@@ -100,6 +100,8 @@ impl World {
         };
         let lifetime = element.lifetime;
         let decay_to = element.decay_to;
+        let alternate_decay_to = element.alternate_decay_to;
+        let alternate_decay_chance = element.alternate_decay_chance;
         let emission = element.emission;
         let motion = element.motion;
         let wind_response = element.wind_response;
@@ -131,7 +133,11 @@ impl World {
                 {
                     self.grow_tree_canopy(i);
                 } else if let Some(to) = decay_to {
-                    self.set_element(i, to);
+                    let outcome = alternate_decay_to.filter(|_| {
+                        alternate_decay_chance > 0.0
+                            && self.random_decay_f32() < alternate_decay_chance
+                    });
+                    self.set_element(i, outcome.unwrap_or(to));
                 }
                 if let Some(emission) = emission {
                     let above = i.checked_sub(self.width);
@@ -982,6 +988,16 @@ impl World {
 
     pub(super) fn random_f32(&mut self) -> f32 {
         (self.random_u64() >> 40) as f32 / (1u32 << 24) as f32
+    }
+
+    /// Decay outcomes have an independent stream so biomass choices do not retune fire spread.
+    fn random_decay_f32(&mut self) -> f32 {
+        let mut x = self.decay_rng;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.decay_rng = x;
+        (x >> 40) as f32 / (1u32 << 24) as f32
     }
 
     /// Density motion has an independent stream so new settling choices cannot retune reactions.
