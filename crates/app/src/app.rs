@@ -160,7 +160,6 @@ pub(super) struct Tinderbox {
     gust_mode: bool,
     boat_tool: bool,
     inspect_mode: bool,
-    #[cfg(not(target_arch = "wasm32"))]
     inspect_cell: Option<(usize, usize)>,
     overlay: Overlay,
     running: bool,
@@ -467,7 +466,6 @@ impl Tinderbox {
             gust_mode: false,
             boat_tool: false,
             inspect_mode: false,
-            #[cfg(not(target_arch = "wasm32"))]
             inspect_cell: None,
             overlay: Overlay::None,
             running: stress_play,
@@ -1569,10 +1567,15 @@ impl eframe::App for Tinderbox {
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.add_enabled_ui(!self.level_setup.open, |ui| panels::toolbar::show(self, ui));
         });
+        let compact_palette = ctx.screen_rect().width() <= 480.0;
         egui::SidePanel::left("palette")
             .resizable(true)
-            .default_width(168.0)
-            .min_width(148.0)
+            .default_width(if compact_palette { 120.0 } else { 168.0 })
+            .width_range(if compact_palette {
+                100.0..=120.0
+            } else {
+                148.0..=260.0
+            })
             .show(ctx, |ui| {
                 ui.add_enabled_ui(!self.level_setup.open, |ui| panels::palette::show(self, ui));
             });

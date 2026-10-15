@@ -69,3 +69,5 @@ jobs:
           curl --fail --silent http://127.0.0.1:4173/ >/dev/null
           node scripts/web-smoke.mjs
           python scripts/assert-web-smoke-image.py
+          node scripts/mobile-touch-smoke.mjs
+          python scripts/assert-mobile-touch-smoke.py
