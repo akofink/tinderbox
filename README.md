@@ -32,9 +32,9 @@ For browser builds, scripted captures, flags, and testing, see [Capture and test
 
 ## Play
 
-- Choose a preset or build a level, then paint materials into the world. Fixed and endless worlds are available.
-- Set wind, inspect cells with the magnifier, open the live Rules panel, or speed the simulation up to 10×.
-- Watch clouds, rain, fire, water, plants, trees, fungi, and critters interact. Build and load custom levels in the browser, or save and load tuned rules there.
+- Choose a preset or build a level, then paint materials into the world. Fixed worlds and endless worlds with a camera-centered active span are available.
+- Set wind, inspect cells with the magnifier, tune the live Rules panel, or speed the simulation up to 10×.
+- Watch clouds drift and release rain while fire, water, plants, trees, fungi, and critters interact. Build and load custom levels in the browser, or save and load tuned rules there.
 
 ## Lineage
 
