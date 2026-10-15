@@ -35,14 +35,14 @@ try {
   }, null, { timeout: 60_000 });
 
   // Dismiss the initial level setup and use the visible touch-sized Inspect control.
-  await page.touchscreen.tap(40, 179);
+  await page.touchscreen.tap(40, 204);
   await page.waitForTimeout(500);
-  await page.touchscreen.tap(110, 84);
+  await page.touchscreen.tap(112, 162);
   await page.waitForTimeout(250);
   await page.touchscreen.tap(250, 400);
   await page.waitForTimeout(250);
   await page.screenshot({ path: `${output}/inspected.png` });
-  await page.touchscreen.tap(110, 84);
+  await page.touchscreen.tap(112, 162);
   await page.waitForTimeout(250);
   await page.screenshot({ path: `${output}/dismissed.png` });
 
@@ -63,7 +63,7 @@ try {
     return target?.getAttribute("data-renderer") && target.getAttribute("data-frame-ms");
   }, null, { timeout: 60_000 });
   await narrowPage.waitForTimeout(1500);
-  await narrowPage.touchscreen.tap(40, 132);
+  await narrowPage.touchscreen.tap(40, 197);
   await narrowPage.waitForTimeout(500);
   await narrowPage.screenshot({ path: `${output}/narrow.png` });
   await narrowContext.close();

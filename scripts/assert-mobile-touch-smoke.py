@@ -23,7 +23,7 @@ if dismissed >= 10:
 narrow = Image.open(Path("tmp/mobile-touch-smoke/narrow.png")).convert("RGB")
 canvas_edge_pixels = sum(
     red < 45 and green < 45 and blue < 70
-    for red, green, blue in narrow.crop((128, 210, 168, 250)).get_flattened_data()
+    for red, green, blue in narrow.crop((128, 350, 168, 390)).get_flattened_data()
 )
 if canvas_edge_pixels < 100:
     raise SystemExit(

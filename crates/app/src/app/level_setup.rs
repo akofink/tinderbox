@@ -12,6 +12,17 @@ pub(crate) enum SetupAction {
     Cancel,
 }
 
+fn compact_setup_size(screen: egui::Vec2) -> Option<egui::Vec2> {
+    if crate::app::panels::toolbar::compact_touch_layout(screen) {
+        Some(egui::vec2(
+            (screen.x - 16.0).clamp(240.0, 480.0),
+            (screen.y * 0.46).max(160.0),
+        ))
+    } else {
+        None
+    }
+}
+
 pub(crate) struct LevelSetup {
     pub open: bool,
     pub draft: Level,
@@ -100,20 +111,44 @@ impl LevelSetup {
         }
         let mut action = None;
         let original_draft = self.draft.clone();
+        let screen = ctx.screen_rect();
+        let compact_size = compact_setup_size(screen.size());
+        let compact = compact_size.is_some();
+        let compact_size = compact_size.unwrap_or(screen.size());
         // No title-bar close button: Cancel explicitly restores the paused game.
-        egui::Window::new("Level setup")
+        let mut window = egui::Window::new("Level setup")
             .id(egui::Id::new("level_setup"))
             .collapsible(false)
             .resizable(true)
-            .default_width(760.0)
+            .default_width(if compact { compact_size.x } else { 760.0 })
             .default_height(640.0)
-            .max_height((ctx.screen_rect().height() - 32.0).max(180.0))
-            .max_width((ctx.screen_rect().width() - 32.0).max(320.0))
-            .default_pos(egui::pos2(48.0, 48.0))
+            .max_height(if compact {
+                compact_size.y
+            } else {
+                (screen.height() - 32.0).max(180.0)
+            })
+            .max_width(if compact {
+                compact_size.x
+            } else {
+                (screen.width() - 32.0).max(320.0)
+            })
+            .default_pos(if compact {
+                egui::pos2(8.0, 8.0)
+            } else {
+                egui::pos2(48.0, 48.0)
+            })
             .movable(true)
             .constrain(true)
-            .vscroll(true)
-            .show(ctx, |ui| {
+            .hscroll(compact)
+            .vscroll(true);
+        if compact {
+            window = window.fixed_size(compact_size);
+        }
+        window.show(ctx, |ui| {
+                if compact {
+                    ui.set_max_width((compact_size.x - 48.0).max(200.0));
+                    ui.spacing_mut().interact_size = egui::vec2(44.0, 44.0);
+                }
                 ui.label("Edit the stage and watch the world preview update. Cancel restores your game.");
                 ui.horizontal_wrapped(|ui| {
                     ui.label("Presets:");
@@ -196,24 +231,38 @@ impl LevelSetup {
                 });
                 ui.small("Amounts are density in each material's terrain region, not percent of the whole world. Empty canvas ignores amounts.");
                 let names: Vec<String> = rules.elements.iter().map(|element| element.name.clone()).collect();
-                ui.horizontal(|ui| {
-                    let split = GROUPS.len().div_ceil(2);
-                    let column_groups = [&GROUPS[..split], &GROUPS[split..]];
-                    for groups in column_groups {
-                        ui.vertical(|ui| {
-                            ui.set_min_width(330.0);
-                            for group in groups {
-                                let grouped: Vec<_> = names.iter().filter(|name| *name != "air" && labels::group(name) == *group).cloned().collect();
-                                if grouped.is_empty() { continue; }
-                                ui.label(egui::RichText::new(*group).small().strong());
-                                for name in grouped {
-                                    let amount = self.draft.amounts.entry(name.clone()).or_default();
-                                    ui.add(egui::Slider::new(amount, 0..=100).text(labels::display_name(&name)).suffix("%"));
-                                }
+                if compact {
+                    ui.vertical(|ui| {
+                        for group in GROUPS {
+                            let grouped: Vec<_> = names.iter().filter(|name| *name != "air" && labels::group(name) == group).cloned().collect();
+                            if grouped.is_empty() { continue; }
+                            ui.label(egui::RichText::new(group).small().strong());
+                            for name in grouped {
+                                let amount = self.draft.amounts.entry(name.clone()).or_default();
+                                ui.add(egui::Slider::new(amount, 0..=100).text(labels::display_name(&name)).suffix("%"));
                             }
-                        });
-                    }
-                });
+                        }
+                    });
+                } else {
+                    ui.horizontal(|ui| {
+                        let split = GROUPS.len().div_ceil(2);
+                        let column_groups = [&GROUPS[..split], &GROUPS[split..]];
+                        for groups in column_groups {
+                            ui.vertical(|ui| {
+                                ui.set_min_width(330.0);
+                                for group in groups {
+                                    let grouped: Vec<_> = names.iter().filter(|name| *name != "air" && labels::group(name) == *group).cloned().collect();
+                                    if grouped.is_empty() { continue; }
+                                    ui.label(egui::RichText::new(*group).small().strong());
+                                    for name in grouped {
+                                        let amount = self.draft.amounts.entry(name.clone()).or_default();
+                                        ui.add(egui::Slider::new(amount, 0..=100).text(labels::display_name(&name)).suffix("%"));
+                                    }
+                                }
+                            });
+                        }
+                    });
+                }
                 if let Some(error) = &self.error { ui.colored_label(egui::Color32::LIGHT_RED, error); }
                 if let Err(e) = self.draft.validate() { ui.colored_label(egui::Color32::LIGHT_RED, e.to_string()); }
                 if !seed_valid { ui.colored_label(egui::Color32::LIGHT_RED, "Seed must be a whole number from 0 to 18446744073709551615"); }
@@ -296,6 +345,50 @@ mod tests {
         );
         assert!(!out.shapes.is_empty());
     }
+    #[test]
+    fn compact_phone_setup_window_leaves_canvas_and_keeps_actions_visible_at_start() {
+        assert!(compact_setup_size(egui::vec2(1280.0, 800.0)).is_none());
+        for (width, height) in [(390.0, 844.0), (844.0, 390.0), (320.0, 640.0)] {
+            let viewport = egui::vec2(width, height);
+            let size = compact_setup_size(viewport).unwrap();
+            assert!(
+                size.x <= viewport.x,
+                "setup width exceeds viewport: {size:?}"
+            );
+            assert!(
+                size.y < viewport.y * 0.5,
+                "setup height leaves too little canvas: {size:?}"
+            );
+            let rules = Rules::load(DEFAULT_RULES).unwrap();
+            let mut setup = LevelSetup::new(Preset::DryForest.level(&rules, 384, 240));
+            let ctx = egui::Context::default();
+            let mut shape_count = 0;
+            for _ in 0..3 {
+                let output = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::Vec2::new(width, height),
+                        )),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        setup.show(ctx, &rules);
+                    },
+                );
+                shape_count = output.shapes.len();
+            }
+            assert!(
+                shape_count > 0,
+                "setup window did not render at {width}x{height}"
+            );
+            assert!(
+                crate::app::panels::toolbar::compact_touch_layout(egui::vec2(width, height)),
+                "phone viewport was not classified as compact"
+            );
+        }
+    }
+
     #[test]
     fn invalid_seed_cannot_be_saved_and_large_seed_round_trips() {
         let rules = Rules::load(DEFAULT_RULES).unwrap();
