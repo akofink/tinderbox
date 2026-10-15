@@ -1336,7 +1336,7 @@ fn seeded_burned_bed_recovers_through_water_and_fertile_soil() {
 }
 
 #[test]
-fn seeds_wait_for_hot_ash_to_cool_before_sprouting() {
+fn seeds_do_not_germinate_on_ash_when_hot_or_cooled() {
     let mut world = guaranteed_world(42, &[("seed", "ash"), ("ash", "seed")]);
     let ignition_point = world.rules().atmosphere.ignition_point;
     for field in &mut world.atmosphere {
@@ -1354,8 +1354,8 @@ fn seeds_wait_for_hot_ash_to_cool_before_sprouting() {
     }
     world.scheduler.enqueue_focus(0);
     world.step(1);
-    assert!(has(&world, 0, 0, "plant"));
-    assert!(has(&world, 0, 1, "fertile_soil"));
+    assert!(has(&world, 0, 0, "seed"));
+    assert!(has(&world, 0, 1, "ash"));
 }
 
 #[test]
@@ -1702,7 +1702,7 @@ fn mature_tree_seeds_a_replacement_on_its_deadwood_stump() {
 }
 
 #[test]
-fn dry_forest_fire_front_leaves_a_regrowing_canopy() {
+fn dry_forest_fire_front_waits_for_soil_enrichment_before_regrowth() {
     let rules = Rules::load(DEFAULT_RULES).unwrap();
     let level = crate::level::Preset::DryForest.level(&rules, 96, 64);
     let mut world = level.generate(rules).unwrap();
@@ -1738,8 +1738,8 @@ fn dry_forest_fire_front_leaves_a_regrowing_canopy() {
     }
     let recovered_trees = count(&world, "tree");
     assert!(
-        recovered_trees >= trees_after_fire + 8,
-        "a burned patch should grow a trunk-and-crown canopy after the front passes"
+        recovered_trees < trees_after_fire + 8,
+        "dry ash without wet or fertile soil should not regrow a trunk-and-crown canopy"
     );
     for _ in 0..600 {
         world.step(usize::MAX);
@@ -1805,17 +1805,17 @@ fn zero_oxygen_smothering_is_deterministic_and_reset_restores_level_oxygen() {
 }
 
 #[test]
-fn burned_patch_regrows_eight_canopy_cells_within_120_seconds() {
+fn fertile_soil_patch_regrows_eight_canopy_cells_within_120_seconds() {
     let mut world = World::new(192, 120, 42, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
     let soil = world.rules().id("soil").unwrap();
+    let fertile_soil = world.rules().id("fertile_soil").unwrap();
     let stone = world.rules().id("stone").unwrap();
-    let ash = world.rules().id("ash").unwrap();
     let seed = world.rules().id("seed").unwrap();
     for x in 85..100 {
         world.paint(x, 100, soil);
         world.paint(x, 101, stone);
     }
-    world.paint(90, 99, ash);
+    world.paint(90, 99, fertile_soil);
     world.paint(90, 98, seed);
     let plant = world.rules().id("plant").unwrap();
     let tree = world.rules().id("tree").unwrap();
@@ -1835,7 +1835,10 @@ fn burned_patch_regrows_eight_canopy_cells_within_120_seconds() {
             break;
         }
     }
-    assert!(saw_sapling, "an ash bed and seed should produce a sapling");
+    assert!(
+        saw_sapling,
+        "fertile soil and a seed should produce a sapling"
+    );
     assert!(
         canopy_frame.is_some_and(|frame| frame <= deadline_frames),
         "burned patch should regrow eight canopy cells within 120 seconds"

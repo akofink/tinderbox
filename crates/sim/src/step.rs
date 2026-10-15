@@ -182,15 +182,7 @@ impl World {
             let rule = self
                 .interaction(e, other)
                 .map(|r| (r.chance, r.downwind_bonus, r.result, r.self_result));
-            let seed_on_hot_ash = (self.rules.elements[e].name == "seed"
-                && self.rules.elements[other].name == "ash"
-                || self.rules.elements[e].name == "ash"
-                    && self.rules.elements[other].name == "seed")
-                && self
-                    .atmosphere_at(x, y)
-                    .is_some_and(|field| field.temperature >= self.rules.atmosphere.ignition_point);
-            if !seed_on_hot_ash
-                && let Some((chance, downwind_bonus, result, self_result)) = rule
+            if let Some((chance, downwind_bonus, result, self_result)) = rule
                 && self.random_f32()
                     < (chance * self.flammability_factor(j, other)
                         + if (nx as isize - x as isize).signum()
