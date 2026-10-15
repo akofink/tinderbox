@@ -24,3 +24,48 @@ jobs:
         run: '! rg -n "std::time::Instant" crates/app/src'
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+
+  web-smoke:
+    name: Browser smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install trunk
+        run: |
+          curl -fsSL -o trunk.tar.gz https://github.com/trunk-rs/trunk/releases/download/v0.21.14/trunk-x86_64-unknown-linux-gnu.tar.gz
+          tar -xzf trunk.tar.gz
+          ./trunk --version
+      - name: Build web bundle
+        working-directory: crates/app
+        run: |
+          "$GITHUB_WORKSPACE/trunk" build --release --public-url /
+      - name: Install Chromium and image inspection tools
+        run: |
+          npm install --no-save --no-audit --no-fund playwright
+          npx playwright install --with-deps chromium
+          python -m pip install pillow
+      - name: Serve the built app and smoke-test it
+        run: |
+          python3 -m http.server 4173 --directory crates/app/dist > /tmp/tinderbox-web-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4173/ >/dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4173/ >/dev/null
+          node scripts/web-smoke.mjs
+          python scripts/assert-web-smoke-image.py
