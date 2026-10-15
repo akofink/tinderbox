@@ -20,5 +20,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
+      - name: Keep native wall-clock APIs out of browser app code
+        run: '! rg -n "std::time::Instant" crates/app/src'
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
