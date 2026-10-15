@@ -59,6 +59,7 @@ pub struct World {
     pub(super) tree_support_age: Vec<u8>,
     pub(super) bodies: Vec<Body>,
     pub(super) rules: Rules,
+    interaction_lookup: Vec<usize>,
     pub(super) scheduler: Scheduler,
     pub(super) dirty_regions: DirtyRegions,
     pub(super) rng: u64,
@@ -96,6 +97,7 @@ impl World {
             .ok_or_else(|| WorldError("ruleset must define 'air'".into()))?;
         let atmosphere_width = width.div_ceil(ATMOSPHERE_CELL_SIZE);
         let atmosphere_height = height.div_ceil(ATMOSPHERE_CELL_SIZE);
+        let interaction_lookup = build_interaction_lookup(&rules);
         Ok(Self {
             width,
             height,
@@ -111,6 +113,7 @@ impl World {
             ],
             tree_support_age: vec![0; count],
             rules,
+            interaction_lookup,
             bodies: Vec::new(),
             scheduler: Scheduler::new(count),
             dirty_regions: DirtyRegions::new(width, height),
@@ -332,6 +335,23 @@ impl World {
         self.mark_all_dirty();
     }
 
+    pub(super) fn rebuild_interaction_lookup(&mut self) {
+        self.interaction_lookup = build_interaction_lookup(&self.rules);
+    }
+
+    /// Returns the first enabled rule for an element pair, matching rules-file order.
+    pub(super) fn interaction(&self, when: usize, with: usize) -> Option<&crate::Interaction> {
+        if self.interaction_lookup.is_empty() {
+            return self
+                .rules
+                .interactions
+                .iter()
+                .find(|rule| rule.enabled && rule.when == when && rule.with == with);
+        }
+        let index = self.interaction_lookup[when * self.rules.elements.len() + with];
+        self.rules.interactions.get(index)
+    }
+
     /// Grid width in cells.
     pub const fn width(&self) -> usize {
         self.width
@@ -516,4 +536,27 @@ impl World {
             std::cmp::Ordering::Equal => Wind::default(),
         }
     }
+}
+
+fn build_interaction_lookup(rules: &Rules) -> Vec<usize> {
+    const MAX_LOOKUP_CELLS: usize = 1_048_576;
+    let Some(length) = rules
+        .elements
+        .len()
+        .checked_mul(rules.elements.len())
+        .filter(|length| *length <= MAX_LOOKUP_CELLS)
+    else {
+        return Vec::new();
+    };
+    let mut lookup = vec![usize::MAX; length];
+    let element_count = rules.elements.len();
+    for (index, rule) in rules.interactions.iter().enumerate() {
+        if rule.enabled && rule.when < element_count && rule.with < element_count {
+            let slot = &mut lookup[rule.when * element_count + rule.with];
+            if *slot == usize::MAX {
+                *slot = index;
+            }
+        }
+    }
+    lookup
 }

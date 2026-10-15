@@ -41,6 +41,27 @@ fn disabled_rule_never_fires_and_can_be_reenabled() {
 }
 
 #[test]
+fn indexed_interactions_preserve_enabled_order_and_live_edits() {
+    let text = PAIR.replace("chance = 1.0", "chance = 0.0\nenabled = false")
+        + "\n[[interactions]]\nwhen = 'spark'\nwith = 'fuel'\nresult = 'spark'\nchance = 1.0\n";
+    let mut world = World::new(2, 1, 42, Rules::load(&text).unwrap()).unwrap();
+    world.paint(0, 0, 1);
+    world.paint(1, 0, 2);
+    world.step(2);
+    assert_eq!(world.cells()[1].element, 1);
+
+    world.paint(0, 0, 1);
+    world.paint(1, 0, 2);
+    world.set_interaction(1, false, 1.0).unwrap();
+    world.step(2);
+    assert_eq!(world.cells()[1].element, 2);
+
+    world.set_interaction(0, true, 1.0).unwrap();
+    world.step(2);
+    assert_eq!(world.cells()[1].element, 1);
+}
+
+#[test]
 fn chance_changes_take_effect_without_resetting() {
     let mut world = pair();
     world.set_interaction(0, true, 0.0).unwrap();
