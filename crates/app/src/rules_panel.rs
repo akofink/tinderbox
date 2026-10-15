@@ -10,10 +10,8 @@ static DEFAULTS: LazyLock<Rules> =
 mod filter;
 use filter::Filter;
 
-#[cfg_attr(target_arch = "wasm32", derive(Default))]
 pub struct RulesPanel {
     pub open: bool,
-    #[cfg(not(target_arch = "wasm32"))]
     path: String,
     text: String,
     message: String,
@@ -21,12 +19,10 @@ pub struct RulesPanel {
     filter: Filter,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl Default for RulesPanel {
     fn default() -> Self {
         Self {
             open: false,
-            #[cfg(not(target_arch = "wasm32"))]
             path: "tinderbox-rules.toml".into(),
             text: String::new(),
             message: String::new(),
@@ -47,23 +43,19 @@ impl RulesPanel {
         self.report(result, "Rules applied. The world keeps running.");
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn load_file(&mut self, world: &mut World) {
-        let result = std::fs::read_to_string(&self.path)
-            .map_err(|e| format!("Cannot read rules: {e}"))
+        let result = crate::app::files::load_text(&self.path)
+            .map_err(|err| format!("Cannot read rules: {err}"))
             .and_then(|text| world.load_rules(&text).map_err(|e| e.to_string()));
         self.report(result, "Rules loaded. The world keeps running.");
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn save_file(&mut self, world: &World) {
         let result = world
             .rules()
             .to_toml()
             .map_err(|e| e.to_string())
-            .and_then(|text| {
-                std::fs::write(&self.path, text).map_err(|e| format!("Cannot save rules: {e}"))
-            });
+            .and_then(|text| crate::app::files::save_text("rules", &self.path, &text));
         self.report(result, "Rules saved.");
     }
 
@@ -292,19 +284,22 @@ impl RulesPanel {
                 });
                 ui.separator();
                 ui.collapsing("Save / load rules", |ui| {
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    ui.label("Rules file path (relative to working directory or absolute)");
-                    ui.text_edit_singleline(&mut self.path);
-                    ui.horizontal(|ui| {
-                        if ui.button("Save file").clicked() {
-                            self.save_file(world);
+                match crate::app::files::controls(ui, "rules", "tinderbox-rules.toml", &mut self.path) {
+                    Some(crate::app::files::Action::Save) => self.save_file(world),
+                    Some(crate::app::files::Action::Load) => self.load_file(world),
+                    Some(crate::app::files::Action::Upload) => {
+                        if let Err(err) = crate::app::files::begin_upload("rules") {
+                            crate::app::files::set_notice(err);
                         }
-                        if ui.button("Load file").clicked() {
-                            self.load_file(world);
-                        }
-                    });
+                    }
+                    Some(crate::app::files::Action::Restore) => match crate::app::files::load_text("rules") {
+                        Ok(text) => crate::app::files::finish_upload("rules", Ok(text)),
+                        Err(err) => crate::app::files::set_notice(err),
+                    },
+                    None => {}
                 }
+                let notice = crate::app::files::notice();
+                if !notice.is_empty() { ui.label(notice); }
                 ui.collapsing("Rules TOML (copy/paste)", |ui| {
                     ui.horizontal(|ui| {
                         if ui.button("Export current rules").clicked() {
@@ -327,8 +322,6 @@ impl RulesPanel {
                             .desired_width(f32::INFINITY),
                     );
                 });
-                #[cfg(target_arch = "wasm32")]
-                browser_files(ui, world);
                 });
                 ui.separator();
                 let grouped = grouped_interactions(world, &self.filter, defaults);
@@ -423,39 +416,6 @@ fn show_interaction(panel: &mut RulesPanel, ui: &mut egui::Ui, world: &mut World
             );
         }
     });
-}
-
-#[cfg(target_arch = "wasm32")]
-fn browser_files(ui: &mut egui::Ui, world: &World) {
-    use crate::app::files;
-    ui.horizontal_wrapped(|ui| {
-        if ui.button("Download rules").clicked() {
-            let result = world
-                .rules()
-                .to_toml()
-                .map_err(|e| e.to_string())
-                .and_then(|text| files::save_text("rules", "tinderbox-rules.toml", &text));
-            match result {
-                Ok(()) => files::set_notice("Downloaded the current tuned rules."),
-                Err(err) => files::set_notice(err),
-            }
-        }
-        if ui.button("Upload rules").clicked() {
-            if let Err(err) = files::begin_upload("rules") {
-                files::set_notice(err);
-            }
-        }
-        if ui.button("Stored rules").clicked() {
-            match files::load_text("rules") {
-                Ok(text) => files::finish_upload("rules", Ok(text)),
-                Err(err) => files::set_notice(err),
-            }
-        }
-    });
-    let notice = files::notice();
-    if !notice.is_empty() {
-        ui.label(notice);
-    }
 }
 
 #[cfg(test)]
