@@ -1359,6 +1359,50 @@ fn seeds_do_not_germinate_on_ash_when_hot_or_cooled() {
 }
 
 #[test]
+fn seeds_do_not_germinate_during_sustained_contact_with_an_ash_only_bed() {
+    let mut world = guaranteed_world(43, &[("seed", "ash"), ("ash", "seed")]);
+    let width = world.width();
+    let height = world.height();
+    let floor_y = height - 1;
+
+    // A stone floor naturally keeps the falling seed and ash side by side.
+    for x in 0..width {
+        put(&mut world, x, floor_y, "stone");
+    }
+    let seed_x = width / 2;
+    let seed_y = floor_y - 1;
+    put(&mut world, seed_x, seed_y, "seed");
+    put(&mut world, seed_x + 1, seed_y, "ash");
+
+    let assert_ash_only_contact = |world: &World, checkpoint: usize| {
+        assert!(
+            has(world, seed_x, seed_y, "seed"),
+            "seed moved at checkpoint {checkpoint}"
+        );
+        assert!(
+            has(world, seed_x + 1, seed_y, "ash"),
+            "ash moved at checkpoint {checkpoint}"
+        );
+        assert!(
+            world.cells().iter().all(|cell| {
+                ["air", "stone", "seed", "ash"]
+                    .iter()
+                    .any(|name| world.rules.elements[cell.element].name == *name)
+            }),
+            "non-ash substrate appeared at checkpoint {checkpoint}"
+        );
+    };
+
+    assert_ash_only_contact(&world, 0);
+    for sweep in 1..=128 {
+        assert_eq!(world.step(width * height), width * height);
+        if [1, 8, 32, 64, 128].contains(&sweep) {
+            assert_ash_only_contact(&world, sweep);
+        }
+    }
+}
+
+#[test]
 fn atmosphere_transfers_heat_and_phase_thresholds_are_data_driven() {
     let mut a = world(61);
     let mut b = world(61);
