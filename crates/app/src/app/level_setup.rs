@@ -72,6 +72,10 @@ impl LevelSetup {
             Ok(level)
         }) {
             Ok(mut level) => {
+                if level.fit_window {
+                    level.width = self.draft.width;
+                    level.height = self.draft.height;
+                }
                 level.add_missing_elements(rules);
                 self.seed_text = level.seed.to_string();
                 self.draft = level;
@@ -303,6 +307,24 @@ mod tests {
         assert!(setup.encode_draft().is_err());
         assert_eq!(setup.draft.seed, u64::MAX);
     }
+    #[test]
+    fn fit_window_recipe_uses_current_dimensions_when_restored() {
+        let rules = Rules::load(DEFAULT_RULES).unwrap();
+        let current = Preset::DryForest.level(&rules, 96, 64);
+        let mut recipe = current.clone();
+        recipe.width = 0;
+        recipe.height = 0;
+        recipe.fit_window = true;
+        let mut setup = LevelSetup::new(current);
+
+        setup.import_text(recipe.to_toml().unwrap(), &rules);
+
+        assert!(setup.error.is_none());
+        assert!(setup.draft.fit_window);
+        assert_eq!((setup.draft.width, setup.draft.height), (96, 64));
+        assert!(setup.draft.generate(rules).is_ok());
+    }
+
     #[test]
     fn loading_bad_text_preserves_draft_and_valid_text_adds_missing_elements() {
         let rules = Rules::load(DEFAULT_RULES).unwrap();
