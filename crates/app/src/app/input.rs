@@ -96,7 +96,11 @@ pub(super) fn handle_canvas_pointer(
     view_width: f32,
     pan_drag: bool,
 ) {
-    if app.level_setup.open || pan_drag || !response.hovered() {
+    if app.level_setup.open
+        || pan_drag
+        || (app.navigation_mode && !app.inspect_mode)
+        || !response.hovered()
+    {
         return;
     }
     let Some(pos) = response.interact_pointer_pos() else {

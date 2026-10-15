@@ -84,6 +84,26 @@ fn cloud_refresh_dirties_only_the_visible_world_span() {
 }
 
 #[test]
+fn finite_camera_pan_and_zoom_stay_in_bounds_and_keep_the_anchor() {
+    let mut app = Tinderbox::new_state(false);
+    app.camera_view_width = app.world.width() as f32;
+    app.zoom_camera(2.0, 0.5, app.world.width() as f32);
+    assert_eq!(app.camera_zoom, 2.0);
+    assert_eq!(app.camera_view_width, app.world.width() as f32 / 2.0);
+    assert!(
+        (app.camera_x + app.camera_view_width * 0.5 - app.world.width() as f32 * 0.5).abs() < 0.01
+    );
+
+    app.pan_camera(10_000.0, app.camera_view_width);
+    assert_eq!(
+        app.camera_x,
+        app.world.width() as f32 - app.camera_view_width
+    );
+    app.pan_camera(-10_000.0, app.camera_view_width);
+    assert_eq!(app.camera_x, 0.0);
+}
+
+#[test]
 fn camera_pan_dirties_only_newly_visible_columns() {
     let mut app = Tinderbox::new_state(false);
     let mut level = app.level.clone();
