@@ -1,6 +1,7 @@
 //! World canvas panel and pointer interactions.
 use crate::app::{Tinderbox, input, inspector, render};
 use eframe::egui::{self, Color32, Sense};
+use web_time::Instant;
 
 pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) -> egui::Rect {
     if app.level.fit_window {
@@ -21,7 +22,7 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) -> egui::Rect
             .stress_max_pending_dirty_regions
             .max(app.world.pending_dirty_regions());
     }
-    let upload_started = std::time::Instant::now();
+    let upload_started = Instant::now();
     let sky = render::upload_dirty(app);
     if app.stress_play {
         app.stress_max_upload_ms = app
@@ -62,7 +63,7 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) -> egui::Rect
     } else {
         false
     };
-    let draw_started = std::time::Instant::now();
+    let draw_started = Instant::now();
     render::draw_world(
         &app.world_texture,
         &painter,
