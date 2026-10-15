@@ -391,7 +391,6 @@ result = "stone"
 chance = 0.25
 
 # Contact with water hydrates soil; ash enriches it into faster-sprouting soil.
-# Seeds can also establish directly on a cool ash bed after fire, even in dry weather.
 [[interactions]]
 when = "soil"
 with = "water"
@@ -419,20 +418,6 @@ with = "ash"
 result = "fertile_soil"
 self_result = "fertile_soil"
 chance = 0.55
-
-[[interactions]]
-when = "seed"
-with = "ash"
-result = "fertile_soil"
-self_result = "plant"
-chance = 0.9
-
-[[interactions]]
-when = "ash"
-with = "seed"
-result = "plant"
-self_result = "fertile_soil"
-chance = 0.9
 
 [[interactions]]
 when = "seed"
