@@ -500,6 +500,20 @@ chance = 0.28
 # Moist soil wakes a decomposer near each kind of organic matter.
 [[interactions]]
 when = "wet_soil"
+with = "ash"
+result = "beetle"
+self_result = "wet_soil"
+chance = 0.16
+
+[[interactions]]
+when = "ash"
+with = "wet_soil"
+result = "wet_soil"
+self_result = "beetle"
+chance = 0.16
+
+[[interactions]]
+when = "wet_soil"
 with = "deadwood"
 result = "fungus"
 self_result = "fertile_soil"
@@ -536,6 +550,21 @@ chance = 0.16
 [[interactions]]
 when = "humus"
 with = "wet_soil"
+result = "fertile_soil"
+self_result = "termite"
+chance = 0.16
+
+# Humus meeting enriched soil wakes termites as the forest floor recovers.
+[[interactions]]
+when = "fertile_soil"
+with = "humus"
+result = "termite"
+self_result = "fertile_soil"
+chance = 0.16
+
+[[interactions]]
+when = "humus"
+with = "fertile_soil"
 result = "fertile_soil"
 self_result = "termite"
 chance = 0.16
