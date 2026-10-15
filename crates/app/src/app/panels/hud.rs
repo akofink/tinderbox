@@ -7,8 +7,10 @@ pub(super) fn show(app: &Tinderbox, painter: &Painter, rect: Rect) {
         return;
     }
     let frame_status = format!(
-        "{:.1} ms/frame   sim {:.1}s   {:.2}x requested, {:.2}x achieved",
-        app.frame_ms, app.sim_seconds, app.speed, app.sim_rate,
+        "{:.1} ms/frame   sim {:.1}s   {}",
+        app.frame_ms,
+        app.sim_seconds,
+        app.speed_status(),
     );
     let work_status = format!(
         "focus {} carry {} dropped {} dirty {}",

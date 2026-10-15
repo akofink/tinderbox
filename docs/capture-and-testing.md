@@ -45,6 +45,8 @@ Capture options:
 - `--span-evidence DIR` runs the scripted endless-world fire demonstration and saves the burning view, far-east view, and return view.
 - `--smooth-play` runs a 900-frame native heavy-play check. Add `--world-size=1024x640` to exercise a larger grid. The report includes simulation and texture-upload caps, frame intervals, and timing data.
 
+Fixed-step captures advance at deterministic simulation steps and label the HUD as `fixed-step capture`; their frame interval describes capture runtime, not interactive achieved speed. Use `--measure-real-seconds` to measure speed against wall time.
+
 Interactive simulation work adapts to a 10 ms target per frame and caps carried work at three frames at the requested speed. The HUD reports requested and achieved speed, pending work, and discarded excess work. Native windows start at 1360 × 860; worlds fit the visible canvas by default at 3.5 logical points per cell, and the **Cell size** control zooms from 2 to 8 points per cell. Resizing preserves existing cells and regenerates newly exposed terrain from the same level seed after a 120 ms debounce.
 
 For native fixed-step captures and desktop checks, use a stable recipe, seed, and requested time. Only describe properties visible in the resulting image.
