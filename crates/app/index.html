@@ -7,6 +7,15 @@
   <base data-trunk-public-url />
   <script>
     (() => {
+      const host = window.location.hostname;
+      const isLocalHost = host === "localhost" || host.endsWith(".localhost") ||
+        host === "127.0.0.1" || host === "[::1]";
+      if (window.location.protocol === "http:" && !isLocalHost) {
+        const secureUrl = new URL(window.location.href);
+        secureUrl.protocol = "https:";
+        window.location.replace(secureUrl.href);
+        return;
+      }
       const retryKey = "_tinderbox_reload";
       let pendingMessage;
       let recoveryScheduled = false;
