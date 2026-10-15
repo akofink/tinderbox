@@ -63,6 +63,8 @@ cargo test --workspace
 
 On touch screens, enable **Inspect (M)** and tap a cell to pin the Inspector there. Taps in Inspect mode select cells instead of painting; tap **Inspect (M)** again to return to painting. A primary drag paints as before. Pinch gestures are not interpreted by the Inspector, and the browser canvas disables native page zoom, so pinch-to-zoom is not currently available. Endless-world panning still uses the existing mouse/keyboard gestures rather than mapping a single-finger drag that would conflict with painting.
 
+At compact phone viewports (width at most 600 CSS px or height at most 500 CSS px), primary toolbar buttons use 44×44 CSS px targets; wind directions use 52×44, **Rules** uses 56×44, and **Inspect (M)** remains 104×44. Toolbar sliders and setup controls get a 44 px minimum interaction height. Sliders keep their available responsive width rather than forcing every dense control to 44 px wide; wind strength is 104×44. The compact setup panel is scrollable, stays within the viewport width, and caps its height to preserve a canvas view; setup controls are laid out in one column. Desktop layout and pointer-sizing are unchanged. Browser regression coverage uses touch emulation at 390×844, 844×390, and 320×640.
+
 The browser smoke test builds the WebAssembly app, serves it, and checks that it starts and renders in Chromium. Run it in an environment with Trunk, Chromium, Node, and Python installed:
 
 ```sh

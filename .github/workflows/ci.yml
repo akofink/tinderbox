@@ -71,3 +71,4 @@ jobs:
           python scripts/assert-web-smoke-image.py
           node scripts/mobile-touch-smoke.mjs
           python scripts/assert-mobile-touch-smoke.py
+          node scripts/mobile-setup-toolbar-smoke.mjs
