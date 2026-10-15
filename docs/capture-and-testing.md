@@ -42,8 +42,10 @@ Capture options:
 - `--world-size WIDTHxHEIGHT` overrides the initial native world size when not loading a recipe.
 - `--speed RATE` selects a simulation speed from 0.25× through 10×.
 - `--measure-real-seconds SECONDS` runs interactively for a measured real-time interval and reports achieved speed and frame timings. Add `--screenshot FILE.png` to save the final frame.
-- `--span-evidence DIR` runs the scripted endless-world span demonstration and saves its evidence views.
+- `--span-evidence DIR` runs the scripted endless-world fire demonstration and saves the burning view, far-east view, and return view.
 - `--smooth-play` runs a 900-frame native heavy-play check. Add `--world-size=1024x640` to exercise a larger grid. The report includes simulation and texture-upload caps, frame intervals, and timing data.
+
+Interactive simulation work adapts to a 10 ms target per frame and caps carried work at three frames at the requested speed. The HUD reports requested and achieved speed, pending work, and discarded excess work. Native windows start at 1360 × 860; worlds fit the visible canvas by default at 3.5 logical points per cell, and the **Cell size** control zooms from 2 to 8 points per cell. Resizing preserves existing cells and regenerates newly exposed terrain from the same level seed after a 120 ms debounce.
 
 For native fixed-step captures and desktop checks, use a stable recipe, seed, and requested time. Only describe properties visible in the resulting image.
 
@@ -66,4 +68,4 @@ cd ../..
 python3 -m http.server 4173 --directory crates/app/dist
 ```
 
-In another shell, run `node scripts/web-smoke.mjs` against the local server. The smoke test and its image assertion are also part of CI. The simulation crate is headless and deterministic; its tests do not require a GPU or browser.
+In another shell at the repository root, run `node scripts/web-smoke.mjs` against the local server, followed by `python scripts/assert-web-smoke-image.py` to check the captured image. The smoke test and image assertion are also part of CI. The simulation crate is headless and deterministic; its tests do not require a GPU or browser.
