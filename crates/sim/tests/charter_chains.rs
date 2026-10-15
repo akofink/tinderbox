@@ -71,6 +71,55 @@ fn sample(world: &World, t: usize) {
 }
 
 #[test]
+fn direct_water_contact_extinguishes_fire_and_keeps_it_out_for_multiple_sweeps() {
+    let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+    let fire = rules.id("fire").unwrap();
+    let water = rules.id("water").unwrap();
+    let dousing = rules
+        .interactions
+        .iter_mut()
+        .find(|rule| rule.when == fire && rule.with == water)
+        .expect("default rules should include direct fire/water dousing");
+    dousing.chance = 1.0;
+
+    let mut world = World::new(8, 8, 0xD0_051E, rules).unwrap();
+    world.paint(3, 6, fire);
+    world.paint(4, 6, water);
+    assert_eq!(count(&world, "fire"), 1);
+    assert_eq!(count(&world, "water"), 1);
+    assert_eq!(count(&world, "steam"), 0);
+
+    tick(&mut world);
+    assert_eq!(
+        count(&world, "fire"),
+        0,
+        "water must extinguish the only fire"
+    );
+    assert_eq!(
+        count(&world, "water"),
+        0,
+        "contacted water must be consumed"
+    );
+    assert!(
+        count(&world, "steam") > 0,
+        "dousing must turn water into steam"
+    );
+
+    for sweep in 1..=5 {
+        tick(&mut world);
+        assert_eq!(
+            count(&world, "fire"),
+            0,
+            "fire must not reappear during controlled sweep {sweep}"
+        );
+        assert!(
+            count(&world, "water") + count(&world, "steam") > 0,
+            "the dousing product must remain water or steam during sweep {sweep}"
+        );
+    }
+}
+
+#[test]
 fn charter_chains_are_measurable_and_regression_covered() {
     // A soaked front must stop while its seeded, unwatered control continues spreading.
     let mut wet = world(48, 32, 7);
