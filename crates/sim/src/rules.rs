@@ -123,6 +123,9 @@ struct RawElement {
     #[serde(default)]
     lifetime: u16,
     decay_to: Option<String>,
+    alternate_decay_to: Option<String>,
+    #[serde(default)]
+    alternate_decay_chance: f32,
     emission: Option<String>,
     #[serde(default)]
     carries_moisture: bool,
@@ -264,6 +267,20 @@ impl Rules {
                     e.name
                 )));
             }
+            if !e.alternate_decay_chance.is_finite()
+                || !(0.0..=1.0).contains(&e.alternate_decay_chance)
+            {
+                return Err(RulesError(format!(
+                    "element '{}' alternate_decay_chance must be between 0 and 1",
+                    e.name
+                )));
+            }
+            if e.alternate_decay_chance > 0.0 && e.alternate_decay_to.is_none() {
+                return Err(RulesError(format!(
+                    "element '{}' alternate_decay_chance requires alternate_decay_to",
+                    e.name
+                )));
+            }
             elements.push(Element {
                 name: e.name,
                 color: e.color,
@@ -276,6 +293,12 @@ impl Rules {
                     .as_deref()
                     .map(|v| id(v, "decay_to"))
                     .transpose()?,
+                alternate_decay_to: e
+                    .alternate_decay_to
+                    .as_deref()
+                    .map(|v| id(v, "alternate_decay_to"))
+                    .transpose()?,
+                alternate_decay_chance: e.alternate_decay_chance,
                 emission: e
                     .emission
                     .as_deref()
@@ -348,6 +371,8 @@ impl Rules {
                     density: e.density,
                     lifetime: e.lifetime,
                     decay_to: e.decay_to.map(name).transpose()?,
+                    alternate_decay_to: e.alternate_decay_to.map(name).transpose()?,
+                    alternate_decay_chance: e.alternate_decay_chance,
                     emission: e.emission.map(name).transpose()?,
                     carries_moisture: e.carries_moisture,
                     moisture_rate: e.moisture_rate,

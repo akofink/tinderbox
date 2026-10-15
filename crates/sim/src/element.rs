@@ -49,6 +49,10 @@ pub struct Element {
     pub density: u8,
     pub lifetime: u16,
     pub decay_to: Option<usize>,
+    /// Optional probabilistic decay outcome, selected instead of `decay_to`.
+    pub alternate_decay_to: Option<usize>,
+    /// Chance of selecting `alternate_decay_to` when an element expires.
+    pub alternate_decay_chance: f32,
     pub emission: Option<usize>,
     /// Whether this material exchanges moisture with its local atmosphere.
     pub carries_moisture: bool,

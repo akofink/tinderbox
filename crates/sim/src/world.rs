@@ -63,6 +63,7 @@ pub struct World {
     pub(super) scheduler: Scheduler,
     pub(super) dirty_regions: DirtyRegions,
     pub(super) rng: u64,
+    pub(super) decay_rng: u64,
     pub(super) density_rng: u64,
     pub(super) weather_rng: u64,
     pub(super) wind: Wind,
@@ -118,6 +119,7 @@ impl World {
             scheduler: Scheduler::new(count),
             dirty_regions: DirtyRegions::new(width, height),
             rng: seed.max(1),
+            decay_rng: (seed ^ 0xDEC4_9EED_51A7_0001).max(1),
             density_rng: (seed ^ 0xD1CE_BA5E_5EED_1234).max(1),
             weather_rng: seed.wrapping_add(0x9e37_79b9_7f4a_7c15).max(1),
             wind: Wind::default(),
@@ -306,6 +308,7 @@ impl World {
         }
 
         self.rng = previous.rng;
+        self.decay_rng = previous.decay_rng;
         self.density_rng = previous.density_rng;
         self.weather_rng = previous.weather_rng;
         self.wind = previous.wind;

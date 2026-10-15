@@ -28,6 +28,7 @@ impl World {
         self.dormant_chunks.clear();
         self.dormant_bodies.clear();
         self.rng = seed.max(1);
+        self.decay_rng = (seed ^ 0xDEC4_9EED_51A7_0001).max(1);
     }
 
     /// Paints an in-bounds cell and prioritizes it and its neighbors for simulation.

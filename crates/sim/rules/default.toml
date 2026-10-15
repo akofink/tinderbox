@@ -146,6 +146,8 @@ density = 10
 lifetime = 24
 wind_response = 0.1
 decay_to = "ash"
+alternate_decay_to = "leaf_litter"
+alternate_decay_chance = 0.1
 emission = "smoke"
 
 [[elements]]
