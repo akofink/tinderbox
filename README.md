@@ -6,6 +6,8 @@ A living falling-element sandbox where fire, wind, weather, and ecosystems resha
 
 ![A wind-driven fire front moving through a forest, with east wind selected](docs/images/hero-fire.webp)
 
+*East wind carries a fire front into standing trees.*
+
 ![MIT licensed](https://img.shields.io/badge/license-MIT-blue)
 
 ## Screenshots
