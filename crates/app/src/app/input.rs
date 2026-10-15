@@ -96,12 +96,25 @@ pub(super) fn handle_canvas_pointer(
     view_width: f32,
     pan_drag: bool,
 ) {
-    if app.level_setup.open || app.inspect_mode || pan_drag || !response.hovered() {
+    if app.level_setup.open || pan_drag || !response.hovered() {
         return;
     }
     let Some(pos) = response.interact_pointer_pos() else {
         return;
     };
+    if app.inspect_mode {
+        if response.clicked_by(egui::PointerButton::Primary) {
+            app.inspect_cell = Some(cell_at(
+                pos,
+                rect,
+                view_width,
+                app.world.width(),
+                app.world.height(),
+                app.camera_x,
+            ));
+        }
+        return;
+    }
     if response.dragged_by(egui::PointerButton::Primary)
         || response.clicked_by(egui::PointerButton::Primary)
     {
@@ -118,6 +131,21 @@ pub(super) fn handle_canvas_pointer(
         let fire = app.world.rules().id("fire").unwrap_or(app.selected);
         paint_at(app, pos, rect, view_width, fire);
     }
+}
+
+fn cell_at(
+    pos: Pos2,
+    rect: Rect,
+    view_width: f32,
+    world_width: usize,
+    world_height: usize,
+    camera_x: f32,
+) -> (usize, usize) {
+    let (x, y) = screen_to_world(pos, rect, view_width, world_height, camera_x);
+    (
+        (x.floor() as isize).clamp(0, world_width.saturating_sub(1) as isize) as usize,
+        (y.floor() as isize).clamp(0, world_height.saturating_sub(1) as isize) as usize,
+    )
 }
 
 fn boat_at(app: &mut Tinderbox, pos: Pos2, rect: Rect, view_width: f32) {
@@ -161,5 +189,18 @@ mod tests {
         let (world_x, world_y) = screen_to_world(screen, rect, 240.0, 160, 80.0);
         assert!((world_x - 193.25).abs() < 0.001);
         assert!((world_y - 87.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn inspection_pointer_maps_to_a_clamped_world_cell() {
+        let rect = Rect::from_min_max(Pos2::new(10.0, 20.0), Pos2::new(210.0, 120.0));
+        assert_eq!(
+            cell_at(Pos2::new(110.0, 70.0), rect, 40.0, 40, 20, 5.0),
+            (25, 10)
+        );
+        assert_eq!(
+            cell_at(Pos2::new(500.0, 500.0), rect, 40.0, 40, 20, 5.0),
+            (39, 19)
+        );
     }
 }

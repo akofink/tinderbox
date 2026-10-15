@@ -86,7 +86,6 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) -> egui::Rect
     }
     input::handle_canvas_pointer(app, &response, rect, view_width, pan_drag);
     if app.inspect_mode {
-        #[cfg(not(target_arch = "wasm32"))]
         let inspect_pointer = app.inspect_cell.map(|(x, y)| {
             input::world_to_screen(
                 x as f32 + 0.5,
@@ -97,8 +96,6 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) -> egui::Rect
                 app.camera_x,
             )
         });
-        #[cfg(target_arch = "wasm32")]
-        let inspect_pointer = None;
         if let Some(pointer) = response.hover_pos().or(inspect_pointer) {
             inspector::show(app, &painter, rect, pointer, view_width);
         }

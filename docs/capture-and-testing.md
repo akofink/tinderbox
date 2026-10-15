@@ -61,6 +61,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
+On touch screens, enable **Inspect (M)** and tap a cell to pin the Inspector there. Taps in Inspect mode select cells instead of painting; tap **Inspect (M)** again to return to painting. A primary drag paints as before. Pinch gestures are not interpreted by the Inspector, and the browser canvas disables native page zoom, so pinch-to-zoom is not currently available. Endless-world panning still uses the existing mouse/keyboard gestures rather than mapping a single-finger drag that would conflict with painting.
+
 The browser smoke test builds the WebAssembly app, serves it, and checks that it starts and renders in Chromium. Run it in an environment with Trunk, Chromium, Node, and Python installed:
 
 ```sh

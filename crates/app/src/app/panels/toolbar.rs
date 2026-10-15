@@ -32,7 +32,18 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
         ui.label("Cell size");
         ui.add(egui::Slider::new(&mut app.cell_size, 2.0..=8.0).suffix(" pt"));
         ui.checkbox(&mut app.show_hud, "HUD");
-        ui.toggle_value(&mut app.inspect_mode, "Inspect (M)");
+        if ui
+            .add_sized(
+                egui::vec2(104.0, 44.0),
+                egui::Button::new("Inspect (M)").selected(app.inspect_mode),
+            )
+            .clicked()
+        {
+            app.inspect_mode = !app.inspect_mode;
+        }
+        if app.inspect_mode {
+            ui.label("Tap a cell; Inspect again to paint");
+        }
         let previous_overlay = app.overlay;
         egui::ComboBox::from_label("Overlay")
             .selected_text(match app.overlay {
