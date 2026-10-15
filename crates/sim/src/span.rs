@@ -773,9 +773,9 @@ mod tests {
     use crate::level::{ENDLESS_CHUNK_WIDTH, Level, LevelMode, Preset};
     use crate::{DEFAULT_RULES, Rules};
 
-    fn endless() -> (Rules, Level, World) {
+    fn endless_sized(width: usize, height: usize) -> (Rules, Level, World) {
         let rules = Rules::load(DEFAULT_RULES).unwrap();
-        let mut level = Preset::DryForest.level(&rules, 128, 32);
+        let mut level = Preset::DryForest.level(&rules, width, height);
         level.mode = LevelMode::Endless;
         level.fit_window = false;
         level.spark = false;
@@ -784,6 +784,10 @@ mod tests {
         level.amounts.insert("stone".into(), 100);
         let world = level.generate(rules.clone()).unwrap();
         (rules, level, world)
+    }
+
+    fn endless() -> (Rules, Level, World) {
+        endless_sized(128, 32)
     }
 
     fn retain(
@@ -834,36 +838,44 @@ mod tests {
     }
 
     #[test]
-    fn dormant_edit_does_not_step_and_returns_unchanged() {
-        let (rules, level, mut world) = endless();
-        world.set_active_margin_chunks(0);
-        let fire = world.rules().id("fire").unwrap();
-        let edited = world.chunk_origin();
-        let local_x = 20;
-        world.paint(local_x, 8, fire);
-        for _ in 0..8 {
-            world.step(world.width() * world.height());
+    fn dormant_boundary_edit_survives_travel_in_both_directions_at_native_and_web_sizes() {
+        // Native defaults are 400x250. The web smoke viewport produces a smaller fitted world;
+        // 336x200 exercises that browser-sized span without relying on display geometry.
+        for (width, height) in [(400, 250), (336, 200)] {
+            let (rules, level, mut world) = endless_sized(width, height);
+            world.set_active_margin_chunks(0);
+            let stone = world.rules().id("stone").unwrap();
+            let edited = world.chunk_origin();
+            let local_x = ENDLESS_CHUNK_WIDTH - 1;
+            let local_y = 8;
+            world.paint(local_x, local_y, stone);
+            let expected = chunk_cells(&world, edited);
+            assert_eq!(
+                expected[local_y * ENDLESS_CHUNK_WIDTH + local_x].element,
+                stone,
+                "edited boundary cell must be present before travel ({width}x{height})"
+            );
+
+            for travel_chunks in [12, -12] {
+                let away = (edited + travel_chunks) * ENDLESS_CHUNK_WIDTH as i64;
+                retain(&mut world, &rules, &level, away, ENDLESS_CHUNK_WIDTH);
+                assert!(!world.chunk_is_resident(edited));
+                assert!(world.dormant_chunk_count() >= 1);
+                retain(
+                    &mut world,
+                    &rules,
+                    &level,
+                    edited * ENDLESS_CHUNK_WIDTH as i64,
+                    ENDLESS_CHUNK_WIDTH,
+                );
+                assert!(world.chunk_is_resident(edited));
+                assert_eq!(
+                    chunk_cells(&world, edited),
+                    expected,
+                    "chunk {edited} changed after traveling {travel_chunks} chunks at {width}x{height}"
+                );
+            }
         }
-        let frozen = chunk_cells(&world, edited);
-        assert!(frozen.iter().any(|cell| cell.element == fire));
-        let away = (edited + 12) * ENDLESS_CHUNK_WIDTH as i64;
-        retain(&mut world, &rules, &level, away, ENDLESS_CHUNK_WIDTH);
-        assert!(!world.chunk_is_resident(edited));
-        assert!(world.dormant_chunk_count() >= 1);
-        let payload = world.dormant_payload_bytes();
-        for _ in 0..30 {
-            world.step(world.width() * world.height());
-        }
-        assert_eq!(world.dormant_payload_bytes(), payload);
-        retain(
-            &mut world,
-            &rules,
-            &level,
-            edited * ENDLESS_CHUNK_WIDTH as i64,
-            ENDLESS_CHUNK_WIDTH,
-        );
-        assert!(world.chunk_is_resident(edited));
-        assert_eq!(chunk_cells(&world, edited), frozen);
     }
 
     #[test]

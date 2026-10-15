@@ -420,6 +420,47 @@ mod tests {
     }
 
     #[test]
+    fn every_default_element_has_a_distinct_correct_tooltip() {
+        let mut world = world();
+        let elements = world.rules().elements.clone();
+        let mut titles = std::collections::HashSet::new();
+        for element in &elements {
+            let id = world.rules().id(&element.name).unwrap();
+            world.paint(3, 3, id);
+            let description = describe_cell(&world, 3, 3)
+                .unwrap_or_else(|| panic!("{} should be inspectable", element.name));
+            assert_eq!(
+                description.title,
+                crate::labels::display_name(&element.name)
+            );
+            assert!(
+                titles.insert(description.title.clone()),
+                "duplicate tooltip title for {}",
+                element.name
+            );
+            assert_eq!(description.category, crate::labels::group(&element.name));
+
+            let expected_behavior = if matches!(element.name.as_str(), "beetle" | "termite") {
+                "wanders over nearby ground"
+            } else {
+                match element.motion {
+                    Motion::Static => "stays in place",
+                    Motion::Fall => "falls under gravity",
+                    Motion::Liquid => "flows and settles",
+                    Motion::Gas => "rises and drifts with wind",
+                }
+            };
+            assert!(
+                description.lines[0].contains(expected_behavior),
+                "{} tooltip should explain {expected_behavior}: {:?}",
+                element.name,
+                description.lines
+            );
+        }
+        assert_eq!(titles.len(), world.rules().elements.len());
+    }
+
+    #[test]
     fn describes_critter_behavior() {
         let mut world = world();
         let beetle = world.rules().id("beetle").unwrap();
