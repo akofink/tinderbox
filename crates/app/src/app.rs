@@ -396,6 +396,8 @@ impl Tinderbox {
         height: usize,
         stress_play: bool,
     ) -> Self {
+        #[cfg(target_arch = "wasm32")]
+        let _ = std::time::Instant::now();
         let rules = Rules::load(DEFAULT_RULES).expect("bundled rules are validated by tests");
         let selected = rules.id("sand").unwrap_or(0);
         let mut level = Preset::DryForest.level(&rules, width, height);
