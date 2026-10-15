@@ -83,6 +83,7 @@ impl World {
             .ok_or_else(|| RulesError(format!("unknown interaction {index}")))?;
         rule.enabled = enabled;
         rule.chance = chance;
+        self.rebuild_interaction_lookup();
         Ok(())
     }
 
@@ -110,6 +111,7 @@ impl World {
         }
         self.dirty_regions.mark_all();
         self.rules = rules;
+        self.rebuild_interaction_lookup();
         Ok(())
     }
 

@@ -174,10 +174,7 @@ impl World {
                 self.mark_cell_dirty(j);
             }
             let rule = self
-                .rules
-                .interactions
-                .iter()
-                .find(|r| r.enabled && r.when == e && r.with == other)
+                .interaction(e, other)
                 .map(|r| (r.chance, r.downwind_bonus, r.result, r.self_result));
             let seed_on_hot_ash = (self.rules.elements[e].name == "seed"
                 && self.rules.elements[other].name == "ash"
@@ -318,19 +315,14 @@ impl World {
         let target = y * self.width + target_x;
         let element = self.cells[target].element;
         let fire = self.rules.id("fire").unwrap_or(usize::MAX);
-        let rule = self
-            .rules
-            .interactions
-            .iter()
-            .find(|rule| rule.enabled && rule.when == fire && rule.with == element)
-            .map(|rule| {
-                (
-                    rule.chance,
-                    rule.downwind_bonus,
-                    rule.result,
-                    rule.self_result,
-                )
-            });
+        let rule = self.interaction(fire, element).map(|rule| {
+            (
+                rule.chance,
+                rule.downwind_bonus,
+                rule.result,
+                rule.self_result,
+            )
+        });
         let Some((base_chance, downwind_bonus, result, self_result)) = rule else {
             return false;
         };
