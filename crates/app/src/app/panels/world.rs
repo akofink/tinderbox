@@ -31,37 +31,83 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) -> egui::Rect
     }
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 2.0, Color32::from_rgb(18, 22, 34));
-    let view_width = if app.level.mode == tinderbox_sim::level::LevelMode::Endless {
-        rect.width() * app.world.height() as f32 / rect.height().max(1.0)
-    } else {
-        app.world.width() as f32
-    };
+    let base_view_height = app.world.height() as f32;
+    let base_view_width = rect.width() * base_view_height / rect.height().max(1.0);
+    let view_width = (base_view_width / app.camera_zoom).max(1.0);
+    let view_height = (base_view_height / app.camera_zoom).max(1.0);
     app.center_camera_on_origin(view_width);
+    app.camera_view_height = view_height;
+    let mut camera = input::CameraView {
+        x: app.camera_x,
+        y: app.camera_y,
+        width: view_width,
+        height: view_height,
+    };
+    let pinch = ui
+        .input(|input| input.multi_touch())
+        .filter(|touch| touch.num_touches >= 2 && rect.contains(touch.center_pos));
+    if let Some(touch) = pinch {
+        app.touch_gesture_active = true;
+        app.zoom_camera(
+            touch.zoom_delta,
+            egui::vec2(
+                (touch.center_pos.x - rect.left()) / rect.width().max(1.0),
+                (touch.center_pos.y - rect.top()) / rect.height().max(1.0),
+            ),
+            base_view_width,
+            base_view_height,
+        );
+        camera = input::CameraView {
+            x: app.camera_x,
+            y: app.camera_y,
+            width: app.camera_view_width,
+            height: app.camera_view_height,
+        };
+    }
     if app.level.mode == tinderbox_sim::level::LevelMode::Endless && app.camera_initialized {
         let global =
             app.world_start_chunk as f32 * tinderbox_sim::ENDLESS_CHUNK_WIDTH as f32 + app.camera_x;
-        app.sync_active_span(global, view_width);
+        app.sync_active_span(global, camera.width);
+        camera.x = app.camera_x;
     }
-    let pan_drag = if app.level.mode == tinderbox_sim::level::LevelMode::Endless {
-        let (delta_x, shift_down, primary_down, middle_down, scroll) = ui.input(|input| {
+    let pan_drag = if pinch.is_some() || app.touch_gesture_active {
+        true
+    } else {
+        let (delta, shift_down, primary_down, middle_down, scroll) = ui.input(|input| {
             (
-                input.pointer.delta().x,
+                input.pointer.delta(),
                 input.modifiers.shift,
                 input.pointer.button_down(egui::PointerButton::Primary),
                 input.pointer.button_down(egui::PointerButton::Middle),
                 input.smooth_scroll_delta,
             )
         });
-        let dragging = response.hovered() && (middle_down || (shift_down && primary_down));
-        if dragging && delta_x != 0.0 {
-            app.pan_camera(-delta_x * view_width / rect.width().max(1.0), view_width);
+        let endless = app.level.mode == tinderbox_sim::level::LevelMode::Endless;
+        let dragging = response.hovered()
+            && ((endless && (middle_down || (shift_down && primary_down)))
+                || (app.navigation_mode && primary_down));
+        if dragging && delta != egui::Vec2::ZERO {
+            app.pan_camera_2d(
+                -delta.x * camera.width / rect.width().max(1.0),
+                if app.navigation_mode {
+                    -delta.y * camera.height / rect.height().max(1.0)
+                } else {
+                    0.0
+                },
+                camera.width,
+                camera.height,
+            );
+            camera.x = app.camera_x;
+            camera.y = app.camera_y;
         }
-        if response.hovered() && scroll != egui::Vec2::ZERO {
-            app.pan_camera(-(scroll.x + scroll.y) * 0.2, view_width);
+        if app.level.mode == tinderbox_sim::level::LevelMode::Endless
+            && response.hovered()
+            && scroll != egui::Vec2::ZERO
+        {
+            app.pan_camera(-(scroll.x + scroll.y) * 0.2, camera.width);
+            camera.x = app.camera_x;
         }
         dragging
-    } else {
-        false
     };
     let draw_started = Instant::now();
     render::draw_world(
@@ -69,35 +115,23 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) -> egui::Rect
         &painter,
         rect,
         app.world.width(),
-        app.camera_x,
-        view_width,
+        app.world.height(),
+        camera,
     );
-    render::draw_life_sprites(
-        &app.world,
-        &painter,
-        rect,
-        app.overlay,
-        &sky,
-        app.camera_x,
-        view_width,
-    );
+    render::draw_life_sprites(&app.world, &painter, rect, app.overlay, &sky, camera);
     if app.level.mode == tinderbox_sim::level::LevelMode::Endless {
         render::draw_endless_cursor(&painter, rect);
     }
-    input::handle_canvas_pointer(app, &response, rect, view_width, pan_drag);
+    input::handle_canvas_pointer(app, &response, rect, camera, pan_drag);
+    if app.touch_gesture_active && !ui.input(|input| input.any_touches()) {
+        app.touch_gesture_active = false;
+    }
     if app.inspect_mode {
-        let inspect_pointer = app.inspect_cell.map(|(x, y)| {
-            input::world_to_screen(
-                x as f32 + 0.5,
-                y as f32 + 0.5,
-                rect,
-                view_width,
-                app.world.height(),
-                app.camera_x,
-            )
-        });
+        let inspect_pointer = app
+            .inspect_cell
+            .map(|(x, y)| input::world_to_screen(x as f32 + 0.5, y as f32 + 0.5, rect, camera));
         if let Some(pointer) = response.hover_pos().or(inspect_pointer) {
-            inspector::show(app, &painter, rect, pointer, view_width);
+            inspector::show(app, &painter, rect, pointer, camera);
         }
     }
     super::hud::show(app, &painter, rect);

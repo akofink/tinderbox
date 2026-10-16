@@ -1,5 +1,5 @@
 //! Read-only magnified view and plain-language description of the hovered cell.
-use super::{Tinderbox, input};
+use super::{Tinderbox, input, input::CameraView};
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Stroke, Vec2};
 use tinderbox_sim::{Motion, World};
 
@@ -224,15 +224,9 @@ pub(super) fn show(
     painter: &egui::Painter,
     canvas: Rect,
     pointer: Pos2,
-    view_width: f32,
+    camera: CameraView,
 ) {
-    let (world_x, world_y) = input::screen_to_world(
-        pointer,
-        canvas,
-        view_width,
-        app.world.height(),
-        app.camera_x,
-    );
+    let (world_x, world_y) = input::screen_to_world(pointer, canvas, camera);
     let x =
         (world_x.floor() as isize).clamp(0, app.world.width().saturating_sub(1) as isize) as usize;
     let y =
@@ -240,8 +234,8 @@ pub(super) fn show(
     let Some(description) = describe_cell(&app.world, x, y) else {
         return;
     };
-    let cell_w = canvas.width() / view_width.max(1.0);
-    let cell_h = canvas.height() / app.world.height() as f32;
+    let cell_w = canvas.width() / camera.width.max(1.0);
+    let cell_h = canvas.height() / camera.height.max(1.0);
     let lens_size = Vec2::new(
         cell_w * LENS_WIDTH as f32 * MAGNIFICATION,
         cell_h * LENS_HEIGHT as f32 * MAGNIFICATION,
@@ -290,14 +284,7 @@ pub(super) fn show(
         Stroke::new(2.0_f32, Color32::WHITE),
         egui::StrokeKind::Outside,
     );
-    let cell_center = input::world_to_screen(
-        x as f32 + 0.5,
-        y as f32 + 0.5,
-        canvas,
-        view_width,
-        app.world.height(),
-        app.camera_x,
-    );
+    let cell_center = input::world_to_screen(x as f32 + 0.5, y as f32 + 0.5, canvas, camera);
     painter.circle_stroke(
         cell_center,
         cell_w.max(cell_h) * 0.9,

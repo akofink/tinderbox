@@ -193,7 +193,12 @@ pub(super) struct Tinderbox {
     resize_target: Option<(usize, usize)>,
     resize_target_since: Instant,
     camera_x: f32,
+    camera_y: f32,
     camera_view_width: f32,
+    camera_view_height: f32,
+    camera_zoom: f32,
+    navigation_mode: bool,
+    touch_gesture_active: bool,
     camera_initialized: bool,
     world_start_chunk: i64,
     stress_play: bool,
@@ -499,7 +504,12 @@ impl Tinderbox {
             resize_target: None,
             resize_target_since: Instant::now(),
             camera_x: 0.0,
+            camera_y: 0.0,
             camera_view_width: width as f32,
+            camera_view_height: height as f32,
+            camera_zoom: 1.0,
+            navigation_mode: false,
+            touch_gesture_active: false,
             camera_initialized: false,
             world_start_chunk: 0,
             stress_play,
@@ -593,6 +603,9 @@ impl Tinderbox {
     }
 
     fn reset_camera_mode(&mut self, mode: LevelMode) {
+        self.camera_zoom = 1.0;
+        self.camera_x = 0.0;
+        self.camera_y = 0.0;
         if mode == LevelMode::Endless {
             let chunks = self.world.width() / ENDLESS_CHUNK_WIDTH;
             self.world_start_chunk = if self.world.chunk_span_enabled() {
@@ -631,10 +644,15 @@ impl Tinderbox {
     }
 
     pub(super) fn pan_camera(&mut self, delta: f32, view_width: f32) {
+        let previous_camera_x = self.camera_x;
         if self.level.mode != LevelMode::Endless {
+            self.camera_view_width = view_width.max(1.0);
+            self.camera_x = (self.camera_x + delta).clamp(
+                0.0,
+                (self.world.width() as f32 - self.camera_view_width).max(0.0),
+            );
             return;
         }
-        let previous_camera_x = self.camera_x;
         let previous_view_width = self.camera_view_width;
         let previous_camera_initialized = self.camera_initialized;
         let previous_world_width = self.world.width();
@@ -656,6 +674,55 @@ impl Tinderbox {
                 self.mark_newly_visible_world_span(previous_camera_x, previous_view_width);
             }
         }
+    }
+
+    pub(super) fn zoom_camera(
+        &mut self,
+        factor: f32,
+        anchor: egui::Vec2,
+        base_view_width: f32,
+        base_view_height: f32,
+    ) {
+        let old_view_width = self.camera_view_width.max(1.0);
+        let old_view_height = self.camera_view_height.max(1.0);
+        let anchor = egui::vec2(anchor.x.clamp(0.0, 1.0), anchor.y.clamp(0.0, 1.0));
+        let anchor_world_x = self.camera_x + old_view_width * anchor.x;
+        let anchor_world_y = self.camera_y + old_view_height * anchor.y;
+        let max_zoom = base_view_width.min(base_view_height).clamp(1.0, 8.0);
+        self.camera_zoom = (self.camera_zoom * factor).clamp(1.0, max_zoom);
+        let new_view_width = base_view_width / self.camera_zoom;
+        let new_view_height = (base_view_height / self.camera_zoom).max(1.0);
+        self.camera_view_width = new_view_width;
+        self.camera_view_height = new_view_height;
+        self.camera_x = anchor_world_x - new_view_width * anchor.x;
+        self.camera_y = anchor_world_y - new_view_height * anchor.y;
+        if self.level.mode == LevelMode::Endless {
+            self.camera_initialized = true;
+            self.pan_camera(0.0, new_view_width);
+        } else {
+            self.camera_x = self
+                .camera_x
+                .clamp(0.0, (self.world.width() as f32 - new_view_width).max(0.0));
+        }
+        self.camera_y = self
+            .camera_y
+            .clamp(0.0, (self.world.height() as f32 - new_view_height).max(0.0));
+        self.world.mark_all_dirty();
+    }
+
+    pub(super) fn pan_camera_2d(
+        &mut self,
+        delta_x: f32,
+        delta_y: f32,
+        view_width: f32,
+        view_height: f32,
+    ) {
+        self.pan_camera(delta_x, view_width);
+        self.camera_view_height = view_height.max(1.0);
+        self.camera_y = (self.camera_y + delta_y).clamp(
+            0.0,
+            (self.world.height() as f32 - self.camera_view_height).max(0.0),
+        );
     }
 
     fn mark_newly_visible_world_span(&mut self, previous_camera_x: f32, previous_view_width: f32) {

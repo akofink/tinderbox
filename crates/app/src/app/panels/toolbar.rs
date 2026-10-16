@@ -17,6 +17,17 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
         if toolbar_button(ui, "Reset", compact).clicked() {
             app.reset();
         }
+        if compact
+            && ui
+                .add_sized(
+                    egui::vec2(92.0, 44.0),
+                    egui::Button::new("Navigate").selected(app.navigation_mode),
+                )
+                .on_hover_text("Drag the canvas to pan; pinch to zoom")
+                .clicked()
+        {
+            app.navigation_mode = !app.navigation_mode;
+        }
         ui.separator();
         ui.label("Speed");
         ui.add(egui::Slider::new(&mut app.speed, 0.25..=10.0).suffix("×"));

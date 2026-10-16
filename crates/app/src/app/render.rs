@@ -1,5 +1,5 @@
 //! Incremental cell texture uploads and canvas geometry.
-use crate::app::{MAX_TEXTURE_REGIONS_PER_FRAME, Overlay, Tinderbox};
+use crate::app::{MAX_TEXTURE_REGIONS_PER_FRAME, Overlay, Tinderbox, input::CameraView};
 use eframe::egui::{
     Color32, ColorImage, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, TextureHandle,
     TextureOptions, Vec2,
@@ -506,17 +506,21 @@ pub(super) fn draw_world(
     painter: &Painter,
     rect: Rect,
     world_width: usize,
-    camera_x: f32,
-    view_width: f32,
+    world_height: usize,
+    camera: CameraView,
 ) {
     let texture_width = texture.size()[0] as f32;
-    let left = (camera_x / texture_width).clamp(0.0, 1.0);
+    let texture_height = texture.size()[1] as f32;
+    let left = (camera.x / texture_width).clamp(0.0, 1.0);
     let right =
-        ((camera_x + view_width) / texture_width).clamp(left, world_width as f32 / texture_width);
+        ((camera.x + camera.width) / texture_width).clamp(left, world_width as f32 / texture_width);
+    let top = (camera.y / texture_height).clamp(0.0, 1.0);
+    let bottom = ((camera.y + camera.height) / texture_height)
+        .clamp(top, world_height as f32 / texture_height);
     painter.image(
         texture.id(),
         rect,
-        Rect::from_min_max(Pos2::new(left, 0.0), eframe::egui::pos2(right, 1.0)),
+        Rect::from_min_max(Pos2::new(left, top), eframe::egui::pos2(right, bottom)),
         Color32::WHITE,
     );
 }
@@ -570,17 +574,18 @@ pub(super) fn draw_life_sprites(
     rect: Rect,
     overlay: Overlay,
     sky: &[bool],
-    camera_x: f32,
-    view_width: f32,
+    camera: CameraView,
 ) {
     if overlay != Overlay::None {
         return;
     }
-    let cell_width = rect.width() / view_width.max(1.0);
-    let cell_height = rect.height() / world.height() as f32;
-    let x_start = camera_x.floor().max(0.0) as usize;
-    let x_end = (camera_x + view_width).ceil().min(world.width() as f32) as usize;
-    for y in 0..world.height() {
+    let cell_width = rect.width() / camera.width.max(1.0);
+    let cell_height = rect.height() / camera.height.max(1.0);
+    let x_start = camera.x.floor().max(0.0) as usize;
+    let x_end = (camera.x + camera.width).ceil().min(world.width() as f32) as usize;
+    let y_start = camera.y.floor().max(0.0) as usize;
+    let y_end = (camera.y + camera.height).ceil().min(world.height() as f32) as usize;
+    for y in y_start..y_end {
         for x in x_start..x_end {
             let index = y * world.width() + x;
             let cell = &world.cells()[index];
@@ -593,8 +598,8 @@ pub(super) fn draw_life_sprites(
                 continue;
             }
             let center = Pos2::new(
-                rect.left() + (x as f32 + 0.5 - camera_x) * cell_width,
-                rect.top() + (y as f32 + 0.5) * cell_height,
+                rect.left() + (x as f32 + 0.5 - camera.x) * cell_width,
+                rect.top() + (y as f32 + 0.5 - camera.y) * cell_height,
             );
             match kind {
                 LifeSprite::Beetle => draw_beetle(painter, center, cell_width, cell_height),
