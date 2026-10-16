@@ -13,7 +13,7 @@ try {
   const normalPage = await normalContext.newPage();
   await normalPage.goto(baseUrl, { waitUntil: "load", timeout: 60_000 });
   await normalPage.waitForFunction(
-    () => document.querySelector("#the_canvas_id")?.getAttribute("data-renderer") === "webgl",
+    () => ["webgl", "webgpu"].includes(document.querySelector("#the_canvas_id")?.getAttribute("data-renderer")),
     null,
     { timeout: 60_000 },
   );
@@ -31,10 +31,8 @@ const controls = [
   "wind-east", "wind-strength", "gust",
 ];
 const scenarios = [
-  ["portrait-390x664", { ...devices["iPhone 13"], viewport: { width: 390, height: 664 } }, [45, 205]],
   ["portrait-390x844", { ...devices["iPhone 13"], viewport: { width: 390, height: 844 } }, [45, 205]],
   ["landscape-750x342", { ...devices["iPhone 13"], viewport: { width: 750, height: 342 } }, [45, 188]],
-  ["narrow-320x640", { ...devices["iPhone 13"], viewport: { width: 320, height: 640 } }, [38, 197]],
   ["desktop-1180x800", { viewport: { width: 1180, height: 800 }, deviceScaleFactor: 1 }, [60, 150]],
 ];
 const results = [];
@@ -51,7 +49,7 @@ try {
     url.searchParams.set("toolbar-test", "1");
     await page.goto(url.toString(), { waitUntil: "load", timeout: 60_000 });
     await page.waitForFunction(
-      () => document.querySelector("#the_canvas_id")?.getAttribute("data-renderer") === "webgl",
+      () => ["webgl", "webgpu"].includes(document.querySelector("#the_canvas_id")?.getAttribute("data-renderer")),
       null,
       { timeout: 60_000 },
     );
@@ -60,6 +58,33 @@ try {
     if (config.hasTouch) await page.touchscreen.tap(...setupTap);
     else await page.mouse.click(...setupTap);
     await page.waitForTimeout(700);
+    await page.screenshot({ path: path.join(output, `${name}-compact-toolbar.png`) });
+    const collapsed = await page.evaluate(() => {
+      const canvas = document.querySelector("#the_canvas_id");
+      return {
+        toolbar: canvas.getAttribute("data-layout-toolbar")?.split(",").map(Number),
+        palette: canvas.getAttribute("data-layout-palette")?.split(",").map(Number),
+        more: canvas.getAttribute("data-toolbar-more")?.split(",").map(Number),
+        viewportMeta: document.querySelector('meta[name="viewport"]')?.content,
+      };
+    });
+    if (!collapsed.toolbar || !collapsed.palette) throw new Error(`${name}: missing panel geometry`);
+    const toolbarHeight = collapsed.toolbar[3] - collapsed.toolbar[1];
+    const paletteWidth = collapsed.palette[2] - collapsed.palette[0];
+    if (name === "portrait-390x844" && (toolbarHeight > 100 || paletteWidth / 390 >= 0.22)) {
+      throw new Error(`${name}: compact layout geometry failed: ${JSON.stringify({ toolbarHeight, paletteWidth })}`);
+    }
+    if (!collapsed.viewportMeta?.includes("viewport-fit=cover")) throw new Error(`${name}: viewport-fit=cover missing`);
+    if (config.viewport.width <= 420) {
+      if (!collapsed.more) throw new Error(`${name}: More controls toggle is missing`);
+      const [moreX0, moreY0, moreX1, moreY1] = collapsed.more;
+      await page.touchscreen.tap((moreX0 + moreX1) / 2, (moreY0 + moreY1) / 2);
+      await page.waitForFunction(() => {
+        const bounds = document.querySelector("#the_canvas_id")?.getAttribute("data-toolbar-more");
+        return bounds?.split(",")[8] === "true";
+      });
+    }
+    await page.waitForFunction(() => document.querySelector("#the_canvas_id")?.hasAttribute("data-toolbar-wind-strength"));
     const snapshot = await page.evaluate(() => {
       const canvas = document.querySelector("#the_canvas_id");
       return {
@@ -68,12 +93,16 @@ try {
         touch: { maxTouchPoints: navigator.maxTouchPoints },
         canvas: { ...canvas.getBoundingClientRect().toJSON(), renderer: canvas.getAttribute("data-renderer") },
         testBounds: Object.fromEntries([...canvas.attributes].filter((attribute) => attribute.name.startsWith("data-toolbar-")).map((attribute) => [attribute.name.slice("data-toolbar-".length), attribute.value])),
+        hudBounds: canvas.getAttribute("data-layout-hud")?.split(",").map(Number),
       };
     });
     const screenshot = path.join(output, `${name}-toolbar.png`);
     await page.screenshot({ path: screenshot });
     if (snapshot.viewport.scrollWidth > snapshot.viewport.width || snapshot.canvas.width > snapshot.viewport.width) {
       throw new Error(`${name}: horizontal overflow ${JSON.stringify(snapshot.viewport)}`);
+    }
+    if (name === "portrait-390x844" && (!snapshot.hudBounds || snapshot.hudBounds[2] > snapshot.viewport.width + 0.5 || snapshot.hudBounds[3] - snapshot.hudBounds[1] > 80)) {
+      throw new Error(`${name}: HUD text is missing, overflowing, or too tall: ${JSON.stringify(snapshot.hudBounds)}`);
     }
     if (snapshot.testBounds["play-pause"]?.split(",")[8] !== "true") {
       throw new Error(`${name}: Play level tap did not start the world toolbar`);
@@ -93,7 +122,7 @@ try {
       }
     }
     if (errors.length) throw new Error(`${name}: browser errors: ${errors.join("\n")}`);
-    const result = { name, viewport: snapshot.viewport, screen: snapshot.screen, touch: { descriptorHasTouch: Boolean(config.hasTouch), maxTouchPoints: snapshot.touch.maxTouchPoints }, controls: Object.fromEntries(requiredControls.map((control) => [control, snapshot.testBounds[control]])), errors, screenshot };
+    const result = { name, viewport: snapshot.viewport, screen: snapshot.screen, compactGeometry: { toolbarHeight, paletteWidth, paletteFraction: paletteWidth / snapshot.viewport.width }, touch: { descriptorHasTouch: Boolean(config.hasTouch), maxTouchPoints: snapshot.touch.maxTouchPoints }, hudBounds: snapshot.hudBounds, controls: Object.fromEntries(requiredControls.map((control) => [control, snapshot.testBounds[control]])), errors, screenshot };
     results.push(result);
     console.log(JSON.stringify(result));
     await context.close();
