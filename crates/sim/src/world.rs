@@ -274,13 +274,12 @@ impl World {
                 continue;
             }
             for x in 0..copy_width {
-                let source = previous.cells[source_y as usize * previous.width + x];
+                let source_index = source_y as usize * previous.width + x;
+                let source = previous.cells[source_index];
                 let target = y * self.width + offset_x + x;
                 self.cells[target] = source;
                 self.cells[target].body_id = 0;
-                if self.rules.id("tree") == Some(source.element) {
-                    self.tree_support_age[target] = (target % 64) as u8;
-                }
+                self.tree_support_age[target] = previous.tree_support_age[source_index];
             }
         }
         for old_body in &previous.bodies {
