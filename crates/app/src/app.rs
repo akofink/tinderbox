@@ -1639,6 +1639,7 @@ impl eframe::App for Tinderbox {
         panels::toolbar::record_test_panel_bounds("toolbar", toolbar_panel.response.rect);
         let compact_palette = ctx.screen_rect().width() <= 480.0;
         let palette_panel = egui::SidePanel::left("palette")
+            .frame(egui::Frame::NONE)
             .resizable(true)
             .default_width(if compact_palette { 60.0 } else { 168.0 })
             .width_range(if compact_palette {
@@ -1650,9 +1651,11 @@ impl eframe::App for Tinderbox {
                 ui.add_enabled_ui(!self.level_setup.open, |ui| panels::palette::show(self, ui));
             });
         panels::toolbar::record_test_panel_bounds("palette", palette_panel.response.rect);
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add_enabled_ui(!self.level_setup.open, |ui| panels::world::show(self, ui));
-        });
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| {
+                ui.add_enabled_ui(!self.level_setup.open, |ui| panels::world::show(self, ui));
+            });
         if self.rules_panel.open && !self.level_setup.open {
             let selected_name = self
                 .world
