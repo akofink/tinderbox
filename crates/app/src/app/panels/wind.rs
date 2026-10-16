@@ -25,6 +25,12 @@ pub(in crate::app) fn show_directions(app: &mut Tinderbox, ui: &mut egui::Ui) {
         } else {
             ui.selectable_value(&mut wind.direction, direction, label)
         };
+        let name = match direction {
+            WindDirection::West => "wind-west",
+            WindDirection::Calm => "wind-calm",
+            WindDirection::East => "wind-east",
+        };
+        super::toolbar::record_test_bounds(ui, name, response.rect, String::new);
         if response.clicked() {
             wind.direction = direction;
             app.world.set_wind(wind.direction, wind.strength);
@@ -62,6 +68,7 @@ pub(in crate::app) fn show_strength_and_gust(
     } else {
         ui.selectable_label(app.gust_mode, "Gust brush")
     };
+    super::toolbar::record_test_bounds(ui, "gust", gust.rect, String::new);
     if gust.clicked() {
         app.gust_mode = !app.gust_mode;
         if app.gust_mode {

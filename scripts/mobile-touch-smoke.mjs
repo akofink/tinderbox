@@ -1,8 +1,10 @@
-import { chromium } from "playwright";
 import fs from "node:fs/promises";
+import path from "node:path";
+const playwright = await import(process.env.PLAYWRIGHT_PATH ? path.join(process.env.PLAYWRIGHT_PATH, "index.mjs") : "playwright");
+const { chromium } = playwright;
 
 const errors = [];
-const output = "tmp/mobile-touch-smoke";
+const output = process.env.TINDERBOX_TOUCH_OUTPUT_DIR ?? "tmp/mobile-touch-smoke";
 await fs.mkdir(output, { recursive: true });
 const browser = await chromium.launch({
   headless: true,
@@ -27,7 +29,9 @@ try {
   page.on("console", (message) => {
     if (message.type() === "error") errors.push(`console: ${message.text()}`);
   });
-  await page.goto("http://127.0.0.1:4173/", { waitUntil: "load", timeout: 60_000 });
+  const testUrl = new URL("http://127.0.0.1:4173/");
+  testUrl.searchParams.set("toolbar-test", "1");
+  await page.goto(testUrl.toString(), { waitUntil: "load", timeout: 60_000 });
   const canvas = page.locator("#the_canvas_id");
   await page.waitForFunction(() => {
     const target = document.querySelector("#the_canvas_id");
@@ -37,12 +41,18 @@ try {
   // Dismiss the initial level setup and use the visible touch-sized Inspect control.
   await page.touchscreen.tap(40, 204);
   await page.waitForTimeout(500);
-  await page.touchscreen.tap(112, 162);
+  const tapToolbarControl = async (name) => {
+    const encoded = await canvas.getAttribute(`data-toolbar-${name}`);
+    if (!encoded) throw new Error(`missing ${name} toolbar bounds`);
+    const [x0, y0, x1, y1] = encoded.split(",").slice(0, 4).map(Number);
+    await page.touchscreen.tap((x0 + x1) / 2, (y0 + y1) / 2);
+  };
+  await tapToolbarControl("inspect");
   await page.waitForTimeout(250);
-  await page.touchscreen.tap(250, 400);
+  await page.touchscreen.tap(250, 500);
   await page.waitForTimeout(250);
   await page.screenshot({ path: `${output}/inspected.png` });
-  await page.touchscreen.tap(112, 162);
+  await tapToolbarControl("inspect");
   await page.waitForTimeout(250);
   await page.screenshot({ path: `${output}/dismissed.png` });
 

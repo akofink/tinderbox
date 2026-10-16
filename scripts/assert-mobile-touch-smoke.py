@@ -1,6 +1,10 @@
+import os
 from pathlib import Path
 
 from PIL import Image
+
+
+output = Path(os.environ.get("TINDERBOX_TOUCH_OUTPUT_DIR", "tmp/mobile-touch-smoke"))
 
 
 def yellow_canvas_pixels(path: Path) -> int:
@@ -12,15 +16,15 @@ def yellow_canvas_pixels(path: Path) -> int:
     )
 
 
-inspected = yellow_canvas_pixels(Path("tmp/mobile-touch-smoke/inspected.png"))
-dismissed = yellow_canvas_pixels(Path("tmp/mobile-touch-smoke/dismissed.png"))
+inspected = yellow_canvas_pixels(output / "inspected.png")
+dismissed = yellow_canvas_pixels(output / "dismissed.png")
 # The Inspector marks its selected cell with a bright yellow circle. The baseline
 # scene and ordinary toolbar do not contain yellow marks in this canvas region.
 if inspected < 10:
     raise SystemExit(f"touch inspection marker missing: found {inspected} yellow canvas pixels")
 if dismissed >= 10:
     raise SystemExit(f"Inspector did not dismiss: found {dismissed} yellow canvas pixels")
-narrow = Image.open(Path("tmp/mobile-touch-smoke/narrow.png")).convert("RGB")
+narrow = Image.open(output / "narrow.png").convert("RGB")
 canvas_world_pixels = sum(
     70 < red < 150 and 70 < green < 160 and 80 < blue < 180
     for red, green, blue in narrow.crop((128, 450, 168, 490)).get_flattened_data()

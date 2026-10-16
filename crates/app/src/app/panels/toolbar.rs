@@ -14,7 +14,7 @@ pub(in crate::app) fn set_test_mode(enabled: bool) {
 
 pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
     let screen = ui.ctx().screen_rect().size();
-    if screen.x <= 360.0 {
+    if narrow_toolbar_layout(screen) {
         show_narrow(app, ui);
         return;
     }
@@ -23,38 +23,50 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
         ui.spacing_mut().interact_size = egui::vec2(44.0, 44.0);
     }
     ui.horizontal_wrapped(|ui| {
-        if toolbar_button(ui, if app.running { "Pause" } else { "Play" }, compact).clicked() {
+        let play = toolbar_button(ui, if app.running { "Pause" } else { "Play" }, compact);
+        record_test_bounds(ui, "play-pause", play.rect, || app.running.to_string());
+        if play.clicked() {
             app.running = !app.running;
         }
-        if toolbar_button(ui, "Step", compact).clicked() {
+        let step = toolbar_button(ui, "Step", compact);
+        record_test_bounds(ui, "step", step.rect, String::new);
+        if step.clicked() {
             app.request_step();
         }
-        if toolbar_button(ui, "Reset", compact).clicked() {
+        let reset = toolbar_button(ui, "Reset", compact);
+        record_test_bounds(ui, "reset", reset.rect, String::new);
+        if reset.clicked() {
             app.reset();
         }
-        if compact
-            && ui
+        if compact {
+            let navigate = ui
                 .add_sized(
                     egui::vec2(92.0, 44.0),
                     egui::Button::new("Navigate").selected(app.navigation_mode),
                 )
-                .on_hover_text("Drag the canvas to pan; pinch to zoom")
-                .clicked()
-        {
-            app.navigation_mode = !app.navigation_mode;
+                .on_hover_text("Drag the canvas to pan; pinch to zoom");
+            record_test_bounds(ui, "navigate", navigate.rect, String::new);
+            if navigate.clicked() {
+                app.navigation_mode = !app.navigation_mode;
+            }
         }
         ui.separator();
         ui.label("Speed");
-        ui.add(egui::Slider::new(&mut app.speed, 0.25..=10.0).suffix("×"));
+        let speed = ui.add(egui::Slider::new(&mut app.speed, 0.25..=10.0).suffix("×"));
+        record_test_bounds(ui, "speed", speed.rect, || app.speed.to_string());
         ui.label("Brush");
         let response = ui.add(egui::Slider::new(&mut app.brush, 1..=16).suffix(" cells"));
         record_test_bounds(ui, "brush", response.rect, || app.brush.to_string());
     });
     ui.horizontal_wrapped(|ui| {
-        if toolbar_button(ui, "Level setup", compact).clicked() {
+        let level_setup = toolbar_button(ui, "Level setup", compact);
+        record_test_bounds(ui, "level-setup", level_setup.rect, String::new);
+        if level_setup.clicked() {
             app.open_level_setup();
         }
-        if toolbar_button(ui, "Wildfire", compact).clicked() {
+        let wildfire = toolbar_button(ui, "Wildfire", compact);
+        record_test_bounds(ui, "wildfire", wildfire.rect, String::new);
+        if wildfire.clicked() {
             app.wildfire();
         }
         ui.label("Cell size");
@@ -62,21 +74,21 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
         record_test_bounds(ui, "cell-size", response.rect, || {
             format!("{:.2}", app.cell_size)
         });
-        ui.checkbox(&mut app.show_hud, "HUD");
-        if ui
-            .add_sized(
-                egui::vec2(104.0, 44.0),
-                egui::Button::new("Inspect (M)").selected(app.inspect_mode),
-            )
-            .clicked()
-        {
+        let hud = ui.checkbox(&mut app.show_hud, "HUD");
+        record_test_bounds(ui, "hud", hud.rect, || app.show_hud.to_string());
+        let inspect = ui.add_sized(
+            egui::vec2(104.0, 44.0),
+            egui::Button::new("Inspect (M)").selected(app.inspect_mode),
+        );
+        record_test_bounds(ui, "inspect", inspect.rect, String::new);
+        if inspect.clicked() {
             app.inspect_mode = !app.inspect_mode;
         }
         if app.inspect_mode {
             ui.label("Tap a cell; Inspect again to paint");
         }
         let previous_overlay = app.overlay;
-        egui::ComboBox::from_label("Overlay")
+        let overlay = egui::ComboBox::from_label("Overlay")
             .selected_text(match app.overlay {
                 Overlay::None => "Off",
                 Overlay::Temperature => "Temperature",
@@ -95,21 +107,22 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
                 ui.selectable_value(&mut app.overlay, Overlay::Moisture, "Material moisture");
                 ui.selectable_value(&mut app.overlay, Overlay::BurnProgress, "Burn progress");
             });
+        record_test_bounds(ui, "overlay", overlay.response.rect, String::new);
         if app.overlay != previous_overlay {
             app.world.mark_all_dirty();
         }
         if compact {
-            if ui
-                .add_sized(
-                    egui::vec2(56.0, 44.0),
-                    egui::Button::new("Rules").selected(app.rules_panel.open),
-                )
-                .clicked()
-            {
+            let rules = ui.add_sized(
+                egui::vec2(56.0, 44.0),
+                egui::Button::new("Rules").selected(app.rules_panel.open),
+            );
+            record_test_bounds(ui, "rules", rules.rect, String::new);
+            if rules.clicked() {
                 app.rules_panel.open = !app.rules_panel.open;
             }
         } else {
-            ui.toggle_value(&mut app.rules_panel.open, "Rules");
+            let rules = ui.toggle_value(&mut app.rules_panel.open, "Rules");
+            record_test_bounds(ui, "rules", rules.rect, String::new);
         }
     });
     ui.horizontal_wrapped(|ui| {
@@ -122,40 +135,40 @@ fn show_narrow(app: &mut Tinderbox, ui: &mut egui::Ui) {
     ui.spacing_mut().slider_width = 104.0;
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
-            if ui
-                .add_sized(
-                    egui::vec2(52.0, 44.0),
-                    egui::Button::new(if app.running { "Pause" } else { "Play" }),
-                )
-                .clicked()
-            {
+            let play = ui.add_sized(
+                egui::vec2(52.0, 44.0),
+                egui::Button::new(if app.running { "Pause" } else { "Play" }),
+            );
+            record_test_bounds(ui, "play-pause", play.rect, || app.running.to_string());
+            if play.clicked() {
                 app.running = !app.running;
             }
-            if toolbar_button(ui, "Step", true).clicked() {
+            let step = toolbar_button(ui, "Step", true);
+            record_test_bounds(ui, "step", step.rect, String::new);
+            if step.clicked() {
                 app.request_step();
             }
-            if ui
-                .add_sized(egui::vec2(52.0, 44.0), egui::Button::new("Reset"))
-                .clicked()
-            {
+            let reset = ui.add_sized(egui::vec2(52.0, 44.0), egui::Button::new("Reset"));
+            record_test_bounds(ui, "reset", reset.rect, String::new);
+            if reset.clicked() {
                 app.reset();
             }
-            if ui
-                .add_sized(
-                    egui::vec2(92.0, 44.0),
-                    egui::Button::new("Navigate").selected(app.navigation_mode),
-                )
-                .clicked()
-            {
+            let navigate = ui.add_sized(
+                egui::vec2(92.0, 44.0),
+                egui::Button::new("Navigate").selected(app.navigation_mode),
+            );
+            record_test_bounds(ui, "navigate", navigate.rect, String::new);
+            if navigate.clicked() {
                 app.navigation_mode = !app.navigation_mode;
             }
         });
         ui.horizontal(|ui| {
             ui.label("Speed");
-            ui.add_sized(
+            let speed = ui.add_sized(
                 egui::vec2(104.0, 44.0),
                 egui::Slider::new(&mut app.speed, 0.25..=10.0).suffix("×"),
             );
+            record_test_bounds(ui, "speed", speed.rect, || app.speed.to_string());
         });
         ui.horizontal(|ui| {
             ui.label("Brush");
@@ -166,16 +179,15 @@ fn show_narrow(app: &mut Tinderbox, ui: &mut egui::Ui) {
             record_test_bounds(ui, "brush", response.rect, || app.brush.to_string());
         });
         ui.horizontal(|ui| {
-            if ui
-                .add_sized(egui::vec2(92.0, 44.0), egui::Button::new("Level setup"))
-                .clicked()
-            {
+            let level_setup =
+                ui.add_sized(egui::vec2(92.0, 44.0), egui::Button::new("Level setup"));
+            record_test_bounds(ui, "level-setup", level_setup.rect, String::new);
+            if level_setup.clicked() {
                 app.open_level_setup();
             }
-            if ui
-                .add_sized(egui::vec2(76.0, 44.0), egui::Button::new("Wildfire"))
-                .clicked()
-            {
+            let wildfire = ui.add_sized(egui::vec2(76.0, 44.0), egui::Button::new("Wildfire"));
+            record_test_bounds(ui, "wildfire", wildfire.rect, String::new);
+            if wildfire.clicked() {
                 app.wildfire();
             }
         });
@@ -190,28 +202,27 @@ fn show_narrow(app: &mut Tinderbox, ui: &mut egui::Ui) {
             });
         });
         ui.horizontal(|ui| {
-            ui.checkbox(&mut app.show_hud, "HUD");
-            if ui
-                .add_sized(
-                    egui::vec2(104.0, 44.0),
-                    egui::Button::new("Inspect (M)").selected(app.inspect_mode),
-                )
-                .clicked()
-            {
+            let hud = ui.checkbox(&mut app.show_hud, "HUD");
+            record_test_bounds(ui, "hud", hud.rect, || app.show_hud.to_string());
+            let inspect = ui.add_sized(
+                egui::vec2(104.0, 44.0),
+                egui::Button::new("Inspect (M)").selected(app.inspect_mode),
+            );
+            record_test_bounds(ui, "inspect", inspect.rect, String::new);
+            if inspect.clicked() {
                 app.inspect_mode = !app.inspect_mode;
             }
-            if ui
-                .add_sized(
-                    egui::vec2(56.0, 44.0),
-                    egui::Button::new("Rules").selected(app.rules_panel.open),
-                )
-                .clicked()
-            {
+            let rules = ui.add_sized(
+                egui::vec2(56.0, 44.0),
+                egui::Button::new("Rules").selected(app.rules_panel.open),
+            );
+            record_test_bounds(ui, "rules", rules.rect, String::new);
+            if rules.clicked() {
                 app.rules_panel.open = !app.rules_panel.open;
             }
         });
         ui.horizontal(|ui| {
-            egui::ComboBox::from_label("Overlay")
+            let overlay = egui::ComboBox::from_label("Overlay")
                 .selected_text(match app.overlay {
                     Overlay::None => "Off",
                     Overlay::Temperature => "Temperature",
@@ -230,6 +241,7 @@ fn show_narrow(app: &mut Tinderbox, ui: &mut egui::Ui) {
                     ui.selectable_value(&mut app.overlay, Overlay::Moisture, "Material moisture");
                     ui.selectable_value(&mut app.overlay, Overlay::BurnProgress, "Burn progress");
                 });
+            record_test_bounds(ui, "overlay", overlay.response.rect, String::new);
         });
         ui.horizontal(|ui| super::wind::show_directions(app, ui));
         ui.horizontal(|ui| super::wind::show_strength_and_gust(app, ui, true));
@@ -280,6 +292,10 @@ fn toolbar_button(ui: &mut egui::Ui, label: &str, compact: bool) -> egui::Respon
     }
 }
 
+fn narrow_toolbar_layout(screen: egui::Vec2) -> bool {
+    screen.x <= 420.0
+}
+
 pub(in crate::app) fn compact_touch_layout(screen: egui::Vec2) -> bool {
     screen.x <= 600.0 || screen.y <= 500.0
 }
@@ -305,6 +321,11 @@ mod tests {
 
     #[test]
     fn compact_phone_viewports_size_toolbar_controls_for_touch() {
+        assert!(narrow_toolbar_layout(egui::vec2(390.0, 664.0)));
+        assert!(narrow_toolbar_layout(egui::vec2(390.0, 844.0)));
+        assert!(narrow_toolbar_layout(egui::vec2(320.0, 640.0)));
+        assert!(!narrow_toolbar_layout(egui::vec2(750.0, 342.0)));
+        assert!(!narrow_toolbar_layout(egui::vec2(1180.0, 800.0)));
         assert!(compact_touch_layout(egui::vec2(390.0, 844.0)));
         assert!(compact_touch_layout(egui::vec2(844.0, 390.0)));
         assert!(compact_touch_layout(egui::vec2(320.0, 640.0)));

@@ -52,10 +52,10 @@ jobs:
         working-directory: crates/app
         run: |
           "$GITHUB_WORKSPACE/trunk" build --release --public-url /
-      - name: Install Chromium and image inspection tools
+      - name: Install browser runtimes and image inspection tools
         run: |
           npm install --no-save --no-audit --no-fund playwright
-          npx playwright install --with-deps chromium
+          npx playwright install --with-deps chromium webkit
           python -m pip install pillow
       - name: Serve the built app and smoke-test it
         run: |
@@ -73,3 +73,5 @@ jobs:
           python scripts/assert-mobile-touch-smoke.py
           node scripts/mobile-setup-toolbar-smoke.mjs
           node scripts/mobile-gestures-smoke.mjs
+          export TINDERBOX_OUTPUT_DIR="${RUNNER_TEMP}/tinderbox-toolbar-webkit"
+          node scripts/mobile-toolbar-fit-webkit-smoke.mjs
