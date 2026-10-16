@@ -26,6 +26,8 @@ mod tests;
 pub use dirty::DirtyRegion;
 pub use element::{Cell, Element, Motion, Wind, WindDirection};
 pub use level::{ENDLESS_CHUNK_WIDTH, GeneratedChunk, LevelMode};
-pub use rules::{AtmosphereRules, DEFAULT_RULES, EcologyRules, Interaction, Rules, RulesError};
+pub use rules::{
+    AtmosphereRules, BurialRule, DEFAULT_RULES, EcologyRules, Interaction, Rules, RulesError,
+};
 pub use span::SpanAdjustment;
 pub use world::{AtmosphereCell, World, WorldError};

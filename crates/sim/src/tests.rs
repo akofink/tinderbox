@@ -476,6 +476,7 @@ fn put(world: &mut World, x: usize, y: usize, element: &str) {
     world.cells[index] = crate::Cell {
         element: id,
         age: 0,
+        burial_age: 0,
         moisture: 0,
         burn_progress: 0,
         body_id: 0,
@@ -910,6 +911,180 @@ fn trees_die_into_organic_matter_and_plants_mature_into_trees() {
     assert!(has(&world, 0, 0, "deadwood"));
     assert!(has(&world, 2, 1, "tree"));
     assert!(has(&world, 2, 0, "tree"));
+}
+
+#[test]
+fn burial_kills_plants_before_maturation_and_trees_into_deadwood() {
+    let mut plant = World::new(12, 10, 501, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    put(&mut plant, 5, 5, "plant");
+    put(&mut plant, 5, 4, "sand");
+    put(&mut plant, 4, 5, "stone");
+    put(&mut plant, 6, 5, "stone");
+    for _ in 0..119 {
+        plant.step(usize::MAX);
+    }
+    assert!(has(&plant, 5, 5, "plant"));
+    assert!(
+        !plant
+            .cells()
+            .iter()
+            .any(|cell| { cell.element == plant.rules().id("tree").unwrap() })
+    );
+    plant.step(usize::MAX);
+    assert!(
+        ["deadwood", "leaf_litter", "humus"].iter().any(|name| {
+            plant
+                .cells()
+                .iter()
+                .any(|cell| cell.element == plant.rules().id(name).unwrap())
+        }),
+        "a buried plant should leave existing dead organic matter"
+    );
+    assert!(
+        !plant
+            .cells()
+            .iter()
+            .any(|cell| { cell.element == plant.rules().id("tree").unwrap() })
+    );
+
+    let mut tree = World::new(12, 10, 502, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    put(&mut tree, 5, 6, "soil");
+    put(&mut tree, 5, 5, "tree");
+    put(&mut tree, 5, 4, "sand");
+    put(&mut tree, 4, 5, "stone");
+    put(&mut tree, 6, 5, "stone");
+    for _ in 0..48 {
+        tree.step(usize::MAX);
+    }
+    assert!(
+        tree.cells()
+            .iter()
+            .any(|cell| { cell.element == tree.rules().id("deadwood").unwrap() })
+    );
+}
+
+#[test]
+fn soil_and_stone_are_configured_burial_covers() {
+    for (seed, cover) in [(510, "soil"), (511, "stone")] {
+        let mut world = World::new(12, 10, seed, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+        put(&mut world, 5, 6, "soil");
+        put(&mut world, 5, 5, "tree");
+        put(&mut world, 5, 4, cover);
+        for _ in 0..48 {
+            world.step(usize::MAX);
+        }
+        assert!(
+            world
+                .cells()
+                .iter()
+                .any(|cell| { cell.element == world.rules().id("deadwood").unwrap() }),
+            "{cover} should trigger the configured overhead burial rule"
+        );
+    }
+}
+
+#[test]
+fn lateral_living_and_exposed_vegetation_do_not_count_as_burial() {
+    let mut side = World::new(12, 10, 520, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    put(&mut side, 5, 6, "soil");
+    put(&mut side, 5, 5, "tree");
+    put(&mut side, 4, 5, "stone");
+    for _ in 0..48 {
+        side.step(usize::MAX);
+    }
+    assert!(has(&side, 5, 5, "tree"));
+    assert!(
+        !side
+            .cells()
+            .iter()
+            .any(|cell| { cell.element == side.rules().id("deadwood").unwrap() })
+    );
+
+    for (seed, fluid_or_gas) in [(523, "water"), (524, "smoke")] {
+        let mut world = World::new(12, 10, seed, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+        put(&mut world, 5, 6, "soil");
+        put(&mut world, 5, 5, "tree");
+        put(&mut world, 5, 4, fluid_or_gas);
+        for _ in 0..48 {
+            world.step(usize::MAX);
+        }
+        assert!(
+            has(&world, 5, 5, "tree"),
+            "{fluid_or_gas} is not solid cover"
+        );
+    }
+
+    let mut canopy = World::new(12, 10, 521, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    put(&mut canopy, 5, 6, "soil");
+    put(&mut canopy, 5, 5, "tree");
+    put(&mut canopy, 5, 4, "tree");
+    for _ in 0..48 {
+        canopy.step(usize::MAX);
+    }
+    assert!(
+        canopy
+            .cells()
+            .iter()
+            .filter(|cell| { cell.element == canopy.rules().id("tree").unwrap() })
+            .count()
+            >= 2,
+        "a living canopy cell is not burial cover"
+    );
+
+    let mut exposed = World::new(12, 10, 522, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    put(&mut exposed, 5, 6, "soil");
+    put(&mut exposed, 5, 5, "plant");
+    for _ in 0..120 {
+        exposed.step(usize::MAX);
+    }
+    assert!(
+        has(&exposed, 5, 5, "tree"),
+        "uncovered plant maturation is unchanged"
+    );
+}
+
+#[test]
+fn burial_timer_resets_when_cover_is_removed() {
+    let mut world = World::new(12, 10, 529, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    put(&mut world, 5, 6, "soil");
+    put(&mut world, 5, 5, "tree");
+    let tree = 5 + 5 * world.width();
+    world.cells[tree].burial_age = 47;
+    world.step(usize::MAX);
+    assert_eq!(world.cells()[tree].burial_age, 0);
+
+    put(&mut world, 5, 4, "stone");
+    world.step(usize::MAX);
+    assert_eq!(
+        world.cells()[tree].element,
+        world.rules().id("tree").unwrap()
+    );
+}
+
+#[test]
+fn burial_products_remain_connected_to_existing_decomposition() {
+    let mut world = guaranteed_world(
+        530,
+        &[("wet_soil", "deadwood"), ("wet_soil", "leaf_litter")],
+    );
+    put(&mut world, 1, 1, "wet_soil");
+    put(&mut world, 2, 1, "deadwood");
+    put(&mut world, 3, 1, "leaf_litter");
+    world.step(usize::MAX);
+    assert!(has(&world, 1, 1, "fertile_soil"));
+    assert!(world.cells().iter().any(|cell| {
+        cell.element == world.rules().id("fungus").unwrap()
+            || cell.element == world.rules().id("beetle").unwrap()
+    }));
+}
+
+#[test]
+fn burial_rules_round_trip_with_the_data_driven_ruleset() {
+    let rules = Rules::load(DEFAULT_RULES).unwrap();
+    let exported = rules.to_toml().unwrap();
+    let loaded = Rules::load(&exported).unwrap();
+    assert_eq!(loaded.burial_rules.len(), 2);
+    assert_eq!(loaded.burial_rules[0].updates, 120);
 }
 
 #[test]
