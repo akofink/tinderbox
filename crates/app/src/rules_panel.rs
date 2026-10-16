@@ -99,25 +99,43 @@ impl RulesPanel {
                         "Default rules restored.",
                     );
                 }
-                ui.add(egui::TextEdit::singleline(&mut self.filter.query)
-                    .hint_text("Search rules (e.g. fire tree, heat)")
-                    .desired_width(f32::INFINITY));
-                ui.horizontal_wrapped(|ui| {
-                    ui.checkbox(&mut self.filter.changed_only, "Changed from default");
-                    if ui.button("Clear filters").clicked() {
-                        self.filter = Filter::default();
+                ui.scope(|ui| {
+                    let phone_touch = use_phone_touch_targets(ui);
+                    let search = egui::TextEdit::singleline(&mut self.filter.query)
+                        .hint_text("Search rules (e.g. fire tree, heat)");
+                    if phone_touch {
+                        ui.add_sized(egui::vec2(ui.available_width(), 48.0), search);
+                    } else {
+                        ui.add(search.desired_width(f32::INFINITY));
                     }
-                    if world.rules().id("fire").is_some() && ui.button("Fire rules").clicked() {
-                        self.filter = Filter { element: Some("fire".into()), ..Default::default() };
-                    }
-                });
-                ui.collapsing("Filter by element", |ui| {
                     ui.horizontal_wrapped(|ui| {
-                        ui.selectable_value(&mut self.filter.element, None, "All elements");
-                        for element in &world.rules().elements {
-                            ui.selectable_value(&mut self.filter.element, Some(element.name.clone()), labels::display_name(&element.name));
+                        ui.checkbox(&mut self.filter.changed_only, "Changed from default");
+                        if ui.button("Clear filters").clicked() {
+                            self.filter = Filter::default();
+                        }
+                        if world.rules().id("fire").is_some() && ui.button("Fire rules").clicked() {
+                            self.filter = Filter { element: Some("fire".into()), ..Default::default() };
                         }
                     });
+                    egui::ComboBox::from_label("Filter by element")
+                        .selected_text(
+                            self.filter
+                                .element
+                                .as_deref()
+                                .map(labels::display_name)
+                                .unwrap_or_else(|| "All elements".into()),
+                        )
+                        .show_ui(ui, |ui| {
+                            use_phone_touch_targets(ui);
+                            ui.selectable_value(&mut self.filter.element, None, "All elements");
+                            for element in &world.rules().elements {
+                                ui.selectable_value(
+                                    &mut self.filter.element,
+                                    Some(element.name.clone()),
+                                    labels::display_name(&element.name),
+                                );
+                            }
+                        });
                 });
                 if let Some(element) = &self.filter.element {
                     ui.label(format!("Involving {} (inputs or outputs)", labels::display_name(element)));
@@ -354,6 +372,15 @@ impl RulesPanel {
     }
 }
 
+fn use_phone_touch_targets(ui: &mut egui::Ui) -> bool {
+    let screen = ui.ctx().screen_rect().size();
+    let compact = screen.x <= 600.0 || screen.y <= 500.0;
+    if compact {
+        ui.spacing_mut().interact_size.y = 44.0;
+    }
+    compact
+}
+
 fn grouped_interactions(
     world: &World,
     filter: &Filter,
@@ -425,6 +452,90 @@ mod tests {
 
     fn world() -> World {
         World::new(2, 2, 7, Rules::load(DEFAULT_RULES).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn phone_filter_controls_have_touch_sized_targets_without_changing_desktop() {
+        for (width, height, compact) in [
+            (390.0, 844.0, true),
+            (844.0, 390.0, true),
+            (320.0, 640.0, true),
+            (1280.0, 800.0, false),
+        ] {
+            let ctx = egui::Context::default();
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(width, height),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        ui.scope(|ui| {
+                            assert_eq!(use_phone_touch_targets(ui), compact);
+                            let mut query = String::new();
+                            let search = egui::TextEdit::singleline(&mut query);
+                            let search = if compact {
+                                ui.add_sized(egui::vec2(ui.available_width(), 48.0), search)
+                            } else {
+                                ui.add(search.desired_width(f32::INFINITY))
+                            };
+                            let changed = ui.checkbox(&mut false, "Changed from default");
+                            let clear = ui.button("Clear filters");
+                            let fire = ui.button("Fire rules");
+                            let mut selected_element = None;
+                            let element = egui::ComboBox::from_label("Filter by element")
+                                .selected_text("All elements")
+                                .show_ui(ui, |ui| {
+                                    assert_eq!(use_phone_touch_targets(ui), compact);
+                                    let water = ui.selectable_value(
+                                        &mut selected_element,
+                                        Some("water"),
+                                        "Water",
+                                    );
+                                    if compact {
+                                        assert!(
+                                            water.rect.height() >= 44.0,
+                                            "Water option target too short at {width}x{height}: {:?}",
+                                            water.rect
+                                        );
+                                    } else {
+                                        assert!(
+                                            water.rect.height() < 44.0,
+                                            "desktop Water option unexpectedly changed: {:?}",
+                                            water.rect
+                                        );
+                                    }
+                                })
+                                .response;
+                            for (name, response) in [
+                                ("search", search),
+                                ("changed filter", changed),
+                                ("clear filters", clear),
+                                ("Fire quick access", fire),
+                                ("element filter", element),
+                            ] {
+                                if compact {
+                                    assert!(
+                                        response.rect.height() >= 44.0,
+                                        "{name} target too short at {width}x{height}: {:?}",
+                                        response.rect
+                                    );
+                                } else {
+                                    assert!(
+                                        response.rect.height() < 44.0,
+                                        "desktop {name} target unexpectedly changed: {:?}",
+                                        response.rect
+                                    );
+                                }
+                            }
+                        });
+                    });
+                },
+            );
+        }
     }
 
     #[test]
