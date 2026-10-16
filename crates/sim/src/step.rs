@@ -5,6 +5,20 @@ use crate::{
 };
 
 impl World {
+    /// Returns the configured burial rule when a living cell has a matching solid directly overhead.
+    /// This directional predicate is separate from pair interactions, which cannot distinguish
+    /// overhead cover from lateral adjacency. The rules and cover lists are preallocated at load time.
+    fn burial_rule_for(&self, index: usize) -> Option<(u16, usize)> {
+        let above = index.checked_sub(self.width)?;
+        let element = self.cells[index].element;
+        let cover = self.cells[above].element;
+        self.rules
+            .burial_rules
+            .iter()
+            .find(|rule| rule.when == element && rule.covered_by.contains(&cover))
+            .map(|rule| (rule.updates, rule.result))
+    }
+
     /// Processes at most `budget` work units, servicing recent player actions first.
     /// A rigid-body translation is charged by its member-cell count. Returns work units used.
     pub fn step(&mut self, budget: usize) -> usize {
@@ -107,6 +121,17 @@ impl World {
         let wind_response = element.wind_response;
         let is_ash = element.name == "ash";
         let is_tree = element.name == "tree";
+        let burial_rule = self.burial_rule_for(i);
+        let is_buried = burial_rule.is_some();
+        if let Some((updates, result)) = burial_rule {
+            self.cells[i].burial_age = self.cells[i].burial_age.saturating_add(1);
+            if self.cells[i].burial_age >= updates {
+                self.set_element(i, result);
+                return;
+            }
+        } else {
+            self.cells[i].burial_age = 0;
+        }
         if is_ash && self.cells[i].burn_progress == 2 {
             let retry_due = self.cells[i].age % 64 == 0;
             self.cells[i].age = self.cells[i].age.wrapping_add(1);
@@ -125,7 +150,7 @@ impl World {
                 }
             }
         }
-        if lifetime > 0 {
+        if lifetime > 0 && !is_buried {
             self.cells[i].age = self.cells[i].age.saturating_add(1);
             if self.cells[i].age >= lifetime {
                 if self.rules.elements[e].name == "plant"
@@ -873,6 +898,7 @@ impl World {
         self.cells[index] = crate::Cell {
             element,
             age: 0,
+            burial_age: 0,
             moisture: 0,
             // Tag tree-born flames so canopy can drop after they finish burning,
             // rather than interrupting the fire front while it is still spreading.

@@ -238,6 +238,21 @@ pressure_wind = 0.15
 oxygen_consumption = 0.2
 oxygen_diffusion = 0.08
 
+# Burial is sustained nonliving solid cover directly overhead. A plant's 120-update
+# window matches its exposed maturation time, but covered plants pause maturation.
+# Trees die sooner than their natural 60,000-update lifetime; existing organic matter decays normally.
+[[burial_rules]]
+when = "plant"
+covered_by = ["sand", "soil", "wet_soil", "fertile_soil", "stone"]
+result = "leaf_litter"
+updates = 120
+
+[[burial_rules]]
+when = "tree"
+covered_by = ["sand", "soil", "wet_soil", "fertile_soil", "stone"]
+result = "deadwood"
+updates = 48
+
 # Wind strengthens fire spread only when the target is directly downwind.
 [[interactions]]
 when = "fire"

@@ -8,6 +8,7 @@ impl World {
         self.cells.fill(Cell {
             element: air,
             age: 0,
+            burial_age: 0,
             moisture: 0,
             burn_progress: 0,
             body_id: 0,
@@ -51,6 +52,7 @@ impl World {
         self.cells[index] = Cell {
             element,
             age: 0,
+            burial_age: 0,
             moisture: 0,
             burn_progress: 0,
             body_id: 0,

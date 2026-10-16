@@ -366,6 +366,7 @@ impl World {
                 let fresh = generated.cells[source + x];
                 if cell.element != fresh.element
                     || cell.age != fresh.age
+                    || cell.burial_age != fresh.burial_age
                     || cell.moisture != fresh.moisture
                     || cell.burn_progress != fresh.burn_progress
                     || cell.body_id != 0
@@ -727,6 +728,7 @@ fn encode_cells(cells: &[Cell]) -> Result<Vec<u8>, WorldError> {
         }
         out.extend_from_slice(&(cell.element as u16).to_le_bytes());
         out.extend_from_slice(&cell.age.to_le_bytes());
+        out.extend_from_slice(&cell.burial_age.to_le_bytes());
         out.push(cell.moisture);
         out.push(cell.burn_progress);
         out.extend_from_slice(&(len as u16).to_le_bytes());
@@ -738,13 +740,14 @@ fn encode_cells(cells: &[Cell]) -> Result<Vec<u8>, WorldError> {
 fn decode_cells(bytes: &[u8], expected: usize) -> Result<Vec<Cell>, WorldError> {
     let mut cells = Vec::with_capacity(expected);
     let mut offset = 0;
-    while offset + 8 <= bytes.len() && cells.len() < expected {
+    while offset + 10 <= bytes.len() && cells.len() < expected {
         let element = u16::from_le_bytes(bytes[offset..offset + 2].try_into().unwrap()) as usize;
         let age = u16::from_le_bytes(bytes[offset + 2..offset + 4].try_into().unwrap());
-        let moisture = bytes[offset + 4];
-        let burn_progress = bytes[offset + 5];
-        let len = u16::from_le_bytes(bytes[offset + 6..offset + 8].try_into().unwrap()) as usize;
-        offset += 8;
+        let burial_age = u16::from_le_bytes(bytes[offset + 4..offset + 6].try_into().unwrap());
+        let moisture = bytes[offset + 6];
+        let burn_progress = bytes[offset + 7];
+        let len = u16::from_le_bytes(bytes[offset + 8..offset + 10].try_into().unwrap()) as usize;
+        offset += 10;
         if len == 0 || cells.len() + len > expected {
             return Err(WorldError("dormant chunk cell run is invalid".into()));
         }
@@ -752,6 +755,7 @@ fn decode_cells(bytes: &[u8], expected: usize) -> Result<Vec<Cell>, WorldError> 
             Cell {
                 element,
                 age,
+                burial_age,
                 moisture,
                 burn_progress,
                 body_id: 0,
