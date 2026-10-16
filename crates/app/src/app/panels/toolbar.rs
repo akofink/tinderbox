@@ -3,7 +3,12 @@ use crate::app::{Overlay, Tinderbox};
 use eframe::egui;
 
 pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
-    let compact = compact_touch_layout(ui.ctx().screen_rect().size());
+    let screen = ui.ctx().screen_rect().size();
+    if screen.x <= 360.0 {
+        show_narrow(app, ui);
+        return;
+    }
+    let compact = compact_touch_layout(screen);
     if compact {
         ui.spacing_mut().interact_size = egui::vec2(44.0, 44.0);
     }
@@ -95,6 +100,116 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
     });
     ui.horizontal_wrapped(|ui| {
         super::wind::show(app, ui);
+    });
+}
+
+fn show_narrow(app: &mut Tinderbox, ui: &mut egui::Ui) {
+    ui.spacing_mut().interact_size = egui::vec2(44.0, 44.0);
+    ui.vertical(|ui| {
+        ui.horizontal(|ui| {
+            if ui
+                .add_sized(
+                    egui::vec2(52.0, 44.0),
+                    egui::Button::new(if app.running { "Pause" } else { "Play" }),
+                )
+                .clicked()
+            {
+                app.running = !app.running;
+            }
+            if toolbar_button(ui, "Step", true).clicked() {
+                app.request_step();
+            }
+            if ui
+                .add_sized(egui::vec2(52.0, 44.0), egui::Button::new("Reset"))
+                .clicked()
+            {
+                app.reset();
+            }
+            if ui
+                .add_sized(
+                    egui::vec2(92.0, 44.0),
+                    egui::Button::new("Navigate").selected(app.navigation_mode),
+                )
+                .clicked()
+            {
+                app.navigation_mode = !app.navigation_mode;
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("Speed");
+            ui.add_sized(
+                egui::vec2(104.0, 44.0),
+                egui::Slider::new(&mut app.speed, 0.25..=10.0).suffix("×"),
+            );
+            ui.label("Brush");
+            ui.add_sized(
+                egui::vec2(104.0, 44.0),
+                egui::Slider::new(&mut app.brush, 1..=16).suffix(" cells"),
+            );
+        });
+        ui.horizontal(|ui| {
+            if ui
+                .add_sized(egui::vec2(92.0, 44.0), egui::Button::new("Level setup"))
+                .clicked()
+            {
+                app.open_level_setup();
+            }
+            if ui
+                .add_sized(egui::vec2(76.0, 44.0), egui::Button::new("Wildfire"))
+                .clicked()
+            {
+                app.wildfire();
+            }
+            ui.label("Cell size");
+            ui.add_sized(
+                egui::vec2(80.0, 44.0),
+                egui::Slider::new(&mut app.cell_size, 2.0..=8.0),
+            );
+        });
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut app.show_hud, "HUD");
+            if ui
+                .add_sized(
+                    egui::vec2(104.0, 44.0),
+                    egui::Button::new("Inspect (M)").selected(app.inspect_mode),
+                )
+                .clicked()
+            {
+                app.inspect_mode = !app.inspect_mode;
+            }
+            if ui
+                .add_sized(
+                    egui::vec2(56.0, 44.0),
+                    egui::Button::new("Rules").selected(app.rules_panel.open),
+                )
+                .clicked()
+            {
+                app.rules_panel.open = !app.rules_panel.open;
+            }
+        });
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_label("Overlay")
+                .selected_text(match app.overlay {
+                    Overlay::None => "Off",
+                    Overlay::Temperature => "Temperature",
+                    Overlay::Humidity => "Humidity",
+                    Overlay::Pressure => "Pressure",
+                    Overlay::Oxygen => "Oxygen",
+                    Overlay::Moisture => "Material moisture",
+                    Overlay::BurnProgress => "Burn progress",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut app.overlay, Overlay::None, "Off");
+                    ui.selectable_value(&mut app.overlay, Overlay::Temperature, "Temperature");
+                    ui.selectable_value(&mut app.overlay, Overlay::Humidity, "Humidity");
+                    ui.selectable_value(&mut app.overlay, Overlay::Pressure, "Pressure");
+                    ui.selectable_value(&mut app.overlay, Overlay::Oxygen, "Oxygen");
+                    ui.selectable_value(&mut app.overlay, Overlay::Moisture, "Material moisture");
+                    ui.selectable_value(&mut app.overlay, Overlay::BurnProgress, "Burn progress");
+                });
+        });
+        ui.horizontal(|ui| super::wind::show_directions(app, ui));
+        ui.horizontal(|ui| super::wind::show_strength_and_gust(app, ui, true));
     });
 }
 
