@@ -29,6 +29,9 @@ width = 384
 height = 240
 seed = "29"
 generator = "island"
+spark = false
+ambient_temperature = 20
+ambient_humidity = 45
 ambient_oxygen = 21
 boat = false
 boat_sand = 0
@@ -45,6 +48,6 @@ tree = 50
 water = 100
 ```
 
-Supported generators are `empty`, `hills`, `island`, `valley`, `boat_lake`, and `density_lab`. The two showcase generators build exact, sealed stone basins and place their demonstrations directly; material amount sliders do not alter those authored scenes. Set `boat = true` to add a small wooden hull over water; `boat_sand` stacks 0..8 sand cargo cells, and `boat_burning = true` starts a fire in a hull plank. These optional recipe fields default to no boat, no cargo, and no fire. Seeds are exported as decimal strings to preserve the full 64-bit range; non-negative TOML integers are also accepted. Missing element amounts default to zero. Wind directions are `calm`, `west` and `east`, with strength 0..4; recipes without a wind table default to calm. Older recipes without `ambient_oxygen` default to 21%. Unknown element names, unsupported versions, invalid dimensions and amounts outside 0..100 fail clearly. Omit both dimension fields to make the recipe fit the canvas, or include both for an explicit size. File loading is limited to 64 KiB.
+Supported generators are `empty`, `hills`, `island`, `valley`, `boat_lake`, and `density_lab`. The two showcase generators build exact, sealed stone basins and place their demonstrations directly; material amount sliders do not alter those authored scenes. Set `boat = true` to add a small wooden hull over water; `boat_sand` stacks 0..8 sand cargo cells, and `boat_burning = true` starts a fire in a hull plank. These optional recipe fields default to no boat, no cargo, and no fire. Seeds are exported as decimal strings to preserve the full 64-bit range; non-negative TOML integers are also accepted. Missing element amounts default to zero. Wind directions are `calm`, `west` and `east`, with strength 0..4; recipes without a wind table default to calm. `spark` defaults to `false`; when enabled, it starts a small upwind fire instead of scattering fire through the canopy. `ambient_temperature` sets the ambient temperature in °C and defaults to 20 (valid range -40..60); `ambient_humidity` sets ambient humidity as a percentage and defaults to 45 (valid range 0..100). Older recipes without `ambient_oxygen` default to 21%. Unknown element names, unsupported versions, invalid dimensions and amounts outside 0..100 fail clearly. Omit both dimension fields to make the recipe fit the canvas, or include both for an explicit size. File loading is limited to 64 KiB.
 
 **Reset** (or `R`) discards painting and evolution and regenerates the applied level using its original seed, wind and settings. It does not choose a new seed. To get a different world, open setup and use **Next seed**. Setup drafts and loaded files do not change the reset target until Play succeeds.
