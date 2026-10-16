@@ -41,15 +41,23 @@ try {
 } finally {
   await normalContext.close();
 }
-const portraitScenarios = [
+const mobileScenarios = [
   [390, 844, "portrait-390x844"],
   [393, 852, "portrait-393x852"],
+  [320, 640, "narrow"],
 ];
+const expectedMobileScenarios = new Set(["portrait-390x844", "portrait-393x852", "narrow"]);
+const actualMobileScenarios = new Set(mobileScenarios.map(([, , name]) => name));
+if (actualMobileScenarios.size !== expectedMobileScenarios.size ||
+    [...expectedMobileScenarios].some((name) => !actualMobileScenarios.has(name))) {
+  throw new Error(`Chromium mobile viewport coverage changed unexpectedly: ${mobileScenarios.map(([, , name]) => name).join(", ")}`);
+}
 const isPhonePortrait = (width, height) => width <= 420 && height >= 800;
-if (portraitScenarios.filter(([width, height]) => isPhonePortrait(width, height)).length !== 2) {
+if (mobileScenarios.filter(([width, height]) => isPhonePortrait(width, height)).length !== 2) {
   throw new Error("expected both phone portrait scenarios to exercise compact layout and HUD assertions");
 }
 let portraitAssertionsRun = 0;
+let narrowInteractionsRun = 0;
 const changedPixels = async (a, b) => {
   const [left, right] = await Promise.all([sharp(a).raw().toBuffer(), sharp(b).raw().toBuffer()]);
   let changed = 0;
@@ -61,7 +69,7 @@ const changedPixels = async (a, b) => {
   return changed;
 };
 try {
-  for (const [width, height, name] of portraitScenarios) {
+  for (const [width, height, name] of mobileScenarios) {
     const phonePortrait = isPhonePortrait(width, height);
     const context = await browser.newContext({
       viewport: { width, height },
@@ -159,7 +167,7 @@ try {
     if (width <= 420) {
       await page.waitForFunction(() => document.querySelector("#the_canvas_id")?.hasAttribute("data-toolbar-more"));
       const moreBounds = await readControl("more");
-      await page.touchscreen.tap((moreBounds.x0 + moreBounds.x1) / 2, (moreBounds.y0 + moreBounds.y1) / 2);
+      await page.touchscreen.tap((moreBounds.x0 + moreBounds.x1) / 2, dimensions.canvasRect.top + (moreBounds.y0 + moreBounds.y1) / 2);
       await page.waitForFunction(() => {
         const bounds = document.querySelector("#the_canvas_id")?.getAttribute("data-toolbar-more");
         return bounds?.split(",")[8] === "true";
@@ -192,8 +200,9 @@ try {
       errors,
     };
     if (name === "narrow") {
+      narrowInteractionsRun++;
       const speedBounds = await readControl("speed");
-      const speedY = (speedBounds.y0 + speedBounds.y1) / 2;
+      const speedY = dimensions.canvasRect.top + (speedBounds.y0 + speedBounds.y1) / 2;
       await page.mouse.move(speedBounds.x0 + 40, speedY);
       await page.mouse.down();
       await page.mouse.move(speedBounds.x0 + 100, speedY, { steps: 5 });
@@ -206,7 +215,7 @@ try {
 
       for (const attribute of ["brush", "cell-size", "wind-strength"]) {
         const before = await readControl(attribute);
-        await page.touchscreen.tap((before.x0 + before.x1) / 2, (before.y0 + before.y1) / 2);
+        await page.touchscreen.tap((before.x0 + before.x1) / 2, dimensions.canvasRect.top + (before.y0 + before.y1) / 2);
         await page.waitForFunction(({ attribute, previous }) => {
           const current = document.querySelector("#the_canvas_id")?.getAttribute(`data-toolbar-${attribute}`);
           return current && current.split(",")[8] !== previous;
@@ -216,17 +225,23 @@ try {
         path,
         clip: { x: 0, y: 0, width: 320, height: 330 },
       });
-      const beforeRules = await page.screenshot({
-        path: `${output}/before-rules-close-region.png`,
-        clip: { x: 293, y: 76, width: 27, height: 24 },
-      });
       const rulesBounds = await readControl("rules");
-      await page.touchscreen.tap((rulesBounds.x0 + rulesBounds.x1) / 2, (rulesBounds.y0 + rulesBounds.y1) / 2);
+      const rulesRegion = {
+        x: Math.max(0, Math.floor(rulesBounds.x0)),
+        y: Math.max(0, Math.floor(dimensions.canvasRect.top + rulesBounds.y0)),
+        width: Math.ceil(rulesBounds.x1 - rulesBounds.x0),
+        height: Math.ceil(rulesBounds.y1 - rulesBounds.y0),
+      };
+      const beforeRules = await page.screenshot({
+        path: `${output}/before-rules-control.png`,
+        clip: rulesRegion,
+      });
+      await page.touchscreen.tap((rulesBounds.x0 + rulesBounds.x1) / 2, dimensions.canvasRect.top + (rulesBounds.y0 + rulesBounds.y1) / 2);
       await page.waitForTimeout(250);
       await toolbarShot(`${output}/after-rules.png`);
       const afterRules = await page.screenshot({
-        path: `${output}/after-rules-close-region.png`,
-        clip: { x: 293, y: 76, width: 27, height: 24 },
+        path: `${output}/after-rules-control.png`,
+        clip: rulesRegion,
       });
       result.rulesCloseRegionChangedPixels = await changedPixels(beforeRules, afterRules);
       if (result.rulesCloseRegionChangedPixels < 20) {
@@ -242,6 +257,9 @@ try {
 }
 if (portraitAssertionsRun !== 2) {
   throw new Error(`expected compact geometry assertions for both phone portrait cases; ran ${portraitAssertionsRun}`);
+}
+if (narrowInteractionsRun !== 1) {
+  throw new Error(`expected narrow-screen touch interactions to run once; ran ${narrowInteractionsRun}`);
 }
 await fs.writeFile(`${output}/results.json`, JSON.stringify(results, null, 2));
 console.log(JSON.stringify(results, null, 2));
