@@ -2,32 +2,27 @@
 use super::Tinderbox;
 use eframe::egui::{self, Pos2, Rect, Response};
 
+#[derive(Clone, Copy, Debug)]
+pub(super) struct CameraView {
+    pub(super) x: f32,
+    pub(super) y: f32,
+    pub(super) width: f32,
+    pub(super) height: f32,
+}
+
 /// Convert a canvas pointer position into world-space cell coordinates.
-pub(crate) fn screen_to_world(
-    pos: Pos2,
-    rect: Rect,
-    view_width: f32,
-    world_height: usize,
-    camera_x: f32,
-) -> (f32, f32) {
-    let x = camera_x + (pos.x - rect.left()) / rect.width().max(1.0) * view_width;
-    let y = (pos.y - rect.top()) / rect.height().max(1.0) * world_height as f32;
+pub(super) fn screen_to_world(pos: Pos2, rect: Rect, camera: CameraView) -> (f32, f32) {
+    let x = camera.x + (pos.x - rect.left()) / rect.width().max(1.0) * camera.width;
+    let y = camera.y + (pos.y - rect.top()) / rect.height().max(1.0) * camera.height;
     (x, y)
 }
 
 /// Convert world-space cell coordinates into their canvas position.
 #[allow(dead_code)] // Shared with the parallel cell-inspector feature.
-pub(crate) fn world_to_screen(
-    x: f32,
-    y: f32,
-    rect: Rect,
-    view_width: f32,
-    world_height: usize,
-    camera_x: f32,
-) -> Pos2 {
+pub(super) fn world_to_screen(x: f32, y: f32, rect: Rect, camera: CameraView) -> Pos2 {
     Pos2::new(
-        rect.left() + (x - camera_x) / view_width.max(1.0) * rect.width(),
-        rect.top() + y / world_height.max(1) as f32 * rect.height(),
+        rect.left() + (x - camera.x) / camera.width.max(1.0) * rect.width(),
+        rect.top() + (y - camera.y) / camera.height.max(1.0) * rect.height(),
     )
 }
 
@@ -93,7 +88,7 @@ pub(super) fn handle_canvas_pointer(
     app: &mut Tinderbox,
     response: &Response,
     rect: Rect,
-    view_width: f32,
+    camera: CameraView,
     pan_drag: bool,
 ) {
     if app.level_setup.open
@@ -111,10 +106,9 @@ pub(super) fn handle_canvas_pointer(
             app.inspect_cell = Some(cell_at(
                 pos,
                 rect,
-                view_width,
+                camera,
                 app.world.width(),
                 app.world.height(),
-                app.camera_x,
             ));
         }
         return;
@@ -123,51 +117,50 @@ pub(super) fn handle_canvas_pointer(
         || response.clicked_by(egui::PointerButton::Primary)
     {
         if app.boat_tool {
-            boat_at(app, pos, rect, view_width);
+            boat_at(app, pos, rect, camera);
             app.boat_tool = false;
         } else if app.gust_mode {
-            gust_at(app, pos, rect, view_width);
+            gust_at(app, pos, rect, camera);
         } else {
-            paint_at(app, pos, rect, view_width, app.selected);
+            paint_at(app, pos, rect, camera, app.selected);
         }
     }
     if response.clicked_by(egui::PointerButton::Secondary) {
         let fire = app.world.rules().id("fire").unwrap_or(app.selected);
-        paint_at(app, pos, rect, view_width, fire);
+        paint_at(app, pos, rect, camera, fire);
     }
 }
 
 fn cell_at(
     pos: Pos2,
     rect: Rect,
-    view_width: f32,
+    camera: CameraView,
     world_width: usize,
     world_height: usize,
-    camera_x: f32,
 ) -> (usize, usize) {
-    let (x, y) = screen_to_world(pos, rect, view_width, world_height, camera_x);
+    let (x, y) = screen_to_world(pos, rect, camera);
     (
         (x.floor() as isize).clamp(0, world_width.saturating_sub(1) as isize) as usize,
         (y.floor() as isize).clamp(0, world_height.saturating_sub(1) as isize) as usize,
     )
 }
 
-fn boat_at(app: &mut Tinderbox, pos: Pos2, rect: Rect, view_width: f32) {
-    let (x, y) = screen_to_world(pos, rect, view_width, app.world.height(), app.camera_x);
+fn boat_at(app: &mut Tinderbox, pos: Pos2, rect: Rect, camera: CameraView) {
+    let (x, y) = screen_to_world(pos, rect, camera);
     let (x, y) = (x.floor() as usize, y.floor() as usize);
     app.world.place_boat(x, y);
 }
 
-fn gust_at(app: &mut Tinderbox, pos: Pos2, rect: Rect, view_width: f32) {
-    let (x, y) = screen_to_world(pos, rect, view_width, app.world.height(), app.camera_x);
+fn gust_at(app: &mut Tinderbox, pos: Pos2, rect: Rect, camera: CameraView) {
+    let (x, y) = screen_to_world(pos, rect, camera);
     let (x, y) = (x.floor() as usize, y.floor() as usize);
     let wind = app.world.wind();
     app.world
         .gust(x, y, app.brush / 2, wind.direction, wind.strength);
 }
 
-fn paint_at(app: &mut Tinderbox, pos: Pos2, rect: Rect, view_width: f32, element: usize) {
-    let (x, y) = screen_to_world(pos, rect, view_width, app.world.height(), app.camera_x);
+fn paint_at(app: &mut Tinderbox, pos: Pos2, rect: Rect, camera: CameraView, element: usize) {
+    let (x, y) = screen_to_world(pos, rect, camera);
     let (x, y) = (x.floor() as usize, y.floor() as usize);
     let size = app.brush as isize;
     let start = -(size / 2);
@@ -189,8 +182,14 @@ mod tests {
     #[test]
     fn world_screen_transforms_round_trip_with_camera_offset() {
         let rect = Rect::from_min_max(Pos2::new(17.0, 23.0), Pos2::new(617.0, 423.0));
-        let screen = world_to_screen(193.25, 87.5, rect, 240.0, 160, 80.0);
-        let (world_x, world_y) = screen_to_world(screen, rect, 240.0, 160, 80.0);
+        let camera = CameraView {
+            x: 80.0,
+            y: 40.0,
+            width: 240.0,
+            height: 80.0,
+        };
+        let screen = world_to_screen(193.25, 87.5, rect, camera);
+        let (world_x, world_y) = screen_to_world(screen, rect, camera);
         assert!((world_x - 193.25).abs() < 0.001);
         assert!((world_y - 87.5).abs() < 0.001);
     }
@@ -199,11 +198,33 @@ mod tests {
     fn inspection_pointer_maps_to_a_clamped_world_cell() {
         let rect = Rect::from_min_max(Pos2::new(10.0, 20.0), Pos2::new(210.0, 120.0));
         assert_eq!(
-            cell_at(Pos2::new(110.0, 70.0), rect, 40.0, 40, 20, 5.0),
+            cell_at(
+                Pos2::new(110.0, 70.0),
+                rect,
+                CameraView {
+                    x: 5.0,
+                    y: 0.0,
+                    width: 40.0,
+                    height: 20.0,
+                },
+                40,
+                20,
+            ),
             (25, 10)
         );
         assert_eq!(
-            cell_at(Pos2::new(500.0, 500.0), rect, 40.0, 40, 20, 5.0),
+            cell_at(
+                Pos2::new(500.0, 500.0),
+                rect,
+                CameraView {
+                    x: 5.0,
+                    y: 0.0,
+                    width: 40.0,
+                    height: 20.0,
+                },
+                40,
+                20,
+            ),
             (39, 19)
         );
     }

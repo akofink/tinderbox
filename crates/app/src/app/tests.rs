@@ -86,21 +86,59 @@ fn cloud_refresh_dirties_only_the_visible_world_span() {
 #[test]
 fn finite_camera_pan_and_zoom_stay_in_bounds_and_keep_the_anchor() {
     let mut app = Tinderbox::new_state(false);
-    app.camera_view_width = app.world.width() as f32;
-    app.zoom_camera(2.0, 0.5, app.world.width() as f32);
+    let base_view_width = app.world.width() as f32;
+    let base_view_height = app.world.height() as f32;
+    app.camera_view_width = base_view_width;
+    app.camera_view_height = base_view_height;
+    app.zoom_camera(2.0, egui::vec2(0.5, 0.5), base_view_width, base_view_height);
     assert_eq!(app.camera_zoom, 2.0);
-    assert_eq!(app.camera_view_width, app.world.width() as f32 / 2.0);
-    assert!(
-        (app.camera_x + app.camera_view_width * 0.5 - app.world.width() as f32 * 0.5).abs() < 0.01
-    );
+    assert_eq!(app.camera_view_width, base_view_width / 2.0);
+    assert_eq!(app.camera_view_height, base_view_height / 2.0);
+    assert!((app.camera_x + app.camera_view_width * 0.5 - base_view_width * 0.5).abs() < 0.01);
+    assert!((app.camera_y + app.camera_view_height * 0.5 - base_view_height * 0.5).abs() < 0.01);
 
-    app.pan_camera(10_000.0, app.camera_view_width);
+    app.pan_camera_2d(
+        10_000.0,
+        10_000.0,
+        app.camera_view_width,
+        app.camera_view_height,
+    );
     assert_eq!(
         app.camera_x,
         app.world.width() as f32 - app.camera_view_width
     );
-    app.pan_camera(-10_000.0, app.camera_view_width);
+    assert_eq!(
+        app.camera_y,
+        app.world.height() as f32 - app.camera_view_height
+    );
+    app.pan_camera_2d(
+        -10_000.0,
+        -10_000.0,
+        app.camera_view_width,
+        app.camera_view_height,
+    );
     assert_eq!(app.camera_x, 0.0);
+    assert_eq!(app.camera_y, 0.0);
+}
+
+#[test]
+fn diagonal_pinch_zoom_scales_both_axes_equally_and_preserves_its_anchor() {
+    let mut app = Tinderbox::new_state(false);
+    let base_view_width = app.world.width() as f32;
+    let base_view_height = app.world.height() as f32;
+    app.camera_view_width = base_view_width;
+    app.camera_view_height = base_view_height;
+    let anchor = egui::vec2(0.7, 0.3);
+    app.zoom_camera(2.0, anchor, base_view_width, base_view_height);
+
+    let canvas = egui::vec2(base_view_width, base_view_height);
+    let scale_x = canvas.x / app.camera_view_width;
+    let scale_y = canvas.y / app.camera_view_height;
+    assert!((scale_x - scale_y).abs() < 0.001);
+    let anchored_x = (base_view_width * anchor.x - app.camera_x) / app.camera_view_width;
+    let anchored_y = (base_view_height * anchor.y - app.camera_y) / app.camera_view_height;
+    assert!((anchored_x - anchor.x).abs() < 0.001);
+    assert!((anchored_y - anchor.y).abs() < 0.001);
 }
 
 #[test]

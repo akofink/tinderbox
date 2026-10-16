@@ -41,8 +41,8 @@ try {
       return page.screenshot({ path: `${output}/${name}-${label}.png` });
     };
     const beforeZoom = await snap("before");
-    await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: cx - 35, y: cy }, { x: cx + 35, y: cy }] });
-    await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: cx - 75, y: cy }, { x: cx + 75, y: cy }] });
+    await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: cx - 35, y: cy - 25 }, { x: cx + 35, y: cy + 25 }] });
+    await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: cx - 75, y: cy - 55 }, { x: cx + 75, y: cy + 55 }] });
     await page.waitForTimeout(150);
     await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
     const afterZoom = await snap("zoomed");
