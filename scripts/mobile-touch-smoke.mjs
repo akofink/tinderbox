@@ -38,7 +38,7 @@ try {
     return target?.getAttribute("data-renderer") && target.getAttribute("data-frame-ms");
   }, null, { timeout: 60_000 });
 
-  // Dismiss the initial level setup and use the visible touch-sized Inspect control.
+  // Dismiss setup, expand the compact toolbar, and use the touch-sized Inspect control.
   await page.touchscreen.tap(40, 204);
   await page.waitForTimeout(500);
   const tapToolbarControl = async (name) => {
@@ -47,6 +47,11 @@ try {
     const [x0, y0, x1, y1] = encoded.split(",").slice(0, 4).map(Number);
     await page.touchscreen.tap((x0 + x1) / 2, (y0 + y1) / 2);
   };
+  await tapToolbarControl("more");
+  await page.waitForFunction(() => {
+    const bounds = document.querySelector("#the_canvas_id")?.getAttribute("data-toolbar-more");
+    return bounds?.split(",")[8] === "true";
+  });
   await tapToolbarControl("inspect");
   await page.waitForTimeout(250);
   await page.touchscreen.tap(250, 500);
