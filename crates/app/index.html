@@ -85,8 +85,8 @@
       position: absolute;
       inset: var(--safe-area-top) var(--safe-area-right)
         var(--safe-area-bottom) var(--safe-area-left);
-      width: auto;
-      height: auto;
+      width: calc(100% - var(--safe-area-left) - var(--safe-area-right));
+      height: calc(100% - var(--safe-area-top) - var(--safe-area-bottom));
       touch-action: none;
     }
     .loading {

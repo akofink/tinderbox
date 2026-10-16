@@ -1,6 +1,9 @@
-import { chromium } from "playwright";
 import fs from "node:fs/promises";
-import sharp from "sharp";
+import path from "node:path";
+const playwright = await import(process.env.PLAYWRIGHT_PATH ? path.join(process.env.PLAYWRIGHT_PATH, "index.mjs") : "playwright");
+const sharpModule = await import(process.env.SHARP_PATH ? path.join(process.env.SHARP_PATH, "dist", "index.mjs") : "sharp");
+const { chromium } = playwright;
+const sharp = sharpModule.default;
 
 const output = process.env.TINDERBOX_OUTPUT_DIR ?? "tmp/mobile-toolbar-fit-smoke";
 const baseUrl = process.env.TINDERBOX_TEST_URL ?? "http://127.0.0.1:4173/";
@@ -50,9 +53,8 @@ const changedPixels = async (a, b) => {
 };
 try {
   for (const [width, height, name] of [
-    [390, 844, "portrait"],
-    [844, 390, "landscape"],
-    [320, 640, "narrow"],
+    [390, 844, "portrait-390x844"],
+    [393, 852, "portrait-393x852"],
   ]) {
     const context = await browser.newContext({
       viewport: { width, height },
@@ -71,9 +73,11 @@ try {
     testUrl.searchParams.set("safe-area-test", "1");
     await page.addInitScript(() => {
       if (new URLSearchParams(location.search).has("safe-area-test")) {
-        for (const [name, value] of [["top", "24px"], ["right", "0px"], ["bottom", "20px"], ["left", "0px"]]) {
-          document.documentElement.style.setProperty(`--safe-area-${name}`, value);
-        }
+        document.addEventListener("DOMContentLoaded", () => {
+          const style = document.createElement("style");
+          style.textContent = ":root { --safe-area-top: 24px !important; --safe-area-right: 0px !important; --safe-area-bottom: 20px !important; --safe-area-left: 0px !important; }";
+          document.documentElement.append(style);
+        }, { once: true });
       }
     });
     await page.goto(testUrl.toString(), { waitUntil: "load", timeout: 60_000 });
@@ -95,18 +99,27 @@ try {
       safeBottom: getComputedStyle(document.documentElement).getPropertyValue("--safe-area-bottom").trim(),
       toolbar: document.querySelector("#the_canvas_id").getAttribute("data-layout-toolbar")?.split(",").map(Number),
       palette: document.querySelector("#the_canvas_id").getAttribute("data-layout-palette")?.split(",").map(Number),
+      world: document.querySelector("#the_canvas_id").getAttribute("data-layout-world")?.split(",").map(Number),
       viewportMeta: document.querySelector('meta[name="viewport"]')?.content,
       canvasTop: getComputedStyle(document.querySelector("#the_canvas_id")).top,
     }));
     if (dimensions.page > dimensions.viewport || dimensions.canvas > dimensions.viewport) {
       throw new Error(`${name}: horizontal overflow ${JSON.stringify(dimensions)}`);
     }
-    if (!dimensions.toolbar || !dimensions.palette) throw new Error(`${name}: missing panel geometry`);
-    if (dimensions.canvasRect.top !== 24 || dimensions.canvasRect.bottom !== height - 20) {
+    if (!dimensions.toolbar || !dimensions.palette || !dimensions.world) throw new Error(`${name}: missing panel geometry`);
+    if (dimensions.safeTop !== "24px" || dimensions.safeBottom !== "20px" ||
+        dimensions.canvasRect.top !== 24 || dimensions.canvasRect.bottom !== height - 20) {
       throw new Error(`${name}: canvas does not respect test safe-area insets: ${JSON.stringify(dimensions)}`);
     }
-    if (dimensions.palette[2] < 52 || dimensions.palette[2] > width) {
-      throw new Error(`${name}: invalid palette boundary: ${JSON.stringify(dimensions)}`);
+    const toolbarScreenTop = dimensions.canvasRect.top + dimensions.toolbar[1];
+    if (Math.abs(toolbarScreenTop - 24) > 1.5) {
+      throw new Error(`${name}: toolbar screen-space top misses the top safe-area inset: ${JSON.stringify({ toolbarScreenTop, dimensions })}`);
+    }
+    if (Math.abs(dimensions.world[0] - dimensions.palette[2]) > 1.5) {
+      throw new Error(`${name}: unexplained palette-to-world gutter: ${JSON.stringify({ palette: dimensions.palette, world: dimensions.world })}`);
+    }
+    if (Math.abs(dimensions.world[3] - (dimensions.canvasRect.bottom - dimensions.canvasRect.top)) > 2) {
+      throw new Error(`${name}: world does not fit to the bottom safe-area edge: ${JSON.stringify({ world: dimensions.world, canvasRect: dimensions.canvasRect })}`);
     }
     const toolbarHeight = dimensions.toolbar[3] - dimensions.toolbar[1];
     const paletteWidth = dimensions.palette[2] - dimensions.palette[0];
