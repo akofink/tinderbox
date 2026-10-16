@@ -21,15 +21,15 @@ if inspected < 10:
 if dismissed >= 10:
     raise SystemExit(f"Inspector did not dismiss: found {dismissed} yellow canvas pixels")
 narrow = Image.open(Path("tmp/mobile-touch-smoke/narrow.png")).convert("RGB")
-canvas_edge_pixels = sum(
-    red < 45 and green < 45 and blue < 70
-    for red, green, blue in narrow.crop((128, 350, 168, 390)).get_flattened_data()
+canvas_world_pixels = sum(
+    70 < red < 150 and 70 < green < 160 and 80 < blue < 180
+    for red, green, blue in narrow.crop((128, 450, 168, 490)).get_flattened_data()
 )
-if canvas_edge_pixels < 100:
+if canvas_world_pixels < 100:
     raise SystemExit(
-        f"narrow-screen canvas did not expand beside the compact palette: {canvas_edge_pixels} dark pixels"
+        f"narrow-screen world canvas was not visible below the toolbar: {canvas_world_pixels} pixels"
     )
 print(
     f"Mobile Inspector shown ({inspected}px) and dismissed ({dismissed}px); "
-    f"narrow canvas edge verified ({canvas_edge_pixels}px)"
+    f"narrow canvas visible below toolbar ({canvas_world_pixels}px)"
 )

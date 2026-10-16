@@ -64,7 +64,7 @@ try {
     const paintChanged = beforePaint.reduce((count, byte, index) => count + (byte !== afterPaint[index]), 0);
     if (paintChanged < 100) throw new Error(`${name}: one-finger touch paint produced no visible change (${paintChanged} PNG byte differences)`);
 
-    await page.touchscreen.tap(60, 160); // Enable touch Inspector.
+    await page.touchscreen.tap(60, name === "narrow" ? 258 : 160); // Enable touch Inspector.
     const beforeInspect = await snap("before-inspect");
     await page.touchscreen.tap(cx, cy);
     const afterInspect = await snap("inspected");

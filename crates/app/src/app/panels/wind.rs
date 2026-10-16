@@ -4,6 +4,11 @@ use eframe::egui;
 use tinderbox_sim::WindDirection;
 
 pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
+    show_directions(app, ui);
+    show_strength_and_gust(app, ui, false);
+}
+
+pub(in crate::app) fn show_directions(app: &mut Tinderbox, ui: &mut egui::Ui) {
     let compact = super::toolbar::compact_touch_layout(ui.ctx().screen_rect().size());
     let mut wind = app.world.wind();
     ui.label("Wind");
@@ -25,15 +30,29 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
             app.world.set_wind(wind.direction, wind.strength);
         }
     }
+}
+
+pub(in crate::app) fn show_strength_and_gust(
+    app: &mut Tinderbox,
+    ui: &mut egui::Ui,
+    label_strength: bool,
+) {
+    let compact = super::toolbar::compact_touch_layout(ui.ctx().screen_rect().size());
+    let mut wind = app.world.wind();
     let mut strength = wind.strength;
     let strength_slider = egui::Slider::new(&mut strength, 0..=4);
-    if compact {
-        ui.add_sized(egui::vec2(104.0, 44.0), strength_slider);
+    let response = if compact {
+        if label_strength {
+            ui.label("Strength");
+        }
+        ui.add_sized(egui::vec2(104.0, 44.0), strength_slider)
     } else {
-        ui.add(strength_slider.text("strength"));
-    }
+        ui.add(strength_slider.text("strength"))
+    };
+    super::toolbar::record_test_bounds(ui, "wind-strength", response.rect, || strength.to_string());
     if strength != wind.strength {
-        app.world.set_wind(wind.direction, strength);
+        wind.strength = strength;
+        app.world.set_wind(wind.direction, wind.strength);
     }
     let gust = if compact {
         ui.add_sized(
