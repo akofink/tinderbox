@@ -140,5 +140,6 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) -> egui::Rect
             .stress_max_draw_ms
             .max(draw_started.elapsed().as_secs_f32() * 1000.0);
     }
+    super::toolbar::record_test_panel_bounds("world", rect);
     rect
 }

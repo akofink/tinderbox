@@ -68,6 +68,14 @@ try {
     });
     const testUrl = new URL(baseUrl);
     testUrl.searchParams.set("toolbar-test", "1");
+    testUrl.searchParams.set("safe-area-test", "1");
+    await page.addInitScript(() => {
+      if (new URLSearchParams(location.search).has("safe-area-test")) {
+        for (const [name, value] of [["top", "24px"], ["right", "0px"], ["bottom", "20px"], ["left", "0px"]]) {
+          document.documentElement.style.setProperty(`--safe-area-${name}`, value);
+        }
+      }
+    });
     await page.goto(testUrl.toString(), { waitUntil: "load", timeout: 60_000 });
     await page.waitForFunction(
       () => ["webgl", "webgpu"].includes(document.querySelector("#the_canvas_id")?.getAttribute("data-renderer")),
@@ -82,6 +90,9 @@ try {
       viewport: document.documentElement.clientWidth,
       page: document.documentElement.scrollWidth,
       canvas: document.querySelector("#the_canvas_id").getBoundingClientRect().width,
+      canvasRect: document.querySelector("#the_canvas_id").getBoundingClientRect().toJSON(),
+      safeTop: getComputedStyle(document.documentElement).getPropertyValue("--safe-area-top").trim(),
+      safeBottom: getComputedStyle(document.documentElement).getPropertyValue("--safe-area-bottom").trim(),
       toolbar: document.querySelector("#the_canvas_id").getAttribute("data-layout-toolbar")?.split(",").map(Number),
       palette: document.querySelector("#the_canvas_id").getAttribute("data-layout-palette")?.split(",").map(Number),
       viewportMeta: document.querySelector('meta[name="viewport"]')?.content,
@@ -91,6 +102,12 @@ try {
       throw new Error(`${name}: horizontal overflow ${JSON.stringify(dimensions)}`);
     }
     if (!dimensions.toolbar || !dimensions.palette) throw new Error(`${name}: missing panel geometry`);
+    if (dimensions.canvasRect.top !== 24 || dimensions.canvasRect.bottom !== height - 20) {
+      throw new Error(`${name}: canvas does not respect test safe-area insets: ${JSON.stringify(dimensions)}`);
+    }
+    if (dimensions.palette[2] < 52 || dimensions.palette[2] > width) {
+      throw new Error(`${name}: invalid palette boundary: ${JSON.stringify(dimensions)}`);
+    }
     const toolbarHeight = dimensions.toolbar[3] - dimensions.toolbar[1];
     const paletteWidth = dimensions.palette[2] - dimensions.palette[0];
     if (name === "portrait" && (toolbarHeight > 100 || paletteWidth / width >= 0.22)) {
