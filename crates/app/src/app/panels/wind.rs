@@ -41,14 +41,15 @@ pub(in crate::app) fn show_strength_and_gust(
     let mut wind = app.world.wind();
     let mut strength = wind.strength;
     let strength_slider = egui::Slider::new(&mut strength, 0..=4);
-    if compact {
+    let response = if compact {
         if label_strength {
             ui.label("Strength");
         }
-        ui.add_sized(egui::vec2(104.0, 44.0), strength_slider);
+        ui.add_sized(egui::vec2(104.0, 44.0), strength_slider)
     } else {
-        ui.add(strength_slider.text("strength"));
-    }
+        ui.add(strength_slider.text("strength"))
+    };
+    super::toolbar::record_test_bounds(ui, "wind-strength", response.rect, || strength.to_string());
     if strength != wind.strength {
         wind.strength = strength;
         app.world.set_wind(wind.direction, wind.strength);

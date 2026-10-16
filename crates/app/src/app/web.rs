@@ -3,6 +3,10 @@ use super::Tinderbox;
 use eframe::wasm_bindgen::JsCast as _;
 
 pub(super) fn start() {
+    let toolbar_test_mode = eframe::web_sys::window()
+        .and_then(|window| window.location().search().ok())
+        .is_some_and(|search| search.contains("toolbar-test=1"));
+    super::panels::toolbar::set_test_mode(toolbar_test_mode);
     eframe::WebLogger::init(log::LevelFilter::Info).ok();
     let web_options = eframe::WebOptions::default();
     wasm_bindgen_futures::spawn_local(async move {

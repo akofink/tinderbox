@@ -1,6 +1,16 @@
 //! Play controls, brush controls, speed, reset, and scene setup.
 use crate::app::{Overlay, Tinderbox};
 use eframe::egui;
+#[cfg(target_arch = "wasm32")]
+use std::sync::OnceLock;
+
+#[cfg(target_arch = "wasm32")]
+static TOOLBAR_TEST_MODE: OnceLock<bool> = OnceLock::new();
+
+#[cfg(target_arch = "wasm32")]
+pub(in crate::app) fn set_test_mode(enabled: bool) {
+    let _ = TOOLBAR_TEST_MODE.set(enabled);
+}
 
 pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
     let screen = ui.ctx().screen_rect().size();
@@ -38,7 +48,7 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
         ui.add(egui::Slider::new(&mut app.speed, 0.25..=10.0).suffix("×"));
         ui.label("Brush");
         let response = ui.add(egui::Slider::new(&mut app.brush, 1..=16).suffix(" cells"));
-        record_test_bounds(ui, "brush", response.rect, app.brush.to_string());
+        record_test_bounds(ui, "brush", response.rect, || app.brush.to_string());
     });
     ui.horizontal_wrapped(|ui| {
         if toolbar_button(ui, "Level setup", compact).clicked() {
@@ -49,12 +59,9 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
         }
         ui.label("Cell size");
         let response = ui.add(egui::Slider::new(&mut app.cell_size, 2.0..=8.0).suffix(" pt"));
-        record_test_bounds(
-            ui,
-            "cell-size",
-            response.rect,
-            format!("{:.2}", app.cell_size),
-        );
+        record_test_bounds(ui, "cell-size", response.rect, || {
+            format!("{:.2}", app.cell_size)
+        });
         ui.checkbox(&mut app.show_hud, "HUD");
         if ui
             .add_sized(
@@ -112,7 +119,7 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
 
 fn show_narrow(app: &mut Tinderbox, ui: &mut egui::Ui) {
     ui.spacing_mut().interact_size = egui::vec2(44.0, 44.0);
-    ui.spacing_mut().slider_width = 72.0;
+    ui.spacing_mut().slider_width = 104.0;
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
             if ui
@@ -144,17 +151,19 @@ fn show_narrow(app: &mut Tinderbox, ui: &mut egui::Ui) {
             }
         });
         ui.horizontal(|ui| {
-            ui.label(format!("Speed {:.1}×", app.speed));
+            ui.label("Speed");
             ui.add_sized(
-                egui::vec2(72.0, 44.0),
-                egui::Slider::new(&mut app.speed, 0.25..=10.0).show_value(false),
+                egui::vec2(104.0, 44.0),
+                egui::Slider::new(&mut app.speed, 0.25..=10.0).suffix("×"),
             );
-            ui.label(format!("Brush {} cells", app.brush));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Brush");
             let response = ui.add_sized(
-                egui::vec2(72.0, 44.0),
-                egui::Slider::new(&mut app.brush, 1..=16).show_value(false),
+                egui::vec2(104.0, 44.0),
+                egui::Slider::new(&mut app.brush, 1..=16).suffix(" cells"),
             );
-            record_test_bounds(ui, "brush", response.rect, app.brush.to_string());
+            record_test_bounds(ui, "brush", response.rect, || app.brush.to_string());
         });
         ui.horizontal(|ui| {
             if ui
@@ -171,17 +180,14 @@ fn show_narrow(app: &mut Tinderbox, ui: &mut egui::Ui) {
             }
         });
         ui.horizontal(|ui| {
-            ui.label(format!("Cell size {:.1} pt", app.cell_size));
+            ui.label("Cell size");
             let response = ui.add_sized(
                 egui::vec2(104.0, 44.0),
-                egui::Slider::new(&mut app.cell_size, 2.0..=8.0).show_value(false),
+                egui::Slider::new(&mut app.cell_size, 2.0..=8.0).suffix(" pt"),
             );
-            record_test_bounds(
-                ui,
-                "cell-size",
-                response.rect,
-                format!("{:.2}", app.cell_size),
-            );
+            record_test_bounds(ui, "cell-size", response.rect, || {
+                format!("{:.2}", app.cell_size)
+            });
         });
         ui.horizontal(|ui| {
             ui.checkbox(&mut app.show_hud, "HUD");
@@ -230,26 +236,23 @@ fn show_narrow(app: &mut Tinderbox, ui: &mut egui::Ui) {
     });
 }
 
-fn record_test_bounds(ui: &egui::Ui, name: &str, rect: egui::Rect, value: String) {
+pub(in crate::app) fn record_test_bounds<F>(ui: &egui::Ui, name: &str, rect: egui::Rect, value: F)
+where
+    F: FnOnce() -> String,
+{
     #[cfg(target_arch = "wasm32")]
     {
-        let Some(window) = eframe::web_sys::window() else {
-            return;
-        };
-        if !window
-            .location()
-            .search()
-            .is_ok_and(|search| search.contains("toolbar-test=1"))
-        {
+        if !TOOLBAR_TEST_MODE.get().copied().unwrap_or(false) {
             return;
         }
-        let Some(canvas) = window
-            .document()
+        let Some(canvas) = eframe::web_sys::window()
+            .and_then(|window| window.document())
             .and_then(|document| document.get_element_by_id("the_canvas_id"))
         else {
             return;
         };
         let clip = ui.clip_rect();
+        let value = value();
         let _ = canvas.set_attribute(
             &format!("data-toolbar-{name}"),
             &format!(
@@ -284,6 +287,21 @@ pub(in crate::app) fn compact_touch_layout(screen: egui::Vec2) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disabled_test_bounds_do_not_format_values() {
+        let ctx = egui::Context::default();
+        let mut formatted = false;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                record_test_bounds(ui, "probe", ui.min_rect(), || {
+                    formatted = true;
+                    String::from("probe")
+                });
+            });
+        });
+        assert!(!formatted);
+    }
 
     #[test]
     fn compact_phone_viewports_size_toolbar_controls_for_touch() {

@@ -16,6 +16,28 @@ const browser = await chromium.launch({
   ],
 });
 const results = [];
+const normalContext = await browser.newContext({
+  viewport: { width: 320, height: 640 },
+  deviceScaleFactor: 1,
+  isMobile: true,
+  hasTouch: true,
+});
+try {
+  const normalPage = await normalContext.newPage();
+  await normalPage.goto(baseUrl, { waitUntil: "load", timeout: 60_000 });
+  await normalPage.waitForFunction(
+    () => document.querySelector("#the_canvas_id")?.getAttribute("data-renderer") === "webgl",
+    null,
+    { timeout: 60_000 },
+  );
+  await normalPage.waitForTimeout(300);
+  const exposed = await normalPage.locator("#the_canvas_id").evaluate((canvas) =>
+    ["brush", "cell-size", "wind-strength"].some((name) => canvas.hasAttribute(`data-toolbar-${name}`)),
+  );
+  if (exposed) throw new Error("normal mode: toolbar test attributes must be disabled");
+} finally {
+  await normalContext.close();
+}
 const changedPixels = async (a, b) => {
   const [left, right] = await Promise.all([sharp(a).raw().toBuffer(), sharp(b).raw().toBuffer()]);
   let changed = 0;
@@ -80,7 +102,9 @@ try {
     };
     await page.waitForFunction(() => {
       const canvas = document.querySelector("#the_canvas_id");
-      return canvas?.hasAttribute("data-toolbar-brush") && canvas?.hasAttribute("data-toolbar-cell-size");
+      return canvas?.hasAttribute("data-toolbar-brush") &&
+        canvas?.hasAttribute("data-toolbar-cell-size") &&
+        canvas?.hasAttribute("data-toolbar-wind-strength");
     });
     const result = {
       name,
@@ -89,6 +113,7 @@ try {
       dimensions,
       brushBounds: await readControl("brush"),
       cellSizeBounds: await readControl("cell-size"),
+      windStrengthBounds: await readControl("wind-strength"),
       errors,
     };
     if (name === "narrow") {
@@ -104,7 +129,7 @@ try {
         path: `${output}/before-rules-close-region.png`,
         clip: { x: 293, y: 76, width: 27, height: 24 },
       });
-      await page.touchscreen.tap(201, 211);
+      await page.touchscreen.tap(201, 259);
       await page.waitForTimeout(250);
       await toolbarShot(`${output}/after-rules.png`);
       const afterRules = await page.screenshot({
@@ -141,14 +166,24 @@ try {
         result[`${filename}Touch`] = { before: before.value, after: after.value, bounds: after };
       }
 
-      const beforeWind = await toolbarShot(`${output}/before-wind-strength.png`);
-      await page.touchscreen.tap(145, 354);
-      await page.waitForTimeout(200);
-      const afterWind = await toolbarShot(`${output}/after-wind-strength.png`);
-      result.windStrengthChangedPixels = await changedPixels(beforeWind, afterWind);
-      if (result.windStrengthChangedPixels < 20) {
-        throw new Error("narrow: Wind-strength slider was not reachable by touch");
-      }
+      const beforeWindStrength = await readControl("wind-strength");
+      await page.touchscreen.tap(
+        (beforeWindStrength.x0 + beforeWindStrength.x1) / 2,
+        (beforeWindStrength.y0 + beforeWindStrength.y1) / 2,
+      );
+      await page.waitForFunction(
+        (previous) => {
+          const current = document.querySelector("#the_canvas_id")?.getAttribute("data-toolbar-wind-strength");
+          return current && current.split(",")[8] !== previous;
+        },
+        beforeWindStrength.value,
+      );
+      const afterWindStrength = await readControl("wind-strength");
+      result.windStrengthTouch = {
+        before: beforeWindStrength.value,
+        after: afterWindStrength.value,
+        bounds: afterWindStrength,
+      };
     }
     if (errors.length) throw new Error(`${name}: ${errors.join("\n")}`);
     results.push(result);
