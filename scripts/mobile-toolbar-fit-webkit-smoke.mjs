@@ -33,10 +33,22 @@ const controls = [
 const scenarios = [
   ["portrait-390x844", { ...devices["iPhone 13"], viewport: { width: 390, height: 844 } }, [45, 205]],
   ["portrait-393x852", { ...devices["iPhone 13"], viewport: { width: 393, height: 852 } }, [45, 205]],
+  ["landscape-750x342", { ...devices["iPhone 13"], viewport: { width: 750, height: 342 } }, [45, 212]],
+  ["desktop-1180x800", { viewport: { width: 1180, height: 800 }, deviceScaleFactor: 1 }, [80, 170]],
 ];
+const expectedScenarios = new Set([
+  "portrait-390x844", "portrait-393x852", "landscape-750x342", "desktop-1180x800",
+]);
+const actualScenarioNames = new Set(scenarios.map(([name]) => name));
+if (actualScenarioNames.size !== expectedScenarios.size ||
+    [...expectedScenarios].some((name) => !actualScenarioNames.has(name))) {
+  throw new Error(`WebKit viewport coverage changed unexpectedly: ${scenarios.map(([name]) => name).join(", ")}`);
+}
+const isPhonePortrait = (config) => config.viewport.width <= 420 && config.viewport.height >= 800;
 const results = [];
 try {
   for (const [name, config, setupTap] of scenarios) {
+    const phonePortrait = isPhonePortrait(config);
     const context = await browser.newContext(config);
     const page = await context.newPage();
     const errors = [];
@@ -98,11 +110,11 @@ try {
     if (Math.abs(collapsed.world[3] - (collapsed.canvasRect.bottom - collapsed.canvasRect.top)) > 2) {
       throw new Error(`${name}: world does not fit to the bottom safe-area edge: ${JSON.stringify({ world: collapsed.world, canvasRect: collapsed.canvasRect })}`);
     }
-    if (toolbarHeight > 100 || paletteWidth / config.viewport.width >= 0.22) {
+    if (phonePortrait && (toolbarHeight > 100 || paletteWidth / config.viewport.width >= 0.22)) {
       throw new Error(`${name}: compact layout geometry failed: ${JSON.stringify({ toolbarHeight, paletteWidth })}`);
     }
     if (!collapsed.viewportMeta?.includes("viewport-fit=cover")) throw new Error(`${name}: viewport-fit=cover missing`);
-    if (config.viewport.width <= 420) {
+    if (config.hasTouch && config.viewport.width <= 420) {
       if (!collapsed.more) throw new Error(`${name}: More controls toggle is missing`);
       const [moreX0, moreY0, moreX1, moreY1] = collapsed.more;
       await page.touchscreen.tap((moreX0 + moreX1) / 2, (moreY0 + moreY1) / 2);
@@ -128,7 +140,7 @@ try {
     if (snapshot.viewport.scrollWidth > snapshot.viewport.width || snapshot.canvas.width > snapshot.viewport.width) {
       throw new Error(`${name}: horizontal overflow ${JSON.stringify(snapshot.viewport)}`);
     }
-    if (name === "portrait-390x844" && (!snapshot.hudBounds || snapshot.hudBounds[2] > snapshot.viewport.width + 0.5 || snapshot.hudBounds[3] - snapshot.hudBounds[1] > 80)) {
+    if (phonePortrait && (!snapshot.hudBounds || snapshot.hudBounds[2] > snapshot.viewport.width + 0.5 || snapshot.hudBounds[3] - snapshot.hudBounds[1] > 80)) {
       throw new Error(`${name}: HUD text is missing, overflowing, or too tall: ${JSON.stringify(snapshot.hudBounds)}`);
     }
     if (snapshot.testBounds["play-pause"]?.split(",")[8] !== "true") {
