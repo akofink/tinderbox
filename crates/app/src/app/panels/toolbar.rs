@@ -133,10 +133,15 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
 fn show_narrow(app: &mut Tinderbox, ui: &mut egui::Ui) {
     ui.spacing_mut().interact_size = egui::vec2(44.0, 44.0);
     ui.spacing_mut().slider_width = 104.0;
+    ui.spacing_mut().item_spacing.y = 0.0;
+    let more_id = ui.make_persistent_id("mobile-toolbar-more");
+    let mut more_open = ui
+        .ctx()
+        .data(|data| data.get_temp::<bool>(more_id).unwrap_or(false));
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
             let play = ui.add_sized(
-                egui::vec2(52.0, 44.0),
+                egui::vec2(48.0, 44.0),
                 egui::Button::new(if app.running { "Pause" } else { "Play" }),
             );
             record_test_bounds(ui, "play-pause", play.rect, || app.running.to_string());
@@ -148,104 +153,155 @@ fn show_narrow(app: &mut Tinderbox, ui: &mut egui::Ui) {
             if step.clicked() {
                 app.request_step();
             }
-            let reset = ui.add_sized(egui::vec2(52.0, 44.0), egui::Button::new("Reset"));
+            let reset = ui.add_sized(egui::vec2(48.0, 44.0), egui::Button::new("Reset"));
             record_test_bounds(ui, "reset", reset.rect, String::new);
             if reset.clicked() {
                 app.reset();
             }
             let navigate = ui.add_sized(
-                egui::vec2(92.0, 44.0),
+                egui::vec2(80.0, 44.0),
                 egui::Button::new("Navigate").selected(app.navigation_mode),
             );
             record_test_bounds(ui, "navigate", navigate.rect, String::new);
             if navigate.clicked() {
                 app.navigation_mode = !app.navigation_mode;
             }
-        });
-        ui.horizontal(|ui| {
-            ui.label("Speed");
-            let speed = ui.add_sized(
-                egui::vec2(104.0, 44.0),
-                egui::Slider::new(&mut app.speed, 0.25..=10.0).suffix("×"),
+            let more = ui.add_sized(
+                egui::vec2(48.0, 44.0),
+                egui::Button::new(if more_open { "Less" } else { "More" }),
             );
-            record_test_bounds(ui, "speed", speed.rect, || app.speed.to_string());
-        });
-        ui.horizontal(|ui| {
-            ui.label("Brush");
-            let response = ui.add_sized(
-                egui::vec2(104.0, 44.0),
-                egui::Slider::new(&mut app.brush, 1..=16).suffix(" cells"),
-            );
-            record_test_bounds(ui, "brush", response.rect, || app.brush.to_string());
-        });
-        ui.horizontal(|ui| {
-            let level_setup =
-                ui.add_sized(egui::vec2(92.0, 44.0), egui::Button::new("Level setup"));
-            record_test_bounds(ui, "level-setup", level_setup.rect, String::new);
-            if level_setup.clicked() {
-                app.open_level_setup();
-            }
-            let wildfire = ui.add_sized(egui::vec2(76.0, 44.0), egui::Button::new("Wildfire"));
-            record_test_bounds(ui, "wildfire", wildfire.rect, String::new);
-            if wildfire.clicked() {
-                app.wildfire();
+            record_test_bounds(ui, "more", more.rect, || more_open.to_string());
+            if more.clicked() {
+                more_open = !more_open;
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(more_id, more_open));
             }
         });
-        ui.horizontal(|ui| {
-            ui.label("Cell size");
-            let response = ui.add_sized(
-                egui::vec2(104.0, 44.0),
-                egui::Slider::new(&mut app.cell_size, 2.0..=8.0).suffix(" pt"),
-            );
-            record_test_bounds(ui, "cell-size", response.rect, || {
-                format!("{:.2}", app.cell_size)
-            });
-        });
-        ui.horizontal(|ui| {
-            let hud = ui.checkbox(&mut app.show_hud, "HUD");
-            record_test_bounds(ui, "hud", hud.rect, || app.show_hud.to_string());
-            let inspect = ui.add_sized(
-                egui::vec2(104.0, 44.0),
-                egui::Button::new("Inspect (M)").selected(app.inspect_mode),
-            );
-            record_test_bounds(ui, "inspect", inspect.rect, String::new);
-            if inspect.clicked() {
-                app.inspect_mode = !app.inspect_mode;
-            }
-            let rules = ui.add_sized(
-                egui::vec2(56.0, 44.0),
-                egui::Button::new("Rules").selected(app.rules_panel.open),
-            );
-            record_test_bounds(ui, "rules", rules.rect, String::new);
-            if rules.clicked() {
-                app.rules_panel.open = !app.rules_panel.open;
-            }
-        });
-        ui.horizontal(|ui| {
-            let overlay = egui::ComboBox::from_label("Overlay")
-                .selected_text(match app.overlay {
-                    Overlay::None => "Off",
-                    Overlay::Temperature => "Temperature",
-                    Overlay::Humidity => "Humidity",
-                    Overlay::Pressure => "Pressure",
-                    Overlay::Oxygen => "Oxygen",
-                    Overlay::Moisture => "Material moisture",
-                    Overlay::BurnProgress => "Burn progress",
-                })
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut app.overlay, Overlay::None, "Off");
-                    ui.selectable_value(&mut app.overlay, Overlay::Temperature, "Temperature");
-                    ui.selectable_value(&mut app.overlay, Overlay::Humidity, "Humidity");
-                    ui.selectable_value(&mut app.overlay, Overlay::Pressure, "Pressure");
-                    ui.selectable_value(&mut app.overlay, Overlay::Oxygen, "Oxygen");
-                    ui.selectable_value(&mut app.overlay, Overlay::Moisture, "Material moisture");
-                    ui.selectable_value(&mut app.overlay, Overlay::BurnProgress, "Burn progress");
+        if more_open {
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Speed");
+                    let speed = ui.add_sized(
+                        egui::vec2(104.0, 44.0),
+                        egui::Slider::new(&mut app.speed, 0.25..=10.0).suffix("×"),
+                    );
+                    record_test_bounds(ui, "speed", speed.rect, || app.speed.to_string());
                 });
-            record_test_bounds(ui, "overlay", overlay.response.rect, String::new);
-        });
-        ui.horizontal(|ui| super::wind::show_directions(app, ui));
-        ui.horizontal(|ui| super::wind::show_strength_and_gust(app, ui, true));
+                ui.horizontal(|ui| {
+                    ui.label("Brush");
+                    let response = ui.add_sized(
+                        egui::vec2(104.0, 44.0),
+                        egui::Slider::new(&mut app.brush, 1..=16).suffix(" cells"),
+                    );
+                    record_test_bounds(ui, "brush", response.rect, || app.brush.to_string());
+                });
+                ui.horizontal(|ui| {
+                    let level_setup =
+                        ui.add_sized(egui::vec2(92.0, 44.0), egui::Button::new("Level setup"));
+                    record_test_bounds(ui, "level-setup", level_setup.rect, String::new);
+                    if level_setup.clicked() {
+                        app.open_level_setup();
+                    }
+                    let wildfire =
+                        ui.add_sized(egui::vec2(76.0, 44.0), egui::Button::new("Wildfire"));
+                    record_test_bounds(ui, "wildfire", wildfire.rect, String::new);
+                    if wildfire.clicked() {
+                        app.wildfire();
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Cell size");
+                    let response = ui.add_sized(
+                        egui::vec2(104.0, 44.0),
+                        egui::Slider::new(&mut app.cell_size, 2.0..=8.0).suffix(" pt"),
+                    );
+                    record_test_bounds(ui, "cell-size", response.rect, || {
+                        format!("{:.2}", app.cell_size)
+                    });
+                });
+                ui.horizontal(|ui| {
+                    let hud = ui.checkbox(&mut app.show_hud, "HUD");
+                    record_test_bounds(ui, "hud", hud.rect, || app.show_hud.to_string());
+                    let inspect = ui.add_sized(
+                        egui::vec2(104.0, 44.0),
+                        egui::Button::new("Inspect (M)").selected(app.inspect_mode),
+                    );
+                    record_test_bounds(ui, "inspect", inspect.rect, String::new);
+                    if inspect.clicked() {
+                        app.inspect_mode = !app.inspect_mode;
+                    }
+                    let rules = ui.add_sized(
+                        egui::vec2(56.0, 44.0),
+                        egui::Button::new("Rules").selected(app.rules_panel.open),
+                    );
+                    record_test_bounds(ui, "rules", rules.rect, String::new);
+                    if rules.clicked() {
+                        app.rules_panel.open = !app.rules_panel.open;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    let overlay = egui::ComboBox::from_label("Overlay")
+                        .selected_text(match app.overlay {
+                            Overlay::None => "Off",
+                            Overlay::Temperature => "Temperature",
+                            Overlay::Humidity => "Humidity",
+                            Overlay::Pressure => "Pressure",
+                            Overlay::Oxygen => "Oxygen",
+                            Overlay::Moisture => "Material moisture",
+                            Overlay::BurnProgress => "Burn progress",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut app.overlay, Overlay::None, "Off");
+                            ui.selectable_value(
+                                &mut app.overlay,
+                                Overlay::Temperature,
+                                "Temperature",
+                            );
+                            ui.selectable_value(&mut app.overlay, Overlay::Humidity, "Humidity");
+                            ui.selectable_value(&mut app.overlay, Overlay::Pressure, "Pressure");
+                            ui.selectable_value(&mut app.overlay, Overlay::Oxygen, "Oxygen");
+                            ui.selectable_value(
+                                &mut app.overlay,
+                                Overlay::Moisture,
+                                "Material moisture",
+                            );
+                            ui.selectable_value(
+                                &mut app.overlay,
+                                Overlay::BurnProgress,
+                                "Burn progress",
+                            );
+                        });
+                    record_test_bounds(ui, "overlay", overlay.response.rect, String::new);
+                });
+                ui.horizontal(|ui| super::wind::show_directions(app, ui));
+                ui.horizontal(|ui| super::wind::show_strength_and_gust(app, ui, true));
+            });
+        }
     });
+}
+
+pub(in crate::app) fn record_test_panel_bounds(name: &str, rect: egui::Rect) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if !TOOLBAR_TEST_MODE.get().copied().unwrap_or(false) {
+            return;
+        }
+        let Some(canvas) = eframe::web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.get_element_by_id("the_canvas_id"))
+        else {
+            return;
+        };
+        let _ = canvas.set_attribute(
+            &format!("data-layout-{name}"),
+            &format!(
+                "{:.1},{:.1},{:.1},{:.1}",
+                rect.min.x, rect.min.y, rect.max.x, rect.max.y
+            ),
+        );
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = (name, rect);
 }
 
 pub(in crate::app) fn record_test_bounds<F>(ui: &egui::Ui, name: &str, rect: egui::Rect, value: F)

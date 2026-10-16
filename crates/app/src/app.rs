@@ -1631,21 +1631,23 @@ impl eframe::App for Tinderbox {
         // immediately but advance by deterministic fixed simulation steps.
         ctx.request_repaint();
 
-        egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
+        let toolbar_panel = egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.add_enabled_ui(!self.level_setup.open, |ui| panels::toolbar::show(self, ui));
         });
+        panels::toolbar::record_test_panel_bounds("toolbar", toolbar_panel.response.rect);
         let compact_palette = ctx.screen_rect().width() <= 480.0;
-        egui::SidePanel::left("palette")
+        let palette_panel = egui::SidePanel::left("palette")
             .resizable(true)
-            .default_width(if compact_palette { 120.0 } else { 168.0 })
+            .default_width(if compact_palette { 60.0 } else { 168.0 })
             .width_range(if compact_palette {
-                100.0..=120.0
+                52.0..=62.0
             } else {
                 148.0..=260.0
             })
             .show(ctx, |ui| {
                 ui.add_enabled_ui(!self.level_setup.open, |ui| panels::palette::show(self, ui));
             });
+        panels::toolbar::record_test_panel_bounds("palette", palette_panel.response.rect);
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_enabled_ui(!self.level_setup.open, |ui| panels::world::show(self, ui));
         });
