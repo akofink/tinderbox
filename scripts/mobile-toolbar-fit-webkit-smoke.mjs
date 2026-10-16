@@ -117,7 +117,10 @@ try {
     if (config.hasTouch && config.viewport.width <= 420) {
       if (!collapsed.more) throw new Error(`${name}: More controls toggle is missing`);
       const [moreX0, moreY0, moreX1, moreY1] = collapsed.more;
-      await page.touchscreen.tap((moreX0 + moreX1) / 2, (moreY0 + moreY1) / 2);
+      await page.touchscreen.tap(
+        (moreX0 + moreX1) / 2,
+        collapsed.canvasRect.top + (moreY0 + moreY1) / 2,
+      );
       await page.waitForFunction(() => {
         const bounds = document.querySelector("#the_canvas_id")?.getAttribute("data-toolbar-more");
         return bounds?.split(",")[8] === "true";
