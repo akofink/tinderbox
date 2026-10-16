@@ -79,11 +79,13 @@ pub(super) fn publish_profile(app: &Tinderbox) {
         .get((sorted.len() * 99 / 100).min(sorted.len().saturating_sub(1)))
         .copied()
         .unwrap_or_default();
-    let steady = sorted
+    let mut steady = app
+        .stress_frame_intervals_ms
         .iter()
         .skip(super::SMOOTH_PLAY_WARMUP_FRAMES)
         .copied()
         .collect::<Vec<_>>();
+    steady.sort_by(f32::total_cmp);
     let steady_p99 = steady
         .get((steady.len() * 99 / 100).min(steady.len().saturating_sub(1)))
         .copied()

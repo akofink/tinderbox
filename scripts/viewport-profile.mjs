@@ -16,34 +16,30 @@ try {
         const page = await context.newPage();
         await page.addInitScript(() => {
           const times = [];
+          const marks = {};
           const loop = (time) => { times.push(time); requestAnimationFrame(loop); };
           requestAnimationFrame(loop);
-          Object.defineProperty(window, "__rafTimes", { get: () => times });
+          Object.defineProperties(window, {
+            __rafTimes: { get: () => times },
+            __profileMarks: { get: () => marks },
+            __profileMark: { value: (name) => { marks[name] = performance.now(); } },
+          });
         });
         await page.goto(`${baseUrl}?toolbar-test=1&profile=${mode}`, { waitUntil: "load", timeout: 60_000 });
         await page.waitForFunction(() => document.querySelector("#the_canvas_id")?.getAttribute("data-renderer")?.match(/webgl|webgpu/), null, { timeout: 60_000 });
         await page.waitForTimeout(3000);
+        await page.evaluate(() => window.__profileMark("resizeStart"));
         await page.setViewportSize(rotated);
-        await page.waitForTimeout(1500);
-        if (mode === "endless") {
-          for (let index = 0; index < 12; index++) {
-            await page.keyboard.press("ArrowRight");
-            await page.waitForTimeout(25);
-          }
-        } else {
-          const nav = await page.locator("#the_canvas_id").evaluate((canvas) => canvas.getAttribute("data-toolbar-navigate"));
-          if (nav) {
-            const [x0, y0, x1, y1] = nav.split(",").map(Number);
-            await page.mouse.click((x0 + x1) / 2, (y0 + y1) / 2);
-          }
-          const bounds = await page.locator("#the_canvas_id").boundingBox();
-          if (bounds) {
-            await page.mouse.move(bounds.x + bounds.width * 0.6, bounds.y + bounds.height * 0.5);
-            await page.mouse.down();
-            await page.mouse.move(bounds.x + bounds.width * 0.3, bounds.y + bounds.height * 0.5, { steps: 12 });
-            await page.mouse.up();
-          }
+        await page.waitForTimeout(750);
+        await page.evaluate(() => window.__profileMark("resizeEnd"));
+        await page.evaluate(() => window.__profileMark("navigationStart"));
+        await page.locator("#the_canvas_id").evaluate((canvas) => canvas.focus());
+        for (let index = 0; index < 12; index++) {
+          await page.keyboard.press("ArrowRight");
+          await page.waitForTimeout(25);
         }
+        await page.waitForTimeout(500);
+        await page.evaluate(() => window.__profileMark("navigationEnd"));
         await page.waitForFunction(() => document.querySelector("#the_canvas_id")?.getAttribute("data-frame-ms") !== null, null, { timeout: 10_000 });
         await page.waitForFunction(
           () => document.querySelector("#the_canvas_id")?.hasAttribute("data-profile-report"),
@@ -52,22 +48,37 @@ try {
         );
         const metrics = await page.evaluate(() => {
           const times = window.__rafTimes ?? [];
-          const frameIntervals = times.slice(1).map((time, index) => time - times[index]).filter(Number.isFinite);
-          const sorted = [...frameIntervals].sort((a, b) => a - b);
-          const percentile = (p) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] ?? 0;
+          const marks = window.__profileMarks ?? {};
+          const frames = times.slice(1).map((end, index) => ({ start: times[index], end, ms: end - times[index] })).filter((frame) => Number.isFinite(frame.ms));
+          const stats = (start, end) => {
+            const samples = frames.filter((frame) => frame.start >= start && frame.end <= end).map((frame) => frame.ms);
+            const sorted = [...samples].sort((a, b) => a - b);
+            return {
+              start_ms: Number(start.toFixed(1)), end_ms: Number(end.toFixed(1)), samples: samples.length,
+              avg_ms: samples.reduce((sum, value) => sum + value, 0) / Math.max(samples.length, 1),
+              p99_ms: sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.99))] ?? 0,
+              worst_ms: sorted.at(-1) ?? 0,
+              over_33ms: samples.filter((value) => value > 33.3).length,
+            };
+          };
+          const resizeStart = marks.resizeStart;
+          const resizeEnd = marks.resizeEnd;
+          const navStart = marks.navigationStart;
+          const navEnd = marks.navigationEnd;
+          const canvas = document.querySelector("#the_canvas_id");
           return {
-            rAF_samples: frameIntervals.length,
-            raf_avg_ms: frameIntervals.reduce((sum, value) => sum + value, 0) / Math.max(frameIntervals.length, 1),
-            raf_p99_ms: percentile(0.99),
-            raf_worst_ms: sorted.at(-1) ?? 0,
-            raf_over_33ms: frameIntervals.filter((value) => value > 33.3).length,
-            app_frame_ms: Number(document.querySelector("#the_canvas_id")?.getAttribute("data-frame-ms")),
-            profile_report: document.querySelector("#the_canvas_id")?.getAttribute("data-profile-report"),
-            scrollY,
-            viewport: { innerWidth, innerHeight },
+            viewport: { innerWidth, innerHeight }, scrollY,
+            all: stats(frames[0]?.start ?? 0, frames.at(-1)?.end ?? 0),
+            phases: {
+              baseline: stats(resizeStart - 1500, resizeStart),
+              resize: stats(resizeStart, resizeEnd),
+              navigation: stats(navStart, navEnd),
+            },
+            profile_report: canvas?.getAttribute("data-profile-report"),
           };
         });
-        if (!metrics.profile_report?.includes(`mode=${mode};`) || !metrics.profile_report.includes("frames=900;") || metrics.rAF_samples < 850) {
+        if (!metrics.profile_report?.includes(`mode=${mode};`) || !metrics.profile_report.includes("frames=900;") ||
+            metrics.all.samples < 850 || Object.values(metrics.phases).some((phase) => phase.samples < 10)) {
           throw new Error(`${viewportName}/${mode}: incomplete profile: ${JSON.stringify(metrics)}`);
         }
         const result = { viewportName, mode, initial, rotated, metrics };
