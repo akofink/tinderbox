@@ -1519,6 +1519,8 @@ impl Tinderbox {
                     self.stress_max_step_ms,
                     self.stress_max_update_work_ms
                 );
+                #[cfg(target_arch = "wasm32")]
+                web::publish_profile(self);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
         }
@@ -1735,7 +1737,7 @@ fn poll_browser_files(ctx: &egui::Context, frame: &mut eframe::Frame, app: &mut 
             }
         }
     }
-    web::publish_frame(app.frame_ms, frame);
+    web::publish_frame(app, frame);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
