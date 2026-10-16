@@ -27,7 +27,12 @@ fn default_world_dimensions_follow_canvas_size_and_cell_size() {
 fn debounced_canvas_resize_preserves_cells_and_updates_the_texture_grid() {
     let mut app = Tinderbox::new_state(false);
     let water = app.world.rules().id("water").unwrap();
+    let soil = app.world.rules().id("soil").unwrap();
+    let tree = app.world.rules().id("tree").unwrap();
     app.world.paint(3, 240, water);
+    app.world.paint(5, 249, soil);
+    app.world.paint(5, 248, tree);
+    app.sim_seconds = 12.0;
     let previous = app.world.cells().to_vec();
     let size = egui::vec2(224.0, 168.0);
     app.resize_world_to_fit(size);
@@ -36,6 +41,9 @@ fn debounced_canvas_resize_preserves_cells_and_updates_the_texture_grid() {
     app.resize_world_to_fit(size);
     assert_eq!((app.world.width(), app.world.height()), (64, 48));
     assert_eq!(app.world.cells()[38 * 64 + 3], previous[240 * 400 + 3]);
+    assert_eq!(app.world.cells()[47 * 64 + 5].element, soil);
+    assert_eq!(app.world.cells()[46 * 64 + 5].element, tree);
+    assert_eq!(app.sim_seconds, 12.0);
     assert_eq!(app.world_texture.size(), [64, 48]);
 }
 

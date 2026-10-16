@@ -1805,6 +1805,26 @@ mod tests {
     }
 
     #[test]
+    fn resize_preserves_tree_support_state_with_bottom_anchored_cells() {
+        let rules = rules();
+        let mut level = Preset::Island.level(&rules, 64, 48);
+        let mut original = level.generate(rules.clone()).unwrap();
+        let tree = rules.id("tree").unwrap();
+        let x = 7;
+        let y = 47;
+        original.paint(x, y, tree);
+        original.tree_support_age[y * original.width + x] = 53;
+
+        level.height = 32;
+        let mut resized = level.generate(rules).unwrap();
+        resized.preserve_resize_state_from(&original);
+
+        let mapped_index = 31 * resized.width + x;
+        assert_eq!(resized.cells()[mapped_index].element, tree);
+        assert_eq!(resized.tree_support_age[mapped_index], 53);
+    }
+
+    #[test]
     fn shrinking_height_keeps_every_cell_in_the_bottom_terrain_band() {
         let rules = rules();
         let level = Preset::Island.level(&rules, 64, 48);
