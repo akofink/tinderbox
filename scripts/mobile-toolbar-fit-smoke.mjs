@@ -41,6 +41,15 @@ try {
 } finally {
   await normalContext.close();
 }
+const portraitScenarios = [
+  [390, 844, "portrait-390x844"],
+  [393, 852, "portrait-393x852"],
+];
+const isPhonePortrait = (width, height) => width <= 420 && height >= 800;
+if (portraitScenarios.filter(([width, height]) => isPhonePortrait(width, height)).length !== 2) {
+  throw new Error("expected both phone portrait scenarios to exercise compact layout and HUD assertions");
+}
+let portraitAssertionsRun = 0;
 const changedPixels = async (a, b) => {
   const [left, right] = await Promise.all([sharp(a).raw().toBuffer(), sharp(b).raw().toBuffer()]);
   let changed = 0;
@@ -52,10 +61,8 @@ const changedPixels = async (a, b) => {
   return changed;
 };
 try {
-  for (const [width, height, name] of [
-    [390, 844, "portrait-390x844"],
-    [393, 852, "portrait-393x852"],
-  ]) {
+  for (const [width, height, name] of portraitScenarios) {
+    const phonePortrait = isPhonePortrait(width, height);
     const context = await browser.newContext({
       viewport: { width, height },
       deviceScaleFactor: 1,
@@ -123,8 +130,11 @@ try {
     }
     const toolbarHeight = dimensions.toolbar[3] - dimensions.toolbar[1];
     const paletteWidth = dimensions.palette[2] - dimensions.palette[0];
-    if (name === "portrait" && (toolbarHeight > 100 || paletteWidth / width >= 0.22)) {
-      throw new Error(`${name}: expanded top-level layout exceeds compact geometry: ${JSON.stringify({ toolbarHeight, paletteWidth, width })}`);
+    if (phonePortrait) {
+      portraitAssertionsRun++;
+      if (toolbarHeight > 100 || paletteWidth / width >= 0.22) {
+        throw new Error(`${name}: expanded top-level layout exceeds compact geometry: ${JSON.stringify({ toolbarHeight, paletteWidth, width })}`);
+      }
     }
     if (!dimensions.viewportMeta?.includes("viewport-fit=cover")) {
       throw new Error(`${name}: viewport-fit=cover is missing`);
@@ -165,11 +175,11 @@ try {
     if (hudBounds) {
       const [,, hudRight, hudBottom] = hudBounds.split(",").map(Number);
       const hudTop = Number(hudBounds.split(",")[1]);
-      if (hudRight > width + 0.5 || (name === "portrait" && hudBottom - hudTop > 80)) {
+      if (hudRight > width + 0.5 || (phonePortrait && hudBottom - hudTop > 80)) {
         throw new Error(`${name}: HUD text is overflowing or too tall: ${hudBounds}`);
       }
     }
-    if (name === "portrait" && !hudBounds) throw new Error("portrait: missing wrapped HUD bounds");
+    if (phonePortrait && !hudBounds) throw new Error(`${name}: missing wrapped HUD bounds`);
     const result = {
       name,
       width,
@@ -229,6 +239,9 @@ try {
   }
 } finally {
   await browser.close();
+}
+if (portraitAssertionsRun !== 2) {
+  throw new Error(`expected compact geometry assertions for both phone portrait cases; ran ${portraitAssertionsRun}`);
 }
 await fs.writeFile(`${output}/results.json`, JSON.stringify(results, null, 2));
 console.log(JSON.stringify(results, null, 2));
