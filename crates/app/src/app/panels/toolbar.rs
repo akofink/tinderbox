@@ -37,7 +37,8 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
         ui.label("Speed");
         ui.add(egui::Slider::new(&mut app.speed, 0.25..=10.0).suffix("×"));
         ui.label("Brush");
-        ui.add(egui::Slider::new(&mut app.brush, 1..=16).suffix(" cells"));
+        let response = ui.add(egui::Slider::new(&mut app.brush, 1..=16).suffix(" cells"));
+        record_test_bounds(ui, "brush", response.rect, app.brush.to_string());
     });
     ui.horizontal_wrapped(|ui| {
         if toolbar_button(ui, "Level setup", compact).clicked() {
@@ -47,7 +48,13 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
             app.wildfire();
         }
         ui.label("Cell size");
-        ui.add(egui::Slider::new(&mut app.cell_size, 2.0..=8.0).suffix(" pt"));
+        let response = ui.add(egui::Slider::new(&mut app.cell_size, 2.0..=8.0).suffix(" pt"));
+        record_test_bounds(
+            ui,
+            "cell-size",
+            response.rect,
+            format!("{:.2}", app.cell_size),
+        );
         ui.checkbox(&mut app.show_hud, "HUD");
         if ui
             .add_sized(
@@ -105,6 +112,7 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
 
 fn show_narrow(app: &mut Tinderbox, ui: &mut egui::Ui) {
     ui.spacing_mut().interact_size = egui::vec2(44.0, 44.0);
+    ui.spacing_mut().slider_width = 72.0;
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
             if ui
@@ -136,16 +144,17 @@ fn show_narrow(app: &mut Tinderbox, ui: &mut egui::Ui) {
             }
         });
         ui.horizontal(|ui| {
-            ui.label("Speed");
+            ui.label(format!("Speed {:.1}×", app.speed));
             ui.add_sized(
-                egui::vec2(104.0, 44.0),
-                egui::Slider::new(&mut app.speed, 0.25..=10.0).suffix("×"),
+                egui::vec2(72.0, 44.0),
+                egui::Slider::new(&mut app.speed, 0.25..=10.0).show_value(false),
             );
-            ui.label("Brush");
-            ui.add_sized(
-                egui::vec2(104.0, 44.0),
-                egui::Slider::new(&mut app.brush, 1..=16).suffix(" cells"),
+            ui.label(format!("Brush {} cells", app.brush));
+            let response = ui.add_sized(
+                egui::vec2(72.0, 44.0),
+                egui::Slider::new(&mut app.brush, 1..=16).show_value(false),
             );
+            record_test_bounds(ui, "brush", response.rect, app.brush.to_string());
         });
         ui.horizontal(|ui| {
             if ui
@@ -160,10 +169,18 @@ fn show_narrow(app: &mut Tinderbox, ui: &mut egui::Ui) {
             {
                 app.wildfire();
             }
-            ui.label("Cell size");
-            ui.add_sized(
-                egui::vec2(80.0, 44.0),
-                egui::Slider::new(&mut app.cell_size, 2.0..=8.0),
+        });
+        ui.horizontal(|ui| {
+            ui.label(format!("Cell size {:.1} pt", app.cell_size));
+            let response = ui.add_sized(
+                egui::vec2(104.0, 44.0),
+                egui::Slider::new(&mut app.cell_size, 2.0..=8.0).show_value(false),
+            );
+            record_test_bounds(
+                ui,
+                "cell-size",
+                response.rect,
+                format!("{:.2}", app.cell_size),
             );
         });
         ui.horizontal(|ui| {
@@ -211,6 +228,45 @@ fn show_narrow(app: &mut Tinderbox, ui: &mut egui::Ui) {
         ui.horizontal(|ui| super::wind::show_directions(app, ui));
         ui.horizontal(|ui| super::wind::show_strength_and_gust(app, ui, true));
     });
+}
+
+fn record_test_bounds(ui: &egui::Ui, name: &str, rect: egui::Rect, value: String) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(window) = eframe::web_sys::window() else {
+            return;
+        };
+        if !window
+            .location()
+            .search()
+            .is_ok_and(|search| search.contains("toolbar-test=1"))
+        {
+            return;
+        }
+        let Some(canvas) = window
+            .document()
+            .and_then(|document| document.get_element_by_id("the_canvas_id"))
+        else {
+            return;
+        };
+        let clip = ui.clip_rect();
+        let _ = canvas.set_attribute(
+            &format!("data-toolbar-{name}"),
+            &format!(
+                "{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{value}",
+                rect.min.x,
+                rect.min.y,
+                rect.max.x,
+                rect.max.y,
+                clip.min.x,
+                clip.min.y,
+                clip.max.x,
+                clip.max.y,
+            ),
+        );
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = (ui, name, rect, value);
 }
 
 fn toolbar_button(ui: &mut egui::Ui, label: &str, compact: bool) -> egui::Response {

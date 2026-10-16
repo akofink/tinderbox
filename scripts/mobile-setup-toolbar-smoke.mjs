@@ -85,7 +85,7 @@ try {
     const playChanged = toolbar.reduce((n, byte, i) => n + (byte !== playing[i]), 0);
     if (playChanged < 1_000) throw new Error(`${name}: primary Play touch caused no visible state change`);
 
-    const westY = name === "landscape" ? 116 : 256;
+    const westY = { portrait: 256, landscape: 116, narrow: 306 }[name];
     await page.touchscreen.tap(70, westY);
     await page.waitForTimeout(200);
     const west = await page.screenshot({ path: `${output}/${name}-wind-west.png` });
