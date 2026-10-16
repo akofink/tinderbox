@@ -20,11 +20,21 @@ pub struct Interaction {
     pub enabled: bool,
 }
 
+/// A sustained overhead-cover lifecycle rule, separate from pair interactions because direction matters.
+#[derive(Clone, Debug)]
+pub struct BurialRule {
+    pub when: usize,
+    pub covered_by: Vec<usize>,
+    pub result: usize,
+    pub updates: u16,
+}
+
 /// Validated element and interaction definitions.
 #[derive(Clone, Debug)]
 pub struct Rules {
     pub elements: Vec<Element>,
     pub interactions: Vec<Interaction>,
+    pub burial_rules: Vec<BurialRule>,
     pub atmosphere: AtmosphereRules,
     pub ecology: EcologyRules,
 }
@@ -106,6 +116,8 @@ struct RawRules {
     #[serde(default)]
     interactions: Vec<RawInteraction>,
     #[serde(default)]
+    burial_rules: Vec<RawBurialRule>,
+    #[serde(default)]
     atmosphere: AtmosphereRules,
     #[serde(default)]
     ecology: EcologyRules,
@@ -146,6 +158,14 @@ struct RawInteraction {
     downwind_bonus: f32,
     #[serde(default = "default_enabled")]
     enabled: bool,
+}
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RawBurialRule {
+    when: String,
+    covered_by: Vec<String>,
+    result: String,
+    updates: u16,
 }
 
 fn default_enabled() -> bool {
@@ -335,11 +355,30 @@ impl Rules {
                 enabled: r.enabled,
             });
         }
+        let mut burial_rules = Vec::with_capacity(raw.burial_rules.len());
+        for (index, rule) in raw.burial_rules.into_iter().enumerate() {
+            if rule.updates == 0 || rule.covered_by.is_empty() {
+                return Err(RulesError(format!(
+                    "burial rule {index} must have positive updates and at least one cover material"
+                )));
+            }
+            burial_rules.push(BurialRule {
+                when: id(&rule.when, &format!("burial rule {index} when"))?,
+                covered_by: rule
+                    .covered_by
+                    .iter()
+                    .map(|name| id(name, &format!("burial rule {index} covered_by")))
+                    .collect::<Result<Vec<_>, _>>()?,
+                result: id(&rule.result, &format!("burial rule {index} result"))?,
+                updates: rule.updates,
+            });
+        }
         validate_atmosphere(&raw.atmosphere)?;
         validate_ecology(&raw.ecology)?;
         Ok(Self {
             elements,
             interactions,
+            burial_rules,
             atmosphere: raw.atmosphere,
             ecology: raw.ecology,
         })
@@ -401,9 +440,26 @@ impl Rules {
                 })
             })
             .collect::<Result<Vec<_>, RulesError>>()?;
+        let burial_rules = self
+            .burial_rules
+            .iter()
+            .map(|rule| {
+                Ok(RawBurialRule {
+                    when: name(rule.when)?,
+                    covered_by: rule
+                        .covered_by
+                        .iter()
+                        .map(|&id| name(id))
+                        .collect::<Result<Vec<_>, _>>()?,
+                    result: name(rule.result)?,
+                    updates: rule.updates,
+                })
+            })
+            .collect::<Result<Vec<_>, RulesError>>()?;
         let text = toml::to_string_pretty(&RawRules {
             elements,
             interactions,
+            burial_rules,
             atmosphere: self.atmosphere.clone(),
             ecology: self.ecology.clone(),
         })

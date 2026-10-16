@@ -67,6 +67,8 @@ pub struct Element {
 pub struct Cell {
     pub element: usize,
     pub(crate) age: u16,
+    /// Consecutive updates under configured overhead burial cover.
+    pub(crate) burial_age: u16,
     /// Intrinsic moisture on a 0..=255 scale.
     pub moisture: u8,
     /// Burn progress on a 0..=255 scale.
