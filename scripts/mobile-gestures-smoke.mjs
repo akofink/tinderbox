@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs/promises";
 
-const output = "tmp/mobile-gestures-smoke";
+const output = process.env.TINDERBOX_GESTURES_OUTPUT_DIR ?? "tmp/mobile-gestures-smoke";
 await fs.mkdir(output, { recursive: true });
 const browser = await chromium.launch({
   headless: true,
@@ -9,10 +9,10 @@ const browser = await chromium.launch({
 });
 const results = [];
 try {
-  for (const [name, width, height, setupPlay] of [
-    ["portrait", 390, 844, [38, 205]],
-    ["landscape", 844, 390, [38, 197]],
-    ["narrow", 320, 640, [38, 197]],
+  for (const [name, width, height] of [
+    ["portrait", 390, 844],
+    ["landscape", 844, 390],
+    ["narrow", 320, 640],
   ]) {
     const errors = [];
     const context = await browser.newContext({
@@ -21,17 +21,30 @@ try {
     const page = await context.newPage();
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
-    await page.goto(process.env.TINDERBOX_TEST_URL ?? "http://127.0.0.1:4173/", { waitUntil: "load", timeout: 60_000 });
+    const testUrl = new URL(process.env.TINDERBOX_TEST_URL ?? "http://127.0.0.1:4173/");
+    testUrl.searchParams.set("profile", "endless");
+    testUrl.searchParams.set("toolbar-test", "1");
+    await page.goto(testUrl.toString(), { waitUntil: "load", timeout: 60_000 });
     await page.waitForFunction(() => document.querySelector("#the_canvas_id")?.getAttribute("data-renderer"), null, { timeout: 60_000 });
+    const canvas = page.locator("#the_canvas_id");
+    await page.waitForFunction(() => document.querySelector("#the_canvas_id")?.hasAttribute("data-toolbar-play-pause"));
     await page.waitForTimeout(1_000);
-    await page.touchscreen.tap(...setupPlay);
-    await page.waitForTimeout(500);
-    await page.touchscreen.tap(30, 24); // Pause simulation so screenshots are stable.
+    const controlBounds = async (name) => {
+      const encoded = await canvas.getAttribute(`data-toolbar-${name}`);
+      if (!encoded) throw new Error(`missing ${name} toolbar bounds`);
+      const [x0, y0, x1, y1] = encoded.split(",").slice(0, 4).map(Number);
+      const rect = await canvas.boundingBox();
+      return { x: rect.x + (x0 + x1) / 2, y: rect.y + (y0 + y1) / 2 };
+    };
+    const tapControl = async (name) => {
+      const point = await controlBounds(name);
+      await page.touchscreen.tap(point.x, point.y);
+    };
+    await tapControl("play-pause"); // Pause simulation so screenshots are stable.
     await page.waitForTimeout(350);
-    await page.touchscreen.tap(Math.min(215, width - 60), 24); // Discoverable Navigate toggle.
+    await tapControl("navigate");
     await page.waitForTimeout(250);
 
-    const canvas = page.locator("#the_canvas_id");
     const bounds = await canvas.boundingBox();
     const cx = Math.round(bounds.x + bounds.width * 0.72);
     const cy = Math.round(bounds.y + bounds.height * 0.67);
@@ -57,14 +70,15 @@ try {
     const panChanged = afterZoom.reduce((count, byte, index) => count + (byte !== afterPan[index]), 0);
     if (panChanged < 1000) throw new Error(`${name}: one-finger Navigate drag produced no visible camera change (${panChanged} PNG byte differences)`);
 
-    await page.touchscreen.tap(Math.min(215, width - 60), 24); // Return to painting.
+    await tapControl("navigate"); // Return to painting.
     const beforePaint = await snap("before-paint");
     await page.touchscreen.tap(cx, cy);
     const afterPaint = await snap("painted");
     const paintChanged = beforePaint.reduce((count, byte, index) => count + (byte !== afterPaint[index]), 0);
     if (paintChanged < 100) throw new Error(`${name}: one-finger touch paint produced no visible change (${paintChanged} PNG byte differences)`);
 
-    await page.touchscreen.tap(60, name === "narrow" ? 258 : 160); // Enable touch Inspector.
+    if (width <= 420) await tapControl("more");
+    await tapControl("inspect");
     const beforeInspect = await snap("before-inspect");
     await page.touchscreen.tap(cx, cy);
     const afterInspect = await snap("inspected");

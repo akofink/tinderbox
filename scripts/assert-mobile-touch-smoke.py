@@ -25,9 +25,11 @@ if inspected < 10:
 if dismissed >= 10:
     raise SystemExit(f"Inspector did not dismiss: found {dismissed} yellow canvas pixels")
 narrow = Image.open(output / "narrow.png").convert("RGB")
+# Fixed worlds now retain their aspect ratio instead of expanding to fill a phone's
+# height. Sample a known terrain strip in the narrow canvas below the 44 px toolbar.
 canvas_world_pixels = sum(
     70 < red < 150 and 70 < green < 160 and 80 < blue < 180
-    for red, green, blue in narrow.crop((128, 450, 168, 490)).get_flattened_data()
+    for red, green, blue in narrow.crop((128, 120, 168, 230)).get_flattened_data()
 )
 if canvas_world_pixels < 100:
     raise SystemExit(

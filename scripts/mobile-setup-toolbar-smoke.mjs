@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs/promises";
 
-const output = "tmp/mobile-setup-toolbar-smoke";
+const output = process.env.TINDERBOX_SETUP_OUTPUT_DIR ?? "tmp/mobile-setup-toolbar-smoke";
 const baseUrl = process.env.TINDERBOX_TEST_URL ?? "http://127.0.0.1:4173/";
 await fs.mkdir(output, { recursive: true });
 const browser = await chromium.launch({

@@ -1,7 +1,8 @@
+import os
 from pathlib import Path
 from PIL import Image
 
-image = Image.open(Path("web-smoke-canvas.png")).convert("RGB")
+image = Image.open(Path(os.environ.get("TINDERBOX_WEB_SMOKE_IMAGE", "web-smoke-canvas.png"))).convert("RGB")
 sample = image.resize((min(160, image.width), min(120, image.height)))
 colors = sample.getcolors(maxcolors=sample.width * sample.height)
 color_count = len(colors) if colors else sample.width * sample.height + 1
