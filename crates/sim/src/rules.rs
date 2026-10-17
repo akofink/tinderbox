@@ -37,6 +37,7 @@ pub struct Rules {
     pub burial_rules: Vec<BurialRule>,
     pub atmosphere: AtmosphereRules,
     pub ecology: EcologyRules,
+    pub daylight: DaylightRules,
 }
 
 /// Tunable atmospheric physics. Temperatures are in Celsius; rates are per atmosphere update.
@@ -69,6 +70,34 @@ impl Default for AtmosphereRules {
             pressure_wind: 0.15,
             oxygen_consumption: 0.35,
             oxygen_diffusion: 0.08,
+        }
+    }
+}
+
+/// Data-driven rates for decomposers and fungus.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DaylightRules {
+    /// Feature gate for day/night light and darkness growth suppression. Enabled by default so
+    /// the shipped ruleset exercises daylight; set false to preserve legacy behavior.
+    pub enabled: bool,
+    /// Work units in one full day/night cycle.
+    pub cycle_ticks: u32,
+    /// Light removed from the next cell by each non-plant/tree static cover cell, in 0..=255.
+    pub solid_attenuation: u8,
+    /// Light at or below this value counts toward sustained darkness.
+    pub darkness_threshold: u8,
+    /// Simulated work units of darkness required before living vegetation decays.
+    pub darkness_ticks: u32,
+}
+impl Default for DaylightRules {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            cycle_ticks: 86_400_000,
+            solid_attenuation: 16,
+            darkness_threshold: 24,
+            darkness_ticks: 46_800_000,
         }
     }
 }
@@ -121,6 +150,8 @@ struct RawRules {
     atmosphere: AtmosphereRules,
     #[serde(default)]
     ecology: EcologyRules,
+    #[serde(default)]
+    daylight: DaylightRules,
 }
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -375,12 +406,19 @@ impl Rules {
         }
         validate_atmosphere(&raw.atmosphere)?;
         validate_ecology(&raw.ecology)?;
+        if raw.daylight.cycle_ticks < 4 || raw.daylight.darkness_ticks == 0 {
+            return Err(RulesError(
+                "daylight cycle_ticks must be at least 4 and darkness_ticks must be non-zero"
+                    .into(),
+            ));
+        }
         Ok(Self {
             elements,
             interactions,
             burial_rules,
             atmosphere: raw.atmosphere,
             ecology: raw.ecology,
+            daylight: raw.daylight,
         })
     }
 
@@ -462,6 +500,7 @@ impl Rules {
             burial_rules,
             atmosphere: self.atmosphere.clone(),
             ecology: self.ecology.clone(),
+            daylight: self.daylight.clone(),
         })
         .map_err(|e| RulesError(format!("cannot serialize rules: {e}")))?;
         // Public Rules values may have been manually constructed or modified.
