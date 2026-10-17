@@ -107,8 +107,10 @@ try {
     if (Math.abs(collapsed.world[0] - collapsed.palette[2]) > 1.5) {
       throw new Error(`${name}: unexplained palette-to-world gutter: ${JSON.stringify({ palette: collapsed.palette, world: collapsed.world })}`);
     }
-    if (Math.abs(collapsed.world[3] - (collapsed.canvasRect.bottom - collapsed.canvasRect.top)) > 2) {
-      throw new Error(`${name}: world does not fit to the bottom safe-area edge: ${JSON.stringify({ world: collapsed.world, canvasRect: collapsed.canvasRect })}`);
+    const canvasHeight = collapsed.canvasRect.bottom - collapsed.canvasRect.top;
+    if (collapsed.toolbar[3] > collapsed.world[1] + 1 ||
+        collapsed.world[1] < 0 || collapsed.world[1] + collapsed.world[3] > canvasHeight + collapsed.toolbar[3] + 1) {
+      throw new Error(`${name}: toolbar occludes or clips the fitted fixed world: ${JSON.stringify({ world: collapsed.world, toolbar: collapsed.toolbar, canvasRect: collapsed.canvasRect })}`);
     }
     if (phonePortrait && (toolbarHeight > 100 || paletteWidth / config.viewport.width >= 0.22)) {
       throw new Error(`${name}: compact layout geometry failed: ${JSON.stringify({ toolbarHeight, paletteWidth })}`);
@@ -149,7 +151,10 @@ try {
     if (snapshot.testBounds["play-pause"]?.split(",")[8] !== "true") {
       throw new Error(`${name}: Play level tap did not start the world toolbar`);
     }
-    const requiredControls = controls.filter((control) => config.hasTouch || control !== "navigate");
+    const requiredControls = controls.filter((control) => control !== "navigate");
+    if (snapshot.testBounds.navigate) {
+      throw new Error(`${name}: Navigate is exposed as a no-op in fixed mode`);
+    }
     for (const control of requiredControls) {
       const encoded = snapshot.testBounds[control];
       if (!encoded) throw new Error(`${name}: missing ${control} response bounds`);

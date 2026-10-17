@@ -124,6 +124,18 @@ pub(super) fn publish_frame(app: &Tinderbox, frame: &eframe::Frame) {
         return;
     };
     let _ = canvas.set_attribute("data-frame-ms", &format!("{:.2}", app.frame_ms));
+    let _ = canvas.set_attribute(
+        "data-world-size",
+        &format!("{}x{}", app.world.width(), app.world.height()),
+    );
+    let _ = canvas.set_attribute("data-dropped-cells", &format!("{:.0}", app.work.dropped));
+    let global_camera_center_x = app.world_start_chunk as f32 * super::ENDLESS_CHUNK_WIDTH as f32
+        + app.camera_x
+        + app.camera_view_width / 2.0;
+    let _ = canvas.set_attribute(
+        "data-global-camera-center-x",
+        &format!("{global_camera_center_x:.3}"),
+    );
     if app.stress_play {
         let _ = canvas.set_attribute("data-profile-frames", &app.stress_frames.to_string());
     }

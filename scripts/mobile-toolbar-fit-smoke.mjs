@@ -133,8 +133,10 @@ try {
     if (Math.abs(dimensions.world[0] - dimensions.palette[2]) > 1.5) {
       throw new Error(`${name}: unexplained palette-to-world gutter: ${JSON.stringify({ palette: dimensions.palette, world: dimensions.world })}`);
     }
-    if (Math.abs(dimensions.world[3] - (dimensions.canvasRect.bottom - dimensions.canvasRect.top)) > 2) {
-      throw new Error(`${name}: world does not fit to the bottom safe-area edge: ${JSON.stringify({ world: dimensions.world, canvasRect: dimensions.canvasRect })}`);
+    const canvasHeight = dimensions.canvasRect.bottom - dimensions.canvasRect.top;
+    if (dimensions.toolbar[3] > dimensions.world[1] + 1 ||
+        dimensions.world[1] < 0 || dimensions.world[1] + dimensions.world[3] > canvasHeight + 1) {
+      throw new Error(`${name}: toolbar occludes or clips the fitted fixed world: ${JSON.stringify({ world: dimensions.world, toolbar: dimensions.toolbar, canvasRect: dimensions.canvasRect })}`);
     }
     const toolbarHeight = dimensions.toolbar[3] - dimensions.toolbar[1];
     const paletteWidth = dimensions.palette[2] - dimensions.palette[0];

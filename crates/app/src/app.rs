@@ -20,7 +20,9 @@ use std::{
     sync::mpsc::{self, Receiver},
     time::SystemTime,
 };
-use tinderbox_sim::level::{ENDLESS_CHUNK_WIDTH, MAX_LEVEL_CELLS, MAX_LEVEL_DIMENSION};
+use tinderbox_sim::level::ENDLESS_CHUNK_WIDTH;
+#[cfg(not(target_arch = "wasm32"))]
+use tinderbox_sim::level::{MAX_LEVEL_CELLS, MAX_LEVEL_DIMENSION};
 use tinderbox_sim::{
     DEFAULT_RULES, Rules, World,
     level::{Level, LevelError, LevelMode, Preset},
@@ -51,23 +53,6 @@ fn simulation_frame_dt(wall_dt: f32, fixed_step: bool) -> f32 {
     } else {
         wall_dt.clamp(0.0, MAX_INTERACTIVE_FRAME_DT)
     }
-}
-
-fn fitted_world_dimensions(available: egui::Vec2, cell_size: f32) -> (usize, usize) {
-    let width = (available.x / cell_size)
-        .floor()
-        .clamp(16.0, MAX_LEVEL_DIMENSION as f32) as usize;
-    let height = (available.y / cell_size)
-        .floor()
-        .clamp(16.0, MAX_LEVEL_DIMENSION as f32) as usize;
-    if width.saturating_mul(height) <= MAX_LEVEL_CELLS {
-        return (width, height);
-    }
-    let scale = (MAX_LEVEL_CELLS as f64 / (width * height) as f64).sqrt();
-    (
-        ((width as f64 * scale).floor() as usize).max(16),
-        ((height as f64 * scale).floor() as usize).max(16),
-    )
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -190,8 +175,6 @@ pub(super) struct Tinderbox {
     max_dirty_regions_uploaded: usize,
     last_frame: Instant,
     frame_ms: f32,
-    resize_target: Option<(usize, usize)>,
-    resize_target_since: Instant,
     camera_x: f32,
     camera_y: f32,
     camera_view_width: f32,
@@ -501,8 +484,6 @@ impl Tinderbox {
             max_dirty_regions_uploaded: 0,
             last_frame: Instant::now(),
             frame_ms: 0.0,
-            resize_target: None,
-            resize_target_since: Instant::now(),
             camera_x: 0.0,
             camera_y: 0.0,
             camera_view_width: width as f32,
@@ -565,37 +546,9 @@ impl Tinderbox {
         }
     }
 
-    pub(super) fn resize_world_to_fit(&mut self, available: egui::Vec2) {
-        if self.level.mode == LevelMode::Endless {
-            self.resize_target = None;
-            return;
-        }
-        let (width, height) = fitted_world_dimensions(available, self.cell_size);
-        let target = (width, height);
-        if target == (self.world.width(), self.world.height()) {
-            self.resize_target = None;
-            return;
-        }
-        if self.resize_target != Some(target) {
-            self.resize_target = Some(target);
-            self.resize_target_since = Instant::now();
-            return;
-        }
-        if self.resize_target_since.elapsed() < std::time::Duration::from_millis(120) {
-            return;
-        }
-        self.resize_target = None;
-        let mut level = self.level.clone();
-        level.width = width;
-        level.height = height;
-        let Ok(mut resized) = level.generate_for_resize(self.world.rules().clone(), &self.world)
-        else {
-            return;
-        };
-        resized.preserve_resize_state_from(&self.world);
-        self.level.width = width;
-        self.level.height = height;
-        self.install_world(resized);
+    pub(super) fn resize_world_to_fit(&mut self, _available: egui::Vec2) {
+        // A viewport is a camera target, never a reason to regenerate the simulation.
+        // Fixed worlds are fit by the renderer; endless worlds keep their active span.
     }
 
     fn reset_camera(&mut self) {
@@ -1444,7 +1397,7 @@ impl Tinderbox {
                     if n % 4 == 0 { fire } else { water },
                 );
             }
-            if self.level.mode == LevelMode::Endless && self.camera_initialized {
+            if self.level.mode == LevelMode::Endless && self.camera_initialized && self.running {
                 let pan_started = Instant::now();
                 self.pan_camera(3.0, self.camera_view_width);
                 self.stress_max_pan_ms = self

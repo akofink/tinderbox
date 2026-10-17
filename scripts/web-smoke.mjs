@@ -1,6 +1,8 @@
 import { chromium } from "playwright";
 
 const errors = [];
+const baseUrl = process.env.TINDERBOX_TEST_URL ?? "http://127.0.0.1:4173/";
+const screenshotPath = process.env.TINDERBOX_WEB_SMOKE_IMAGE ?? "web-smoke-canvas.png";
 const browser = await chromium.launch({
   headless: true,
   args: [
@@ -18,7 +20,7 @@ try {
   page.on("console", (message) => {
     if (message.type() === "error") errors.push(`console: ${message.text()}`);
   });
-  await page.goto("http://127.0.0.1:4173/", { waitUntil: "load", timeout: 60_000 });
+  await page.goto(baseUrl, { waitUntil: "load", timeout: 60_000 });
   const canvas = page.locator("#the_canvas_id");
   await canvas.waitFor({ state: "visible", timeout: 30_000 });
   await page.waitForFunction(() => {
@@ -41,7 +43,7 @@ try {
   if (/panic|panicked at|unreachable!|Tinderbox failed to start/i.test(bodyText)) {
     errors.push(`panic or startup failure text: ${bodyText}`);
   }
-  await canvas.screenshot({ path: "web-smoke-canvas.png" });
+  await canvas.screenshot({ path: screenshotPath });
   if (errors.length) throw new Error(errors.join("\n"));
   console.log(`Web smoke passed: renderer=${await canvas.getAttribute("data-renderer")}, ${frameUpdates} frame updates in 10 seconds`);
 } finally {

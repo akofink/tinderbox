@@ -35,7 +35,18 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) -> egui::Rect
     let base_view_width = rect.width() * base_view_height / rect.height().max(1.0);
     let view_width = (base_view_width / app.camera_zoom).max(1.0);
     let view_height = (base_view_height / app.camera_zoom).max(1.0);
+    let was_camera_initialized = app.camera_initialized;
+    let previous_view_width = app.camera_view_width;
     app.center_camera_on_origin(view_width);
+    if was_camera_initialized
+        && app.level.mode == tinderbox_sim::level::LevelMode::Endless
+        && (previous_view_width - view_width).abs() > f32::EPSILON
+    {
+        // Preserve the global world point at the viewport center while rotation
+        // changes the visible width, then retain enough chunks around that view.
+        app.camera_x += (previous_view_width - view_width) / 2.0;
+        app.pan_camera(0.0, view_width);
+    }
     app.camera_view_height = view_height;
     let mut camera = input::CameraView {
         x: app.camera_x,

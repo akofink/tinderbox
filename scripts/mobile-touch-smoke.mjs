@@ -29,7 +29,7 @@ try {
   page.on("console", (message) => {
     if (message.type() === "error") errors.push(`console: ${message.text()}`);
   });
-  const testUrl = new URL("http://127.0.0.1:4173/");
+  const testUrl = new URL(process.env.TINDERBOX_TEST_URL ?? "http://127.0.0.1:4173/");
   testUrl.searchParams.set("toolbar-test", "1");
   await page.goto(testUrl.toString(), { waitUntil: "load", timeout: 60_000 });
   const canvas = page.locator("#the_canvas_id");
@@ -72,7 +72,7 @@ try {
     hasTouch: true,
   });
   const narrowPage = await narrowContext.newPage();
-  await narrowPage.goto("http://127.0.0.1:4173/", { waitUntil: "load", timeout: 60_000 });
+  await narrowPage.goto(process.env.TINDERBOX_TEST_URL ?? "http://127.0.0.1:4173/", { waitUntil: "load", timeout: 60_000 });
   await narrowPage.waitForFunction(() => {
     const target = document.querySelector("#the_canvas_id");
     return target?.getAttribute("data-renderer") && target.getAttribute("data-frame-ms");

@@ -38,7 +38,7 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
         if reset.clicked() {
             app.reset();
         }
-        if compact {
+        if compact && app.level.mode == crate::app::LevelMode::Endless {
             let navigate = ui
                 .add_sized(
                     egui::vec2(92.0, 44.0),
@@ -158,13 +158,15 @@ fn show_narrow(app: &mut Tinderbox, ui: &mut egui::Ui) {
             if reset.clicked() {
                 app.reset();
             }
-            let navigate = ui.add_sized(
-                egui::vec2(80.0, 44.0),
-                egui::Button::new("Navigate").selected(app.navigation_mode),
-            );
-            record_test_bounds(ui, "navigate", navigate.rect, String::new);
-            if navigate.clicked() {
-                app.navigation_mode = !app.navigation_mode;
+            if app.level.mode == crate::app::LevelMode::Endless {
+                let navigate = ui.add_sized(
+                    egui::vec2(80.0, 44.0),
+                    egui::Button::new("Navigate").selected(app.navigation_mode),
+                );
+                record_test_bounds(ui, "navigate", navigate.rect, String::new);
+                if navigate.clicked() {
+                    app.navigation_mode = !app.navigation_mode;
+                }
             }
             let more = ui.add_sized(
                 egui::vec2(48.0, 44.0),
