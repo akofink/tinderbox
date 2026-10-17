@@ -21,7 +21,12 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
         .show(ui, |ui| {
             if compact {
-                ui.label(egui::RichText::new("Elem.").size(12.0).strong());
+                ui.label(
+                    egui::RichText::new("Elem.")
+                        .size(12.0)
+                        .strong()
+                        .color(Color32::from_rgb(224, 228, 238)),
+                );
             } else {
                 ui.heading("Elements");
             }
@@ -35,7 +40,12 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
                 if rows.is_empty() {
                     continue;
                 }
-                ui.label(egui::RichText::new(group).small().strong());
+                ui.label(
+                    egui::RichText::new(group)
+                        .small()
+                        .strong()
+                        .color(Color32::from_rgb(224, 228, 238)),
+                );
                 for (id, (name, color)) in rows {
                     let selected = id == app.selected;
                     let response = ui
@@ -61,13 +71,16 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
                             } else {
                                 labels::display_name(name)
                             };
-                            if compact {
-                                ui.selectable_label(
-                                    selected,
-                                    egui::RichText::new(label).size(10.0),
-                                )
+                            let foreground = if selected {
+                                Color32::from_rgb(24, 36, 52)
                             } else {
-                                ui.selectable_label(selected, label)
+                                Color32::from_rgb(224, 228, 238)
+                            };
+                            let text = egui::RichText::new(label).color(foreground);
+                            if compact {
+                                ui.selectable_label(selected, text.size(10.0))
+                            } else {
+                                ui.selectable_label(selected, text)
                             }
                         })
                         .inner;

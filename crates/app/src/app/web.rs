@@ -124,6 +124,11 @@ pub(super) fn publish_frame(app: &Tinderbox, frame: &eframe::Frame) {
         return;
     };
     let _ = canvas.set_attribute("data-frame-ms", &format!("{:.2}", app.frame_ms));
+    let _ = canvas.set_attribute(
+        "data-world-size",
+        &format!("{}x{}", app.world.width(), app.world.height()),
+    );
+    let _ = canvas.set_attribute("data-dropped-cells", &format!("{:.0}", app.work.dropped));
     if app.stress_play {
         let _ = canvas.set_attribute("data-profile-frames", &app.stress_frames.to_string());
     }

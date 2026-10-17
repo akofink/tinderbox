@@ -14,17 +14,7 @@ fn play_level(app: &mut Tinderbox, level: Level) {
 }
 
 #[test]
-fn default_world_dimensions_follow_canvas_size_and_cell_size() {
-    let a = fitted_world_dimensions(egui::vec2(960.0, 700.0), 3.5);
-    let b = fitted_world_dimensions(egui::vec2(1280.0, 700.0), 3.5);
-    let zoomed = fitted_world_dimensions(egui::vec2(960.0, 700.0), 4.0);
-    assert_eq!(a, (274, 200));
-    assert_eq!(b, (365, 200));
-    assert_eq!(zoomed, (240, 175));
-}
-
-#[test]
-fn debounced_canvas_resize_preserves_cells_and_updates_the_texture_grid() {
+fn viewport_resize_preserves_the_fixed_world_and_texture_grid() {
     let mut app = Tinderbox::new_state(false);
     let water = app.world.rules().id("water").unwrap();
     let soil = app.world.rules().id("soil").unwrap();
@@ -37,14 +27,14 @@ fn debounced_canvas_resize_preserves_cells_and_updates_the_texture_grid() {
     let size = egui::vec2(224.0, 168.0);
     app.resize_world_to_fit(size);
     assert_eq!((app.world.width(), app.world.height()), (400, 250));
-    app.resize_target_since = Instant::now() - std::time::Duration::from_millis(121);
     app.resize_world_to_fit(size);
-    assert_eq!((app.world.width(), app.world.height()), (64, 48));
-    assert_eq!(app.world.cells()[38 * 64 + 3], previous[240 * 400 + 3]);
-    assert_eq!(app.world.cells()[47 * 64 + 5].element, soil);
-    assert_eq!(app.world.cells()[46 * 64 + 5].element, tree);
+    assert_eq!((app.world.width(), app.world.height()), (400, 250));
+    assert_eq!(app.world.cells(), previous.as_slice());
+    assert_eq!(app.world.cells()[240 * 400 + 3].element, water);
+    assert_eq!(app.world.cells()[249 * 400 + 5].element, soil);
+    assert_eq!(app.world.cells()[248 * 400 + 5].element, tree);
     assert_eq!(app.sim_seconds, 12.0);
-    assert_eq!(app.world_texture.size(), [64, 48]);
+    assert_eq!(app.world_texture.size(), [400, 250]);
 }
 
 #[test]

@@ -1,17 +1,24 @@
 import path from "node:path";
 const playwright = await import(process.env.PLAYWRIGHT_PATH ? path.join(process.env.PLAYWRIGHT_PATH, "index.mjs") : "playwright");
-const { webkit } = playwright;
+const { chromium, webkit } = playwright;
+const browserName = process.env.TINDERBOX_BROWSER ?? "webkit";
+const browserType = browserName === "chromium" ? chromium : webkit;
 const baseUrl = process.env.TINDERBOX_TEST_URL ?? "http://127.0.0.1:4173/";
-const browser = await webkit.launch({ headless: true });
+const browser = await browserType.launch({
+  headless: true,
+  ...(browserName === "chromium" ? { args: ["--enable-webgl", "--ignore-gpu-blocklist", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"] } : {}),
+});
 const scenarios = [
   ["desktop", { width: 1180, height: 800 }, { width: 800, height: 600 }],
-  ["phone-portrait", { width: 390, height: 844 }, { width: 844, height: 390 }],
+  ["phone-portrait-to-landscape", { width: 390, height: 844 }, { width: 844, height: 390 }],
+  ["phone-landscape-to-portrait", { width: 844, height: 390 }, { width: 390, height: 844 }],
 ];
 const results = [];
 try {
   for (const [viewportName, initial, rotated] of scenarios) {
     for (const mode of ["fixed", "endless"]) {
-      const context = await browser.newContext({ viewport: initial, isMobile: viewportName === "phone-portrait", hasTouch: viewportName === "phone-portrait", deviceScaleFactor: 1 });
+      const phone = viewportName.startsWith("phone-");
+      const context = await browser.newContext({ viewport: initial, isMobile: phone, hasTouch: phone, deviceScaleFactor: 1 });
       try {
         const page = await context.newPage();
         await page.addInitScript(() => {
@@ -28,9 +35,32 @@ try {
         await page.goto(`${baseUrl}?toolbar-test=1&profile=${mode}`, { waitUntil: "load", timeout: 60_000 });
         await page.waitForFunction(() => document.querySelector("#the_canvas_id")?.getAttribute("data-renderer")?.match(/webgl|webgpu/), null, { timeout: 60_000 });
         await page.waitForTimeout(3000);
+        const beforeRotation = await page.locator("#the_canvas_id").evaluate((canvas) => ({
+          worldSize: canvas.getAttribute("data-world-size"),
+          dropped: canvas.getAttribute("data-dropped-cells"),
+        }));
         await page.evaluate(() => window.__profileMark("resizeStart"));
         await page.setViewportSize(rotated);
         await page.waitForTimeout(750);
+        const afterRotation = await page.locator("#the_canvas_id").evaluate((canvas) => ({
+          worldSize: canvas.getAttribute("data-world-size"),
+          dropped: canvas.getAttribute("data-dropped-cells"),
+          toolbar: canvas.getAttribute("data-layout-toolbar")?.split(",").map(Number),
+          world: canvas.getAttribute("data-layout-world")?.split(",").map(Number),
+        }));
+        const [beforeWidth, beforeHeight] = beforeRotation.worldSize?.split("x").map(Number) ?? [];
+        const [afterWidth, afterHeight] = afterRotation.worldSize?.split("x").map(Number) ?? [];
+        if (!beforeWidth || !afterWidth || beforeHeight !== afterHeight ||
+            (mode === "fixed" && afterRotation.worldSize !== beforeRotation.worldSize) ||
+            (mode === "endless" && afterWidth % 128 !== 0)) {
+          throw new Error(`${viewportName}/${mode}: world dimensions/span incoherent after rotation ${JSON.stringify({ beforeRotation, afterRotation })}`);
+        }
+        if (beforeRotation.dropped !== "0" || afterRotation.dropped !== "0") {
+          throw new Error(`${viewportName}/${mode}: nonzero dropped-cell count around rotation ${JSON.stringify({ beforeRotation, afterRotation })}`);
+        }
+        if (!afterRotation.toolbar || !afterRotation.world || afterRotation.toolbar[3] > afterRotation.world[1] + 1) {
+          throw new Error(`${viewportName}/${mode}: toolbar clips/overlaps world ${JSON.stringify(afterRotation)}`);
+        }
         await page.evaluate(() => window.__profileMark("resizeEnd"));
         await page.evaluate(() => window.__profileMark("navigationStart"));
         await page.locator("#the_canvas_id").evaluate((canvas) => canvas.focus());

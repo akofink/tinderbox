@@ -38,7 +38,7 @@ pub(in crate::app) fn show(app: &mut Tinderbox, ui: &mut egui::Ui) {
         if reset.clicked() {
             app.reset();
         }
-        if compact {
+        if compact && app.level.mode == crate::app::LevelMode::Endless {
             let navigate = ui
                 .add_sized(
                     egui::vec2(92.0, 44.0),
@@ -158,13 +158,15 @@ fn show_narrow(app: &mut Tinderbox, ui: &mut egui::Ui) {
             if reset.clicked() {
                 app.reset();
             }
-            let navigate = ui.add_sized(
-                egui::vec2(80.0, 44.0),
-                egui::Button::new("Navigate").selected(app.navigation_mode),
-            );
-            record_test_bounds(ui, "navigate", navigate.rect, String::new);
-            if navigate.clicked() {
-                app.navigation_mode = !app.navigation_mode;
+            if app.level.mode == crate::app::LevelMode::Endless {
+                let navigate = ui.add_sized(
+                    egui::vec2(80.0, 44.0),
+                    egui::Button::new("Navigate").selected(app.navigation_mode),
+                );
+                record_test_bounds(ui, "navigate", navigate.rect, String::new);
+                if navigate.clicked() {
+                    app.navigation_mode = !app.navigation_mode;
+                }
             }
             let more = ui.add_sized(
                 egui::vec2(48.0, 44.0),
@@ -349,7 +351,7 @@ fn toolbar_button(ui: &mut egui::Ui, label: &str, compact: bool) -> egui::Respon
 }
 
 fn narrow_toolbar_layout(screen: egui::Vec2) -> bool {
-    screen.x <= 420.0
+    screen.x <= 420.0 || screen.y <= 420.0
 }
 
 pub(in crate::app) fn compact_touch_layout(screen: egui::Vec2) -> bool {
@@ -380,7 +382,7 @@ mod tests {
         assert!(narrow_toolbar_layout(egui::vec2(390.0, 664.0)));
         assert!(narrow_toolbar_layout(egui::vec2(390.0, 844.0)));
         assert!(narrow_toolbar_layout(egui::vec2(320.0, 640.0)));
-        assert!(!narrow_toolbar_layout(egui::vec2(750.0, 342.0)));
+        assert!(narrow_toolbar_layout(egui::vec2(750.0, 342.0)));
         assert!(!narrow_toolbar_layout(egui::vec2(1180.0, 800.0)));
         assert!(compact_touch_layout(egui::vec2(390.0, 844.0)));
         assert!(compact_touch_layout(egui::vec2(844.0, 390.0)));
