@@ -351,7 +351,7 @@ fn toolbar_button(ui: &mut egui::Ui, label: &str, compact: bool) -> egui::Respon
 }
 
 fn narrow_toolbar_layout(screen: egui::Vec2) -> bool {
-    screen.x <= 420.0 || screen.y <= 420.0
+    screen.x <= 420.0
 }
 
 pub(in crate::app) fn compact_touch_layout(screen: egui::Vec2) -> bool {
@@ -382,7 +382,7 @@ mod tests {
         assert!(narrow_toolbar_layout(egui::vec2(390.0, 664.0)));
         assert!(narrow_toolbar_layout(egui::vec2(390.0, 844.0)));
         assert!(narrow_toolbar_layout(egui::vec2(320.0, 640.0)));
-        assert!(narrow_toolbar_layout(egui::vec2(750.0, 342.0)));
+        assert!(!narrow_toolbar_layout(egui::vec2(750.0, 342.0)));
         assert!(!narrow_toolbar_layout(egui::vec2(1180.0, 800.0)));
         assert!(compact_touch_layout(egui::vec2(390.0, 844.0)));
         assert!(compact_touch_layout(egui::vec2(844.0, 390.0)));

@@ -116,7 +116,7 @@ try {
       throw new Error(`${name}: compact layout geometry failed: ${JSON.stringify({ toolbarHeight, paletteWidth })}`);
     }
     if (!collapsed.viewportMeta?.includes("viewport-fit=cover")) throw new Error(`${name}: viewport-fit=cover missing`);
-    if (config.hasTouch && (config.viewport.width <= 420 || config.viewport.height <= 420)) {
+    if (config.hasTouch && config.viewport.width <= 420) {
       if (!collapsed.more) throw new Error(`${name}: More controls toggle is missing`);
       const [moreX0, moreY0, moreX1, moreY1] = collapsed.more;
       await page.touchscreen.tap(

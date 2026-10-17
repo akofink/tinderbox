@@ -1397,7 +1397,7 @@ impl Tinderbox {
                     if n % 4 == 0 { fire } else { water },
                 );
             }
-            if self.level.mode == LevelMode::Endless && self.camera_initialized {
+            if self.level.mode == LevelMode::Endless && self.camera_initialized && self.running {
                 let pan_started = Instant::now();
                 self.pan_camera(3.0, self.camera_view_width);
                 self.stress_max_pan_ms = self

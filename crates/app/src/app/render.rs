@@ -756,6 +756,19 @@ mod tests {
         level::{Generator, Level, LevelMode},
     };
 
+    #[test]
+    fn fixed_world_fits_the_usable_phone_canvas_in_both_orientations() {
+        let world = World::new(400, 250, 2026, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+        for available in [
+            eframe::egui::vec2(330.0, 750.0),
+            eframe::egui::vec2(582.0, 250.0),
+        ] {
+            let fit = fitted_size(&world, available);
+            assert!(fit.x <= available.x && fit.y <= available.y);
+            assert!((fit.x / fit.y - world.width() as f32 / world.height() as f32).abs() < 0.01);
+        }
+    }
+
     fn cloud_coverage_at(humidity: u8, sim_seconds: f64) -> f32 {
         let mut world = World::new(256, 192, 2026, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
         world.set_ambient(20, humidity, 21);

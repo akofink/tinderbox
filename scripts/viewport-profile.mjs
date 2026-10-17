@@ -35,9 +35,21 @@ try {
         await page.goto(`${baseUrl}?toolbar-test=1&profile=${mode}`, { waitUntil: "load", timeout: 60_000 });
         await page.waitForFunction(() => document.querySelector("#the_canvas_id")?.getAttribute("data-renderer")?.match(/webgl|webgpu/), null, { timeout: 60_000 });
         await page.waitForTimeout(3000);
+        const togglePlay = async (expectedRunning) => {
+          const bounds = await page.locator("#the_canvas_id").getAttribute("data-toolbar-play-pause");
+          const [, y0, , y1] = bounds.split(",").map(Number);
+          const canvasTop = await page.locator("#the_canvas_id").evaluate((canvas) => canvas.getBoundingClientRect().top);
+          await page.mouse.click(32, canvasTop + (y0 + y1) / 2);
+          await page.waitForFunction((expected) => {
+            const value = document.querySelector("#the_canvas_id")?.getAttribute("data-toolbar-play-pause")?.split(",")[8];
+            return value === String(expected);
+          }, expectedRunning);
+        };
+        if (mode === "endless") await togglePlay(false);
         const beforeRotation = await page.locator("#the_canvas_id").evaluate((canvas) => ({
           worldSize: canvas.getAttribute("data-world-size"),
           dropped: canvas.getAttribute("data-dropped-cells"),
+          globalCameraCenterX: canvas.getAttribute("data-global-camera-center-x"),
         }));
         await page.evaluate(() => window.__profileMark("resizeStart"));
         await page.setViewportSize(rotated);
@@ -45,6 +57,7 @@ try {
         const afterRotation = await page.locator("#the_canvas_id").evaluate((canvas) => ({
           worldSize: canvas.getAttribute("data-world-size"),
           dropped: canvas.getAttribute("data-dropped-cells"),
+          globalCameraCenterX: canvas.getAttribute("data-global-camera-center-x"),
           toolbar: canvas.getAttribute("data-layout-toolbar")?.split(",").map(Number),
           world: canvas.getAttribute("data-layout-world")?.split(",").map(Number),
         }));
@@ -58,6 +71,10 @@ try {
         if (beforeRotation.dropped !== "0" || afterRotation.dropped !== "0") {
           throw new Error(`${viewportName}/${mode}: nonzero dropped-cell count around rotation ${JSON.stringify({ beforeRotation, afterRotation })}`);
         }
+        if (mode === "endless" && Math.abs(Number(beforeRotation.globalCameraCenterX) - Number(afterRotation.globalCameraCenterX)) > 0.05) {
+          throw new Error(`${viewportName}: global world coordinate at viewport center shifted during rotation ${JSON.stringify({ beforeRotation, afterRotation })}`);
+        }
+        if (mode === "endless") await togglePlay(true);
         if (!afterRotation.toolbar || !afterRotation.world || afterRotation.toolbar[3] > afterRotation.world[1] + 1) {
           throw new Error(`${viewportName}/${mode}: toolbar clips/overlaps world ${JSON.stringify(afterRotation)}`);
         }
@@ -81,6 +98,8 @@ try {
           const marks = window.__profileMarks ?? {};
           const frames = times.slice(1).map((end, index) => ({ start: times[index], end, ms: end - times[index] })).filter((frame) => Number.isFinite(frame.ms));
           const stats = (start, end) => {
+            start = Number.isFinite(start) ? start : (frames[0]?.start ?? 0);
+            end = Number.isFinite(end) ? end : (frames.at(-1)?.end ?? 0);
             const samples = frames.filter((frame) => frame.start >= start && frame.end <= end).map((frame) => frame.ms);
             const sorted = [...samples].sort((a, b) => a - b);
             return {
