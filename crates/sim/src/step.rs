@@ -43,6 +43,8 @@ impl World {
                 completed += 1;
             }
             for _ in 0..if cost <= remaining { cost } else { 1 } {
+                self.update_light_cell();
+                self.day_phase = (self.day_phase + 1) % self.rules.daylight.cycle_ticks;
                 self.atmosphere_credit += 1;
                 if self.atmosphere_credit >= ATMOSPHERE_INTERVAL {
                     self.atmosphere_credit -= ATMOSPHERE_INTERVAL;
@@ -51,6 +53,45 @@ impl World {
             }
         }
         completed
+    }
+
+    /// Recomputes one row-major light sample; this fixed-cost work shares the existing
+    /// scheduler's charged work unit and never scans neighbors or allocates.
+    fn update_light_cell(&mut self) {
+        let index = self.light_cursor;
+        let settings = &self.rules.daylight;
+        if !settings.enabled {
+            self.light[index] = u8::MAX;
+            self.darkness_age[index] = 0;
+        } else {
+            if index == 0 {
+                self.light_scan_phase = self.day_phase;
+            }
+            let sky = crate::world::daylight_sky(settings.cycle_ticks, self.light_scan_phase);
+            let above = index
+                .checked_sub(self.width)
+                .map_or(sky, |above| self.light[above]);
+            let element = self.cells[index].element;
+            let element_settings = &self.rules.elements[element];
+            let blocks_light =
+                element_settings.motion == Motion::Static && element_settings.name != "air";
+            let light = if blocks_light {
+                above.saturating_sub(settings.solid_attenuation)
+            } else {
+                above
+            };
+            self.light[index] = light;
+            if light <= settings.darkness_threshold {
+                self.darkness_age[index] = self.darkness_age[index]
+                    .saturating_add(self.cells.len().min(u32::MAX as usize) as u32);
+            } else {
+                self.darkness_age[index] = 0;
+            }
+        }
+        self.light_cursor += 1;
+        if self.light_cursor == self.cells.len() {
+            self.light_cursor = 0;
+        }
     }
 
     fn update_cell(&mut self, i: usize) {
@@ -121,6 +162,7 @@ impl World {
         let wind_response = element.wind_response;
         let is_ash = element.name == "ash";
         let is_tree = element.name == "tree";
+        let is_plant = element.name == "plant";
         let burial_rule = self.burial_rule_for(i);
         let is_buried = burial_rule.is_some();
         if let Some((updates, result)) = burial_rule {
@@ -150,12 +192,24 @@ impl World {
                 }
             }
         }
-        if lifetime > 0 && !is_buried {
+        let dark =
+            self.rules.daylight.enabled && self.light[i] <= self.rules.daylight.darkness_threshold;
+        let sustained_darkness = dark && self.darkness_age[i] >= self.rules.daylight.darkness_ticks;
+        if sustained_darkness && (is_plant || is_tree) {
+            // Darkness kills living vegetation through its existing organic decay products.
+            let decay = self
+                .rules
+                .id("deadwood")
+                .or(decay_to)
+                .unwrap_or(self.rules.id("air").unwrap_or(usize::MAX));
+            self.set_element(i, decay);
+            return;
+        }
+        let light_suppresses_growth = dark && is_plant;
+        if lifetime > 0 && !is_buried && !light_suppresses_growth {
             self.cells[i].age = self.cells[i].age.saturating_add(1);
             if self.cells[i].age >= lifetime {
-                if self.rules.elements[e].name == "plant"
-                    && decay_to.is_some_and(|to| self.rules.elements[to].name == "tree")
-                {
+                if is_plant && decay_to.is_some_and(|to| self.rules.elements[to].name == "tree") {
                     self.grow_tree_canopy(i);
                 } else if let Some(to) = decay_to {
                     let outcome = alternate_decay_to.filter(|_| {
@@ -207,7 +261,17 @@ impl World {
             let rule = self
                 .interaction(e, other)
                 .map(|r| (r.chance, r.downwind_bonus, r.result, r.self_result));
+            let germinates_plant = rule.is_some_and(|(_, _, result, self_result)| {
+                self.rules.elements[result].name == "plant"
+                    || self_result.is_some_and(|to| self.rules.elements[to].name == "plant")
+            });
+            let dark_seed = self.rules.daylight.enabled
+                && ((self.rules.elements[e].name == "seed"
+                    && self.light[i] <= self.rules.daylight.darkness_threshold)
+                    || (self.rules.elements[other].name == "seed"
+                        && self.light[j] <= self.rules.daylight.darkness_threshold));
             if let Some((chance, downwind_bonus, result, self_result)) = rule
+                && !(germinates_plant && dark_seed)
                 && self.random_f32()
                     < (chance * self.flammability_factor(j, other)
                         + if (nx as isize - x as isize).signum()
@@ -895,6 +959,9 @@ impl World {
         let added_unsupported_tree =
             changed && element_is_tree && !self.tree_has_ground_support(index);
         self.detach_body_member(index);
+        if changed {
+            self.darkness_age[index] = 0;
+        }
         self.cells[index] = crate::Cell {
             element,
             age: 0,
