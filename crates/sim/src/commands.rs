@@ -30,6 +30,16 @@ impl World {
         self.dormant_bodies.clear();
         self.rng = seed.max(1);
         self.decay_rng = (seed ^ 0xDEC4_9EED_51A7_0001).max(1);
+        self.day_phase = seed as u32 % self.rules.daylight.cycle_ticks;
+        self.light_scan_phase = self.day_phase;
+        self.light_cursor = 0;
+        let initial_light = if self.rules.daylight.enabled {
+            crate::world::daylight_sky(self.rules.daylight.cycle_ticks, self.day_phase)
+        } else {
+            u8::MAX
+        };
+        self.light.fill(initial_light);
+        self.darkness_age.fill(0);
     }
 
     /// Paints an in-bounds cell and prioritizes it and its neighbors for simulation.
@@ -58,6 +68,7 @@ impl World {
             body_id: 0,
         };
         self.tree_support_age[index] = (index % 64) as u8;
+        self.darkness_age[index] = 0;
         self.attach_cargo(index);
         self.scheduler.enqueue_focus(index);
         let x = index % self.width;

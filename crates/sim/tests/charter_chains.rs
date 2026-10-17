@@ -1,7 +1,9 @@
 use tinderbox_sim::{DEFAULT_RULES, Rules, WindDirection, World};
 
 fn world(width: usize, height: usize, seed: u64) -> World {
-    World::new(width, height, seed, Rules::load(DEFAULT_RULES).unwrap()).unwrap()
+    let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+    rules.daylight.enabled = false;
+    World::new(width, height, seed, rules).unwrap()
 }
 
 fn id(world: &World, name: &str) -> usize {

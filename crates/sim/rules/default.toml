@@ -226,6 +226,15 @@ fungus_min_humidity = 35.0
 fungus_kill_temperature = 55.0
 fungus_slow_temperature = 30.0
 
+[daylight]
+enabled = true
+# 120 simulated seconds at the default 720,000 work units per simulated second.
+cycle_ticks = 86400000
+# Static cover shades gradually; plant/tree canopies transmit light.
+solid_attenuation = 16
+darkness_threshold = 24
+darkness_ticks = 46800000
+
 [atmosphere]
 freezing_point = 0.0
 melting_point = 2.0
