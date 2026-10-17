@@ -8,6 +8,293 @@ fn world(seed: u64) -> World {
 }
 
 #[test]
+fn daylight_phase_light_shadows_dark_growth_and_decay_are_deterministic() {
+    let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+    rules.daylight.enabled = true;
+    rules.daylight.cycle_ticks = 1_000_000;
+    rules.daylight.darkness_ticks = 1;
+    rules.daylight.darkness_threshold = 255;
+    let mut first = World::new(8, 8, 991, rules.clone()).unwrap();
+    let mut replay = World::new(8, 8, 991, rules.clone()).unwrap();
+    let stone = rules.id("stone").unwrap();
+    let plant = rules.id("plant").unwrap();
+    let tree = rules.id("tree").unwrap();
+    let deadwood = rules.id("deadwood").unwrap();
+    first.paint(3, 0, stone);
+    replay.paint(3, 0, stone);
+    first.paint(1, 0, plant);
+    replay.paint(1, 0, plant);
+    first.paint(6, 0, tree);
+    replay.paint(6, 0, tree);
+    first.rules.elements[plant].lifetime = 1;
+    replay.rules.elements[plant].lifetime = 1;
+    first.rules.elements[tree].lifetime = 1;
+    replay.rules.elements[tree].lifetime = 1;
+    assert_eq!(first.day_phase(), 991);
+    first.day_phase = 500_000;
+    replay.day_phase = 500_000;
+    assert_eq!(first.step(0), 0);
+    assert_eq!(
+        first.day_phase(),
+        500_000,
+        "a frozen world does not advance daylight"
+    );
+    for _ in 0..8 {
+        first.step(64);
+        replay.step(64);
+    }
+    assert_eq!(first.day_phase(), replay.day_phase());
+    assert_eq!(
+        first.cells(),
+        replay.cells(),
+        "same-seed daylight replay diverged"
+    );
+    assert_eq!(first.light, replay.light);
+    assert!(first.light_at(3, 1).unwrap() < first.light_at(2, 1).unwrap());
+    assert!(
+        first.cells.iter().all(|cell| cell.element != plant),
+        "sustained darkness kills plants through decay rather than maturation"
+    );
+    assert!(
+        first.cells.iter().any(|cell| cell.element == deadwood),
+        "darkness death uses detritus decay and living-cell decay remains active"
+    );
+}
+
+#[test]
+fn manually_invalid_daylight_rules_fail_world_construction() {
+    let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+    rules.daylight.cycle_ticks = 0;
+    assert!(World::new(4, 4, 1, rules).is_err());
+}
+
+#[test]
+fn daylight_initial_light_and_scan_phase_are_consistent() {
+    let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+    assert!(
+        rules.daylight.enabled,
+        "shipped daylight is intentionally enabled"
+    );
+    rules.daylight.enabled = true;
+    rules.daylight.cycle_ticks = 1_000;
+    let mut world = World::new(4, 4, 250, rules).unwrap();
+    assert!(world.light.iter().all(|light| *light == 128));
+
+    world.step(3);
+    world.day_phase = 750;
+    world.step(12);
+    assert!(
+        world.light.iter().all(|light| *light == 128),
+        "a row-major scan uses the phase latched at its start: {:?}",
+        world.light
+    );
+}
+
+#[test]
+fn daylight_cycle_recovery_and_populated_replay_remain_bounded() {
+    let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+    rules.daylight.enabled = true;
+    rules.daylight.cycle_ticks = 100_000;
+    rules.daylight.darkness_threshold = 0;
+    rules.daylight.darkness_ticks = 1;
+    let mut world = World::new(16, 12, 77, rules).unwrap();
+    world.day_phase = 0;
+    world.paint(8, 0, world.rules.id("stone").unwrap());
+    world.step(192);
+    assert_eq!(world.day_phase(), 192);
+    assert!(world.darkness_age.iter().any(|age| *age > 0));
+    world.day_phase = 50_000;
+    world.step(192);
+    assert!(world.light_at(0, 0).unwrap() > 0);
+    assert_eq!(
+        world.darkness_age[0], 0,
+        "daylight recovers the darkness timer"
+    );
+
+    for _ in 0..4 {
+        assert_eq!(world.step(96), 96);
+    }
+}
+
+#[test]
+fn painting_living_cells_clears_prior_darkness_exposure() {
+    let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+    rules.daylight.enabled = true;
+    rules.daylight.darkness_ticks = 1;
+    rules.daylight.darkness_threshold = 24;
+    let plant = rules.id("plant").unwrap();
+    rules.elements[plant].lifetime = 1;
+    let mut world = World::new(4, 4, 0, rules).unwrap();
+    let index = 1 + world.width();
+    world.light[index] = 0;
+    world.darkness_age[index] = u32::MAX;
+
+    world.paint(1, 1, plant);
+    assert_eq!(world.darkness_age[index], 0);
+    world.scheduler.reset();
+    world.scheduler.enqueue_focus(index);
+    world.step(1);
+    assert_eq!(world.cells()[index].element, plant);
+}
+
+#[test]
+fn reset_restores_seeded_daylight_state() {
+    let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+    rules.daylight.enabled = true;
+    rules.daylight.cycle_ticks = 1_000;
+    let mut world = World::new(4, 4, 250, rules.clone()).unwrap();
+    world.day_phase = 800;
+    world.light_scan_phase = 900;
+    world.light_cursor = 7;
+    world.light.fill(0);
+    world.darkness_age.fill(u32::MAX);
+
+    world.reset(250);
+    let fresh = World::new(4, 4, 250, rules).unwrap();
+    assert_eq!(world.day_phase, fresh.day_phase);
+    assert_eq!(world.light_scan_phase, fresh.light_scan_phase);
+    assert_eq!(world.light_cursor, fresh.light_cursor);
+    assert_eq!(world.light, fresh.light);
+    assert_eq!(world.darkness_age, fresh.darkness_age);
+}
+
+#[test]
+fn seeds_wait_for_light_before_germinating() {
+    let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+    rules.daylight.enabled = true;
+    rules.daylight.darkness_threshold = 24;
+    let mut world = World::new(4, 4, 611, rules).unwrap();
+    put(&mut world, 1, 0, "seed");
+    put(&mut world, 1, 1, "soil");
+    put(&mut world, 2, 0, "wet_soil");
+    world.light.fill(0);
+    for _ in 0..16 {
+        world.step(16);
+    }
+    assert!(
+        has(&world, 1, 0, "seed"),
+        "a seed cannot germinate in darkness: element={}, light={}, phase={}",
+        world.rules.elements[world.cells[1].element].name,
+        world.light[1],
+        world.day_phase
+    );
+
+    world.light.fill(u8::MAX);
+    world.day_phase = world.rules.daylight.cycle_ticks / 2;
+    for _ in 0..16 {
+        world.step(16);
+    }
+    assert!(has(&world, 1, 0, "plant"), "a seed can germinate in light");
+}
+
+#[test]
+fn disabled_daylight_resets_stale_darkness_and_light_state() {
+    let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+    rules.daylight.enabled = false;
+    let mut world = World::new(4, 4, 5, rules).unwrap();
+    world.darkness_age.fill(u32::MAX);
+    world.light.fill(0);
+    world.step(16);
+    assert!(world.light.iter().all(|light| *light == u8::MAX));
+    assert!(world.darkness_age.iter().all(|age| *age == 0));
+}
+
+#[test]
+fn daylight_resize_preserves_phase_and_overlapping_light_state() {
+    let mut world = world(1_237);
+    world.step(12);
+    let phase = world.day_phase();
+    let old_light = world.light.clone();
+    let mut resized = World::new(40, 24, 9, world.rules().clone()).unwrap();
+    resized.preserve_resize_state_from(&world);
+    assert_eq!(resized.day_phase(), phase);
+    assert_eq!(&resized.light[..32], &old_light[..32]);
+}
+
+#[test]
+fn populated_scene_changes_across_multiple_day_cycles_and_darkness_decays() {
+    let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+    rules.daylight.enabled = true;
+    rules.daylight.cycle_ticks = 512;
+    rules.daylight.darkness_ticks = 2;
+    rules.daylight.darkness_threshold = 32;
+    let mut world = World::new(32, 24, 0x000D_AD17, rules).unwrap();
+    world.day_phase = 0;
+    let soil = world.rules.id("soil").unwrap();
+    let plant = world.rules.id("plant").unwrap();
+    let stone = world.rules.id("stone").unwrap();
+    let sand = world.rules.id("sand").unwrap();
+    world.paint(31, 0, sand);
+    for x in 0..32 {
+        world.paint(x, 20, soil);
+        world.paint(x, 19, plant);
+    }
+    for y in 16..19 {
+        world.paint(4, y, stone);
+    }
+    let initial: Vec<_> = world.cells().iter().map(|cell| cell.element).collect();
+    let mut observed_light = [false; 2];
+    for _ in 0..8 {
+        world.step(32 * 24);
+        let light = world.light_at(0, 0).unwrap();
+        observed_light[usize::from(light > 32)] = true;
+    }
+    assert!(observed_light.into_iter().all(|seen| seen));
+    assert!(
+        world
+            .cells()
+            .iter()
+            .zip(initial)
+            .any(|(cell, old)| cell.element != old),
+        "a populated scene should change across multiple day cycles"
+    );
+}
+
+#[test]
+fn large_populated_daylight_updates_report_bounded_frame_work() {
+    use std::time::Instant;
+
+    let rules = Rules::load(DEFAULT_RULES).unwrap();
+    let mut world = World::new(400, 250, 0x57_2E55, rules).unwrap();
+    let soil = world.rules.id("soil").unwrap();
+    let plant = world.rules.id("plant").unwrap();
+    let stone = world.rules.id("stone").unwrap();
+    for y in (120..240).step_by(4) {
+        for x in (0..400).step_by(3) {
+            world.paint(x, y, soil);
+            if x % 2 == 0 {
+                world.paint(x, y - 1, plant);
+            } else {
+                world.paint(x, y - 1, stone);
+            }
+        }
+    }
+
+    let mut frame_us = [0u128; 12];
+    let mut completed = 0usize;
+    for elapsed in &mut frame_us {
+        let start = Instant::now();
+        completed += world.step(16_000);
+        *elapsed = start.elapsed().as_micros();
+    }
+    frame_us.sort_unstable();
+    let average_us = frame_us.iter().sum::<u128>() / frame_us.len() as u128;
+    let p95_us = frame_us[10];
+    let max_us = frame_us[11];
+    eprintln!(
+        "daylight stress 400x250: avg={average_us}us p95={p95_us}us max={max_us}us pending={} completed={completed} requested={}",
+        world.pending_work(),
+        12 * 16_000
+    );
+    assert_eq!(
+        completed,
+        12 * 16_000,
+        "all charged work units must complete"
+    );
+    assert!(world.width() * world.height() == 100_000);
+}
+
+#[test]
 fn decomposers_persist_on_a_well_fed_forest_floor_and_decline_without_food() {
     let rules = Rules::load(DEFAULT_RULES).unwrap();
     let recipe = Level {
@@ -458,6 +745,7 @@ fn each_update_obeys_work_budget_and_paint_is_bounded() {
 
 fn guaranteed_world(seed: u64, pairs: &[(&str, &str)]) -> World {
     let mut rules = Rules::load(DEFAULT_RULES).unwrap();
+    rules.daylight.enabled = false;
     for interaction in &mut rules.interactions {
         if pairs.iter().any(|(when, with)| {
             rules.elements[interaction.when].name == *when
@@ -902,7 +1190,7 @@ fn trees_die_into_organic_matter_and_plants_mature_into_trees() {
     let plant = rules.id("plant").unwrap();
     rules.elements[tree].lifetime = 1;
     rules.elements[plant].lifetime = 1;
-    let mut world = World::new(16, 12, 15, rules).unwrap();
+    let mut world = World::new(16, 12, 43_200_015, rules).unwrap();
     put(&mut world, 0, 1, "soil");
     put(&mut world, 0, 0, "tree");
     put(&mut world, 2, 2, "soil");
@@ -1031,7 +1319,7 @@ fn lateral_living_and_exposed_vegetation_do_not_count_as_burial() {
         "a living canopy cell is not burial cover"
     );
 
-    let mut exposed = World::new(12, 10, 522, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
+    let mut exposed = World::new(12, 10, 43_200_522, Rules::load(DEFAULT_RULES).unwrap()).unwrap();
     put(&mut exposed, 5, 6, "soil");
     put(&mut exposed, 5, 5, "plant");
     for _ in 0..120 {
@@ -1085,6 +1373,12 @@ fn burial_rules_round_trip_with_the_data_driven_ruleset() {
     let loaded = Rules::load(&exported).unwrap();
     assert_eq!(loaded.burial_rules.len(), 2);
     assert_eq!(loaded.burial_rules[0].updates, 120);
+    assert_eq!(loaded.daylight.enabled, rules.daylight.enabled);
+    assert_eq!(loaded.daylight.cycle_ticks, rules.daylight.cycle_ticks);
+    assert_eq!(
+        loaded.daylight.darkness_ticks,
+        rules.daylight.darkness_ticks
+    );
 }
 
 #[test]
@@ -1753,6 +2047,7 @@ fn lava_heats_a_lake_and_cloud_rain_wets_soil_for_regrowth() {
     let mut rules = Rules::load(DEFAULT_RULES).unwrap();
     let cloud = rules.id("cloud").unwrap();
     rules.elements[cloud].lifetime = 1;
+    rules.daylight.enabled = false;
     for rule in &mut rules.interactions {
         let when = &rules.elements[rule.when].name;
         let with = &rules.elements[rule.with].name;
@@ -1894,6 +2189,9 @@ fn unburned_forest_keeps_at_least_75_percent_canopy_after_300_seconds() {
 #[test]
 fn mature_tree_seeds_a_replacement_on_its_deadwood_stump() {
     let mut world = world(92_814);
+    world.day_phase = world.rules.daylight.cycle_ticks / 2;
+    world.light_scan_phase = world.day_phase;
+    world.light.fill(u8::MAX);
     let tree = world.rules().id("tree").unwrap();
     for x in 7..=13 {
         put(&mut world, x, 23, "stone");

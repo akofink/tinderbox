@@ -4,8 +4,8 @@
 //! at that edge uses the same missing-neighbor rule as a fixed world edge. Fire, water, falling
 //! sand, and wind-carried ash neither read nor write dormant chunks. A chunk that leaves the span
 //! freezes. If it still matches its seed generation, it is dropped and regenerated on return;
-//! otherwise its cells, tree-support ages, and atmosphere columns are stored compactly and restored
-//! exactly. Local gusts expire. Woken chunks do not catch up.
+//! otherwise its cells, tree-support ages, light exposure, and atmosphere columns are stored and
+//! restored exactly. Local gusts expire. Woken chunks do not catch up.
 //!
 //! A cohesive body is never split. If it intersects the span, every chunk it occupies stays
 //! resident, which adds at most one chunk at an edge for the current boat hull.
@@ -38,6 +38,8 @@ pub struct SpanAdjustment {
 pub(super) struct DormantChunk {
     cells: Vec<u8>,
     support_age: Vec<u8>,
+    light: Vec<u8>,
+    darkness_age: Vec<u32>,
     atmosphere: Vec<AtmosphereCell>,
 }
 
@@ -52,6 +54,8 @@ pub(super) struct DormantBody {
 struct ChunkColumn {
     cells: Vec<Cell>,
     support_age: Vec<u8>,
+    light: Vec<u8>,
+    darkness_age: Vec<u32>,
     gusts: Vec<GustCell>,
     atmosphere: Vec<AtmosphereCell>,
     fresh: bool,
@@ -119,6 +123,8 @@ impl World {
             .map(|chunk| {
                 chunk.cells.len()
                     + chunk.support_age.len()
+                    + chunk.light.len()
+                    + chunk.darkness_age.len() * std::mem::size_of::<u32>()
                     + chunk.atmosphere.len() * std::mem::size_of::<AtmosphereCell>()
             })
             .sum()
@@ -349,6 +355,8 @@ impl World {
         Ok(Some(DormantChunk {
             cells: encode_cells(&column.cells)?,
             support_age: column.support_age,
+            light: column.light,
+            darkness_age: column.darkness_age,
             atmosphere: column.atmosphere,
         }))
     }
@@ -387,11 +395,22 @@ impl World {
                 return true;
             }
         }
+        let baseline_light = if self.rules.daylight.enabled {
+            crate::world::daylight_sky(self.rules.daylight.cycle_ticks, self.light_scan_phase)
+        } else {
+            u8::MAX
+        };
         for y in 0..self.height {
             let row = y * self.width + local * width;
-            if self.gusts[row..row + width]
+            if self.light[row..row + width]
                 .iter()
-                .any(|gust| gust.remaining > 0)
+                .any(|light| *light != baseline_light)
+                || self.darkness_age[row..row + width]
+                    .iter()
+                    .any(|age| *age > 0)
+                || self.gusts[row..row + width]
+                    .iter()
+                    .any(|gust| gust.remaining > 0)
             {
                 return true;
             }
@@ -403,6 +422,8 @@ impl World {
         let width = self.chunk_width;
         let mut cells = Vec::with_capacity(width * self.height);
         let mut support_age = Vec::with_capacity(width * self.height);
+        let mut light = Vec::with_capacity(width * self.height);
+        let mut darkness_age = Vec::with_capacity(width * self.height);
         let mut gusts = Vec::with_capacity(width * self.height);
         for y in 0..self.height {
             let start = y * self.width + local * width;
@@ -411,11 +432,15 @@ impl World {
                 ..*cell
             }));
             support_age.extend_from_slice(&self.tree_support_age[start..start + width]);
+            light.extend_from_slice(&self.light[start..start + width]);
+            darkness_age.extend_from_slice(&self.darkness_age[start..start + width]);
             gusts.extend_from_slice(&self.gusts[start..start + width]);
         }
         ChunkColumn {
             cells,
             support_age,
+            light,
+            darkness_age,
             gusts,
             atmosphere: self.chunk_atmosphere(local),
             fresh,
@@ -425,7 +450,10 @@ impl World {
     fn column_from_snapshot(&self, snapshot: &DormantChunk) -> Result<ChunkColumn, WorldError> {
         let expected = self.chunk_width * self.height;
         let cells = decode_cells(&snapshot.cells, expected)?;
-        if snapshot.support_age.len() != expected {
+        if snapshot.support_age.len() != expected
+            || snapshot.light.len() != expected
+            || snapshot.darkness_age.len() != expected
+        {
             return Err(WorldError(
                 "dormant chunk support ages do not match the world".into(),
             ));
@@ -439,6 +467,8 @@ impl World {
         Ok(ChunkColumn {
             cells,
             support_age: snapshot.support_age.clone(),
+            light: snapshot.light.clone(),
+            darkness_age: snapshot.darkness_age.clone(),
             gusts: vec![GustCell::default(); expected],
             atmosphere: snapshot.atmosphere.clone(),
             fresh: true,
@@ -478,6 +508,11 @@ impl World {
         Ok(ChunkColumn {
             cells: generated.cells.clone(),
             support_age,
+            light: vec![
+                crate::world::daylight_sky(self.rules.daylight.cycle_ticks, self.day_phase,);
+                expected
+            ],
+            darkness_age: vec![0; expected],
             gusts: vec![GustCell::default(); expected],
             atmosphere: vec![self.ambient_atmosphere(); self.atmosphere_columns()],
             fresh: true,
@@ -542,6 +577,8 @@ impl World {
         if plan.columns.iter().any(|column| {
             column.cells.len() != expected
                 || column.support_age.len() != expected
+                || column.light.len() != expected
+                || column.darkness_age.len() != expected
                 || column.gusts.len() != expected
         }) {
             return Err(WorldError(
@@ -555,6 +592,8 @@ impl World {
         let new_atmosphere_width = new_width.div_ceil(ATMOSPHERE_CELL_SIZE);
         let mut cells = vec![Cell::default(); cell_count];
         let mut support_age = vec![0; cell_count];
+        let mut light = vec![0; cell_count];
+        let mut darkness_age = vec![0; cell_count];
         let mut gusts = vec![GustCell::default(); cell_count];
         let mut atmosphere =
             vec![self.ambient_atmosphere(); new_atmosphere_width * self.atmosphere_height];
@@ -568,6 +607,10 @@ impl World {
                     .copy_from_slice(&column.cells[source..source + chunk_width]);
                 support_age[destination..destination + chunk_width]
                     .copy_from_slice(&column.support_age[source..source + chunk_width]);
+                light[destination..destination + chunk_width]
+                    .copy_from_slice(&column.light[source..source + chunk_width]);
+                darkness_age[destination..destination + chunk_width]
+                    .copy_from_slice(&column.darkness_age[source..source + chunk_width]);
                 gusts[destination..destination + chunk_width]
                     .copy_from_slice(&column.gusts[source..source + chunk_width]);
             }
@@ -582,6 +625,10 @@ impl World {
         self.width = new_width;
         self.cells = cells;
         self.tree_support_age = support_age;
+        self.light = light;
+        self.darkness_age = darkness_age;
+        self.light_cursor = 0;
+        self.light_scan_phase = self.day_phase;
         self.gusts = gusts;
         self.atmosphere = atmosphere;
         self.atmosphere_width = new_atmosphere_width;
@@ -974,6 +1021,42 @@ mod tests {
         let before = world.chunk_origin();
         world.extend_horizontal(&chunk, true).unwrap();
         assert_eq!(world.chunk_origin(), before - 1);
+    }
+
+    #[test]
+    fn dormant_light_and_darkness_state_restore_without_catch_up() {
+        let (rules, level, mut world) = endless();
+        world.set_active_margin_chunks(0);
+        let origin = world.chunk_origin();
+        let index = 4 + 4 * world.width();
+        let baseline = if world.rules.daylight.enabled {
+            crate::world::daylight_sky(world.rules.daylight.cycle_ticks, world.light_scan_phase)
+        } else {
+            u8::MAX
+        };
+        world.light[index] = if baseline == u8::MAX { 0 } else { baseline + 1 };
+        world.darkness_age[index] = 0;
+        retain(
+            &mut world,
+            &rules,
+            &level,
+            (origin + 8) * ENDLESS_CHUNK_WIDTH as i64,
+            ENDLESS_CHUNK_WIDTH,
+        );
+        assert!(world.dormant_chunk_count() > 0);
+        retain(
+            &mut world,
+            &rules,
+            &level,
+            origin * ENDLESS_CHUNK_WIDTH as i64,
+            ENDLESS_CHUNK_WIDTH,
+        );
+        let restored = 4 + 4 * world.width();
+        assert_eq!(
+            world.light[restored],
+            if baseline == u8::MAX { 0 } else { baseline + 1 }
+        );
+        assert_eq!(world.darkness_age[restored], 0);
     }
 
     #[test]

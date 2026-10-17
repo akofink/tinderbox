@@ -26,6 +26,11 @@ pub(super) const ATMOSPHERE_CELL_SIZE: usize = 8;
 pub(super) const ATMOSPHERE_INTERVAL: usize = 16;
 pub(super) const MAX_EDGE_WATER_COLUMN: usize = 8;
 
+pub(super) fn daylight_sky(cycle_ticks: u32, phase: u32) -> u8 {
+    let distance = (i64::from(phase) * 2 - i64::from(cycle_ticks)).unsigned_abs();
+    255u64.saturating_sub(distance.saturating_mul(255) / u64::from(cycle_ticks)) as u8
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AtmosphereCell {
     pub temperature: f32,
@@ -68,6 +73,11 @@ pub struct World {
     pub(super) weather_rng: u64,
     pub(super) wind: Wind,
     pub(super) gusts: Vec<GustCell>,
+    pub(super) light: Vec<u8>,
+    pub(super) darkness_age: Vec<u32>,
+    pub(super) light_cursor: usize,
+    pub(super) light_scan_phase: u32,
+    pub(super) day_phase: u32,
     pub(super) atmosphere: Vec<AtmosphereCell>,
     pub(super) atmosphere_width: usize,
     pub(super) atmosphere_height: usize,
@@ -96,9 +106,21 @@ impl World {
         let air = rules
             .id("air")
             .ok_or_else(|| WorldError("ruleset must define 'air'".into()))?;
+        if rules.daylight.cycle_ticks < 4 || rules.daylight.darkness_ticks == 0 {
+            return Err(WorldError(
+                "daylight cycle_ticks must be at least 4 and darkness_ticks must be non-zero"
+                    .into(),
+            ));
+        }
         let atmosphere_width = width.div_ceil(ATMOSPHERE_CELL_SIZE);
         let atmosphere_height = height.div_ceil(ATMOSPHERE_CELL_SIZE);
         let interaction_lookup = build_interaction_lookup(&rules);
+        let day_phase = seed as u32 % rules.daylight.cycle_ticks;
+        let initial_light = if rules.daylight.enabled {
+            daylight_sky(rules.daylight.cycle_ticks, day_phase)
+        } else {
+            u8::MAX
+        };
         Ok(Self {
             width,
             height,
@@ -125,6 +147,11 @@ impl World {
             weather_rng: seed.wrapping_add(0x9e37_79b9_7f4a_7c15).max(1),
             wind: Wind::default(),
             gusts: vec![GustCell::default(); count],
+            light: vec![initial_light; count],
+            darkness_age: vec![0; count],
+            light_cursor: 0,
+            light_scan_phase: day_phase,
+            day_phase,
             atmosphere: vec![AtmosphereCell::default(); atmosphere_width * atmosphere_height],
             atmosphere_width,
             atmosphere_height,
@@ -170,9 +197,13 @@ impl World {
         let mut cells = vec![Cell::default(); count];
         let mut support_age = vec![0; count];
         let mut gusts = vec![GustCell::default(); count];
+        let mut light = vec![0; count];
+        let mut darkness_age = vec![0; count];
         let old_cells = std::mem::take(&mut self.cells);
         let old_support_age = std::mem::take(&mut self.tree_support_age);
         let old_gusts = std::mem::take(&mut self.gusts);
+        let old_light = std::mem::take(&mut self.light);
+        let old_darkness_age = std::mem::take(&mut self.darkness_age);
         for y in 0..self.height {
             let source = y * old_width;
             let target = y * new_width + offset_x;
@@ -182,10 +213,20 @@ impl World {
                 .copy_from_slice(&old_support_age[source..source + old_width]);
             gusts[target..target + old_width]
                 .copy_from_slice(&old_gusts[source..source + old_width]);
+            light[target..target + old_width]
+                .copy_from_slice(&old_light[source..source + old_width]);
+            darkness_age[target..target + old_width]
+                .copy_from_slice(&old_darkness_age[source..source + old_width]);
             let chunk_target = y * new_width + if prepend { 0 } else { old_width };
             let chunk_source = y * chunk.width;
             cells[chunk_target..chunk_target + chunk.width]
                 .copy_from_slice(&chunk.cells[chunk_source..chunk_source + chunk.width]);
+            let initial_light = if self.rules.daylight.enabled {
+                daylight_sky(self.rules.daylight.cycle_ticks, self.day_phase)
+            } else {
+                u8::MAX
+            };
+            light[chunk_target..chunk_target + chunk.width].fill(initial_light);
             if let Some(tree) = self.rules.id("tree") {
                 for x in 0..chunk.width {
                     if cells[chunk_target + x].element == tree {
@@ -224,6 +265,10 @@ impl World {
         self.cells = cells;
         self.tree_support_age = support_age;
         self.gusts = gusts;
+        self.light = light;
+        self.darkness_age = darkness_age;
+        self.light_cursor = 0;
+        self.light_scan_phase = self.day_phase;
         self.atmosphere = atmosphere;
         self.atmosphere_width = new_atmosphere_width;
         self.atmosphere_cursor = 0;
@@ -280,6 +325,8 @@ impl World {
                 self.cells[target] = source;
                 self.cells[target].body_id = 0;
                 self.tree_support_age[target] = previous.tree_support_age[source_index];
+                self.light[target] = previous.light[source_index];
+                self.darkness_age[target] = previous.darkness_age[source_index];
             }
         }
         for old_body in &previous.bodies {
@@ -311,6 +358,11 @@ impl World {
         self.decay_rng = previous.decay_rng;
         self.density_rng = previous.density_rng;
         self.weather_rng = previous.weather_rng;
+        self.day_phase = previous.day_phase % self.rules.daylight.cycle_ticks;
+        self.light_scan_phase = previous.light_scan_phase % self.rules.daylight.cycle_ticks;
+        self.light_cursor = previous
+            .light_cursor
+            .min(self.cells.len().saturating_sub(1));
         self.wind = previous.wind;
         self.ambient_temperature = previous.ambient_temperature;
         self.ambient_humidity = previous.ambient_humidity;
@@ -436,6 +488,16 @@ impl World {
         }
         let index = (y / ATMOSPHERE_CELL_SIZE) * self.atmosphere_width + x / ATMOSPHERE_CELL_SIZE;
         self.atmosphere.get(index).copied()
+    }
+
+    /// Day-cycle phase, measured in configured work ticks.
+    pub const fn day_phase(&self) -> u32 {
+        self.day_phase
+    }
+
+    /// Current per-cell light level (0..=255), updated incrementally by `step`.
+    pub fn light_at(&self, x: usize, y: usize) -> Option<u8> {
+        (x < self.width && y < self.height).then(|| self.light[y * self.width + x])
     }
 
     /// Current global horizontal wind.
